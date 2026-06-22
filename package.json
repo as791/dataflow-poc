@@ -1,0 +1,12 @@
+{
+  "name": "dataflow-poc",
+  "private": true,
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "dev:api": "npm -w apps/api run dev",
+    "dev:worker": "npm -w apps/worker run dev",
+    "dev:web": "npm -w apps/web run dev",
+    "build": "npm -ws run build",
+    "promote": "node scripts/promote-build.js"
+  }
+}

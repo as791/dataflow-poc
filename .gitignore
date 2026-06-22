@@ -1,0 +1,9 @@
+# Generated key material — NEVER commit these
+/secrets/*.pem
+/secrets/*.pub
+
+# Environment files
+*.env
+.env
+.env.*
+!.env.example

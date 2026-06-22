@@ -1,0 +1,21 @@
+{
+  "name": "Sheets + Drive fork/merge demo",
+  "tenantId": "default",
+  "trigger": { "type": "webhook", "path": "sync-now", "secret": "change-me" },
+  "nodes": [
+    { "id": "sheet", "type": "source", "activityType": "gsheets.fetch",
+      "config": { "spreadsheetId": "YOUR_SHEET_ID", "range": "A:Z", "keyColumn": "id" },
+      "ingestion": { "mode": "incremental" } },
+    { "id": "drive", "type": "source", "activityType": "gdrive.fetch",
+      "config": {}, "ingestion": { "mode": "backfill", "pageSize": 50 } },
+    { "id": "merge", "type": "merge", "activityType": "flow.merge",
+      "mergeStrategy": "concat" },
+    { "id": "out", "type": "sink", "activityType": "sink.webhook",
+      "config": { "url": "https://example.com/ingest", "secret": "downstream-secret" } }
+  ],
+  "edges": [
+    { "id": "e1", "source": "sheet", "target": "merge" },
+    { "id": "e2", "source": "drive", "target": "merge" },
+    { "id": "e3", "source": "merge", "target": "out" }
+  ]
+}

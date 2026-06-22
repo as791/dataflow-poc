@@ -1,0 +1,22 @@
+{
+  "name": "Zendesk tickets → Postgres (backfill then incremental)",
+  "tenantId": "default",
+  "trigger": { "type": "cron", "schedule": "*/5 * * * *" },
+  "nodes": [
+    { "id": "src", "type": "source", "activityType": "zendesk.fetch",
+      "label": "Zendesk tickets",
+      "config": { "resource": "tickets" },
+      "ingestion": { "mode": "backfill", "backfillStart": "2024-01-01T00:00:00Z", "pageSize": 100 } },
+    { "id": "fil", "type": "transform", "activityType": "transform.filter",
+      "config": { "predicate": "r.status !== 'deleted'" } },
+    { "id": "map", "type": "transform", "activityType": "transform.map",
+      "config": { "expression": "({ id: r.id, subject: r.subject, status: r.status, priority: r.priority, updated_at: r.updated_at })" } },
+    { "id": "snk", "type": "sink", "activityType": "sink.postgres",
+      "config": { "collection": "zendesk_tickets", "dedupField": "id" } }
+  ],
+  "edges": [
+    { "id": "e1", "source": "src", "target": "fil" },
+    { "id": "e2", "source": "fil", "target": "map" },
+    { "id": "e3", "source": "map", "target": "snk" }
+  ]
+}

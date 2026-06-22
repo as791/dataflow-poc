@@ -1,0 +1,31 @@
+<!-- Phase 4 — Tiered storage policy. Mounted at
+     /etc/clickhouse-server/config.d/storage.xml so it merges with the
+     stock server config. The two disks back the same logical table; the
+     TTL clause on sink_records demotes parts from `hot` → `cold` after
+     90 days. Hot/cold paths are bind-mounted to separate Docker volumes
+     so an operator can later swap the cold path for cheaper storage
+     (e.g. an S3 disk) without rebuilding the table. -->
+<clickhouse>
+  <storage_configuration>
+    <disks>
+      <hot_disk>
+        <path>/var/lib/clickhouse/hot/</path>
+      </hot_disk>
+      <cold_disk>
+        <path>/var/lib/clickhouse/cold/</path>
+      </cold_disk>
+    </disks>
+    <policies>
+      <hot_cold>
+        <volumes>
+          <hot>
+            <disk>hot_disk</disk>
+          </hot>
+          <cold>
+            <disk>cold_disk</disk>
+          </cold>
+        </volumes>
+      </hot_cold>
+    </policies>
+  </storage_configuration>
+</clickhouse>

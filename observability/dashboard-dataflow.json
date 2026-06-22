@@ -1,0 +1,17 @@
+{
+  "title": "DataFlow Platform",
+  "uid": "dataflow",
+  "panels": [
+    { "title": "Pipeline executions/min", "type": "timeseries", "gridPos": {"x":0,"y":0,"w":8,"h":8},
+      "targets": [{ "expr": "rate(dataflow_executions_total[5m])*60" }] },
+    { "title": "Node duration p95 (ms)", "type": "timeseries", "gridPos": {"x":8,"y":0,"w":8,"h":8},
+      "targets": [{ "expr": "histogram_quantile(0.95, rate(dataflow_node_duration_ms_bucket[5m]))" }] },
+    { "title": "Node failures", "type": "timeseries", "gridPos": {"x":16,"y":0,"w":8,"h":8},
+      "targets": [{ "expr": "rate(dataflow_node_failures_total[5m])" }] },
+    { "title": "Records ingested by connector", "type": "timeseries", "gridPos": {"x":0,"y":8,"w":12,"h":8},
+      "targets": [{ "expr": "rate(dataflow_records_ingested_total[5m])" }] },
+    { "title": "Connector cursor lag (s)", "type": "timeseries", "gridPos": {"x":12,"y":8,"w":12,"h":8},
+      "targets": [{ "expr": "dataflow_cursor_lag_seconds" }] }
+  ],
+  "schemaVersion": 39, "version": 1
+}

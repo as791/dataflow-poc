@@ -1,0 +1,236 @@
+# Fully isolated environment — everything runs in containers on one private
+# network. No host Node processes needed for the core stack.
+#
+# Default profile starts: postgres, redis, clickhouse, mailhog, temporal,
+# temporal-ui, api, worker, web  (~3 GB RAM total).
+#
+# Add observability services:
+#   docker compose --profile observability up -d
+
+x-app-env: &app-env
+  DATABASE_URL: postgres://dataflow:dataflow@postgres:5432/dataflow
+  # API connects as the lower-privilege, RLS-scoped role. Worker still uses
+  # DATABASE_URL (superuser) because activities run system-level inserts
+  # that span tenants (cron sync, schedule writes).
+  APP_DATABASE_URL: postgres://dataflow_app:dataflow_app@postgres:5432/dataflow
+  REDIS_URL: redis://redis:6379
+  TEMPORAL_ADDRESS: temporal:7233
+  TEMPORAL_NAMESPACE: default
+  TASK_QUEUE: dynamic-dag
+  # OTel endpoint — only reachable when observability profile is active;
+  # the SDK silently drops spans if the collector is unreachable.
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  APP_URL: http://localhost:3000
+  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-access-secret-change-me}
+  SMTP_HOST: mailhog
+  SMTP_PORT: "1025"
+  SMTP_FROM: noreply@dataflow.local
+  CLICKHOUSE_URL: http://clickhouse:8123
+  CLICKHOUSE_USER: dataflow
+  CLICKHOUSE_PASSWORD: dataflow
+  CLICKHOUSE_DB: dataflow
+  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+  GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+  AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+  AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+  AZURE_TENANT_ID: ${AZURE_TENANT_ID:-common}
+  ZENDESK_OAUTH_CLIENT_ID: ${ZENDESK_OAUTH_CLIENT_ID:-}
+  ZENDESK_OAUTH_CLIENT_SECRET: ${ZENDESK_OAUTH_CLIENT_SECRET:-}
+  RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+  RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+  RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+  OAUTH_TOKEN_ENCRYPTION_KEY: ${OAUTH_TOKEN_ENCRYPTION_KEY:-}
+  WORKER_PUBLIC_KEY_PEM: ${WORKER_PUBLIC_KEY_PEM:-}
+
+services:
+  # ───────── infrastructure ─────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: dataflow
+      POSTGRES_PASSWORD: dataflow
+      POSTGRES_DB: dataflow
+    volumes:
+      # Mount only Postgres migration files — keeps ClickHouse SQL out of initdb.
+      - ./db/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+      - ./db/002_auth.sql:/docker-entrypoint-initdb.d/002_auth.sql:ro
+      - ./db/003_rls.sql:/docker-entrypoint-initdb.d/003_rls.sql:ro
+      - ./db/004_oauth.sql:/docker-entrypoint-initdb.d/004_oauth.sql:ro
+      - ./db/005_billing.sql:/docker-entrypoint-initdb.d/005_billing.sql:ro
+      - ./db/006_dashboards.sql:/docker-entrypoint-initdb.d/006_dashboards.sql:ro
+      - ./db/007_kms.sql:/docker-entrypoint-initdb.d/007_kms.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dataflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 512m
+    networks: [dataflow]
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 128m
+    networks: [dataflow]
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.5-alpine
+    environment:
+      CLICKHOUSE_USER: dataflow
+      CLICKHOUSE_PASSWORD: dataflow
+      CLICKHOUSE_DB: dataflow
+    volumes:
+      - ./db/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./db/clickhouse/config.xml:/etc/clickhouse-server/config.d/storage.xml
+      - chdata:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user dataflow --password dataflow --query 'SELECT 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    mem_limit: 1g
+    networks: [dataflow]
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports: ["8025:8025", "1025:1025"]
+    mem_limit: 64m
+    networks: [dataflow]
+
+  # Temporal uses Postgres as its persistence backend — no Cassandra needed.
+  # auto-setup creates `temporal` and `temporal_visibility` databases on the
+  # shared Postgres instance automatically on first boot.
+  temporal:
+    image: temporalio/auto-setup:1.22.7
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_SEEDS=postgres
+      - POSTGRES_USER=dataflow
+      - POSTGRES_PWD=dataflow
+      - VISIBILITY_DB=postgresql
+      - ENABLE_ES=false
+    depends_on:
+      postgres: { condition: service_healthy }
+    mem_limit: 512m
+    networks: [dataflow]
+
+  temporal-ui:
+    image: temporalio/ui:2.26.2
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    ports: ["8082:8080"]
+    depends_on: [temporal]
+    mem_limit: 128m
+    networks: [dataflow]
+
+  # ───────── application ────────────────────────────────────────────────────
+
+  api:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    environment:
+      <<: *app-env
+      API_PORT: "4000"
+      ZENDESK_SUBDOMAIN: ${ZENDESK_SUBDOMAIN:-}
+      ZENDESK_EMAIL: ${ZENDESK_EMAIL:-}
+      ZENDESK_API_TOKEN: ${ZENDESK_API_TOKEN:-}
+      GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: ${GOOGLE_SERVICE_ACCOUNT_JSON_BASE64:-}
+    depends_on:
+      postgres:   { condition: service_healthy }
+      redis:      { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+      temporal:   { condition: service_started }
+      mailhog:    { condition: service_started }
+    mem_limit: 512m
+    networks: [dataflow]
+    ports: ["4000:4000"]
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+      args: { BUILD_ID: "${BUILD_ID:-dev-local}" }
+    volumes:
+      - ./secrets/worker-keypair.pem:/secrets/worker-keypair.pem:ro
+    environment:
+      <<: *app-env
+      BUILD_ID: ${BUILD_ID:-dev-local}
+      USE_VERSIONING: "false"
+      ZENDESK_SUBDOMAIN: ${ZENDESK_SUBDOMAIN:-}
+      ZENDESK_EMAIL: ${ZENDESK_EMAIL:-}
+      ZENDESK_API_TOKEN: ${ZENDESK_API_TOKEN:-}
+      GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: ${GOOGLE_SERVICE_ACCOUNT_JSON_BASE64:-}
+      WORKER_PRIVATE_KEY_PATH: /secrets/worker-keypair.pem
+    depends_on:
+      postgres: { condition: service_healthy }
+      temporal: { condition: service_started }
+    # Temporal bundles workflow code with webpack at process start — needs headroom.
+    mem_limit: 1536m
+    networks: [dataflow]
+
+  web:
+    build: { context: ., dockerfile: apps/web/Dockerfile }
+    ports: ["3002:80"]
+    depends_on: [api]
+    mem_limit: 64m
+    networks: [dataflow]
+
+  # ───────── observability  (opt-in: --profile observability) ───────────────
+
+  otel-collector:
+    profiles: [observability]
+    image: otel/opentelemetry-collector-contrib:0.103.0
+    command: ["--config=/etc/otel/config.yml"]
+    volumes:
+      - ./observability/otel-collector.yml:/etc/otel/config.yml
+    mem_limit: 128m
+    networks: [dataflow]
+
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v2.53.0
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports: ["9090:9090"]
+    mem_limit: 256m
+    networks: [dataflow]
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:11.1.0
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
+    volumes:
+      - ./observability/grafana-datasources.yml:/etc/grafana/provisioning/datasources/ds.yml
+      - ./observability/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/db.yml
+      - ./observability/dashboard-dataflow.json:/var/lib/grafana/dashboards/dataflow.json
+    ports: ["3001:3000"]
+    depends_on: [prometheus]
+    mem_limit: 256m
+    networks: [dataflow]
+
+  jaeger:
+    profiles: [observability]
+    image: jaegertracing/all-in-one:1.58
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports: ["16686:16686"]
+    mem_limit: 256m
+    networks: [dataflow]
+
+networks:
+  dataflow:
+    driver: bridge
+
+volumes:
+  pgdata:
+  chdata:
