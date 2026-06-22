@@ -5,6 +5,7 @@ import { syncSchedule, fireExecution } from '../temporal';
 import { executionsStarted } from '../metrics';
 import { auditLog } from '../middleware/audit';
 import { requireQuota } from '../middleware/quota';
+import { validatePipeline } from '../lib/validatePipeline';
 import type { PipelineDefinition } from '@dataflow/shared';
 
 export const pipelines = Router();
@@ -14,7 +15,7 @@ pipelines.post('/', async (req, res) => {
   const pipelineKey = def.id || uuid();
   def.tenantId = req.tenant.tenantId;
 
-  validate(def);
+  validatePipeline(def);
 
   const rowId = await withTenantTx(req, async client => {
     const { rows: prev } = await client.query(
@@ -74,22 +75,3 @@ pipelines.get('/:rowId', async (req, res) => {
     `SELECT * FROM pipelines WHERE id=$1`, [req.params.rowId]));
   rows.rows.length ? res.json(rows.rows[0]) : res.status(404).json({ error: 'not found' });
 });
-
-function validate(def: PipelineDefinition) {
-  if (!def.nodes?.length) throw new Error('pipeline has no nodes');
-  if (!def.trigger) throw new Error('pipeline must declare a trigger');
-  const inDeg = new Map(def.nodes.map(n => [n.id, 0]));
-  def.edges?.forEach(e => inDeg.set(e.target, (inDeg.get(e.target) ?? 0) + 1));
-  let q = def.nodes.filter(n => !inDeg.get(n.id)).map(n => n.id);
-  let seen = 0;
-  const out = new Map<string, string[]>();
-  def.edges?.forEach(e => out.set(e.source, [...(out.get(e.source) ?? []), e.target]));
-  while (q.length) {
-    const n = q.shift()!; seen++;
-    (out.get(n) ?? []).forEach(t => {
-      const d = inDeg.get(t)! - 1; inDeg.set(t, d);
-      if (!d) q.push(t);
-    });
-  }
-  if (seen !== def.nodes.length) throw new Error('pipeline contains a cycle');
-}

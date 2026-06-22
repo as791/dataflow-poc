@@ -1,31 +1,12 @@
 // UI-side mirror of the worker's activity catalog: drives the palette
 // and the config form rendered for each node type.
+//
+// FieldSpec / CatalogEntry are now defined once in @dataflow/shared so that
+// the API (AI builder) and worker agree on the same shape. Re-exported here so
+// existing imports from '../catalog' keep working.
 
-export interface FieldSpec {
-  key: string;
-  label: string;
-  type: 'text' | 'number' | 'select' | 'textarea' | 'checkbox' | 'oauth-picker';
-  options?: string[];
-  placeholder?: string;
-  help?: string;
-  // Picker-only metadata. The PipelineCanvasPage config renderer dispatches
-  // on `picker` to mount the right component.
-  picker?: 'gsheets' | 'gdrive' | 'excel' | 'zendesk';
-  provider?: 'google' | 'microsoft' | 'zendesk';
-  // Keys that this picker writes into config (e.g. picker 'gsheets' writes
-  // connectionId + spreadsheetId + range + sheetName). Documented for clarity;
-  // the picker components do the writes themselves.
-  writes?: string[];
-}
-
-export interface CatalogEntry {
-  activityType: string;
-  nodeType: 'source' | 'transform' | 'sink' | 'fork' | 'merge';
-  label: string;
-  color: string;
-  fields: FieldSpec[];
-  supportsIngestion?: boolean; // shows incremental/backfill controls
-}
+import type { FieldSpec, CatalogEntry } from '@dataflow/shared';
+export type { FieldSpec, CatalogEntry } from '@dataflow/shared';
 
 export const CATALOG: CatalogEntry[] = [
   // ── Sources ──
@@ -95,6 +76,12 @@ export const CATALOG: CatalogEntry[] = [
     color: '#D85A30',
     fields: [{ key: 'predicate', label: 'Predicate', type: 'textarea',
       placeholder: "r.status === 'open'" }],
+  },
+  {
+    activityType: 'transform.rename', nodeType: 'transform', label: 'Rename',
+    color: '#D85A30',
+    fields: [{ key: 'mapping', label: 'Field mapping (JSON)', type: 'textarea',
+      placeholder: '{"old_name":"new_name","ticket_id":"id"}' }],
   },
   {
     activityType: 'transform.dedupe', nodeType: 'transform', label: 'Dedupe',

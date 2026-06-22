@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 
 const navItems = [
   { to: '/', label: 'Pipelines', end: true },
+  { to: '/ai-builder', label: 'AI Builder' },
   { to: '/connectors', label: 'Connectors' },
   { to: '/analytics', label: 'Analytics' },
   { to: '/team', label: 'Team' },

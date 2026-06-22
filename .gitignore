@@ -7,3 +7,10 @@
 .env
 .env.*
 !.env.example
+
+# Dependencies / build output
+node_modules/
+dist/
+
+# OS cruft
+.DS_Store

@@ -3,6 +3,7 @@ import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AppShell } from './components/AppShell';
 import PipelineCanvasPage from './pages/PipelineCanvasPage';
+import AIBuilderPage from './pages/AIBuilderPage';
 import { LoginPage, RegisterPage, VerifyEmailPage, ForgotPasswordPage, AcceptInvitePage } from './pages/auth';
 import { TeamPage } from './pages/TeamPage';
 import { ConnectorsPage } from './pages/ConnectorsPage';
@@ -22,6 +23,7 @@ export default function App() {
 
           <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
             <Route index element={<PipelineCanvasPage />} />
+            <Route path="ai-builder" element={<AIBuilderPage />} />
             <Route path="connectors" element={<ConnectorsPage />} />
             <Route path="billing" element={<BillingPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />

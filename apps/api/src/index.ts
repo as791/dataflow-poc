@@ -8,6 +8,7 @@ import { executions } from './routes/executions';
 import { auth } from './routes/auth';
 import { team } from './routes/team';
 import { connectors } from './routes/connectors';
+import { ai } from './routes/ai';
 import { billing, billingWebhook } from './routes/billing';
 import { analytics } from './routes/analytics';
 import { registry, httpRequests } from './metrics';
@@ -46,6 +47,7 @@ app.use('/api/pipelines', requireAuth, requireVerified, pipelines);
 app.use('/api/executions', requireAuth, requireVerified, executions);
 app.use('/api/team', team);
 app.use('/api/connectors', requireAuth, requireVerified, connectors);
+app.use('/api/ai', requireAuth, requireVerified, ai);
 
 // billing: the `billingWebhook` router is already mounted above (raw body);
 // the `billing` router below handles the authenticated billing endpoints.
