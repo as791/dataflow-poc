@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import ReactFlow, {
   Background, Controls, MiniMap, addEdge, useNodesState, useEdgesState,
   type Node, type Connection, Handle, Position,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { definitionToMermaid, mermaidToDefinition } from '@dataflow/shared';
 import { CATALOG, byType, type CatalogEntry, type FieldSpec } from '../catalog';
+import { MermaidPreview } from '../components/MermaidPreview';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { SheetPicker } from '../components/connectors/SheetPicker';
@@ -182,9 +185,44 @@ function ExecutionMonitor({ executionId, onNodeStatus }: {
   );
 }
 
+// Inverse of buildDefinition's config flattening: object sub-configs become the
+// JSON-text form fields the ConfigPanel renders.
+function configToForm(cfg: Record<string, any> = {}): Record<string, any> {
+  const out: Record<string, any> = { ...cfg };
+  for (const k of ['pagination', 'auth', 'incremental']) {
+    if (out[k] && typeof out[k] === 'object') { out[`${k}Json`] = JSON.stringify(out[k]); delete out[k]; }
+  }
+  if (out.mapping && typeof out.mapping === 'object') out.mapping = JSON.stringify(out.mapping);
+  return out;
+}
+
+// PipelineDefinition (or AI/mermaid output) → ReactFlow nodes + edges.
+function definitionToFlow(def: any): { nodes: Node[]; edges: any[] } {
+  const nodes: Node[] = (def.nodes ?? []).map((pn: any, i: number) => ({
+    id: pn.id,
+    type: 'flowNode',
+    position: { x: 80 + i * 60, y: 80 + (i % 5) * 100 },
+    data: {
+      activityType: pn.activityType,
+      nodeType: pn.type ?? byType[pn.activityType]?.nodeType,
+      label: pn.label,
+      ingestion: pn.ingestion,
+      config: configToForm({
+        ...pn.config,
+        ...(pn.mergeStrategy ? { mergeStrategy: pn.mergeStrategy } : {}),
+        ...(pn.joinKey ? { joinKey: pn.joinKey } : {}),
+      }),
+    },
+  }));
+  const edges = (def.edges ?? []).map((e: any) => ({ id: e.id ?? `e${Date.now()}-${e.source}-${e.target}`, source: e.source, target: e.target }));
+  return { nodes, edges };
+}
+
 let nid = 0;
 export default function PipelineCanvasPage() {
   const { wrapDekForWorker } = useAuth();
+  const location = useLocation();
+  const hydrated = useRef(false);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selected, setSelected] = useState<Node | null>(null);
@@ -193,6 +231,21 @@ export default function PipelineCanvasPage() {
   const [savedRowId, setSavedRowId] = useState<string | null>(null);
   const [executionId, setExecutionId] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
+  const [showMermaid, setShowMermaid] = useState(false);
+  const [mermaidDraft, setMermaidDraft] = useState('');
+
+  // Hydrate from the AI builder ("Open in canvas" passes the definition in
+  // router state). Runs once.
+  useEffect(() => {
+    const def = (location.state as any)?.definition;
+    if (!def || hydrated.current) return;
+    hydrated.current = true;
+    const { nodes: ns, edges: es } = definitionToFlow(def);
+    setNodes(ns); setEdges(es);
+    if (def.name) setName(def.name);
+    if (def.trigger) setTrigger(def.trigger);
+    setMsg('Loaded from AI builder — review and Save');
+  }, [location.state]);
 
   const onConnect = useCallback((c: Connection) =>
     setEdges(eds => addEdge({ ...c, id: `e${Date.now()}` }, eds)), []);
@@ -225,6 +278,10 @@ export default function PipelineCanvasPage() {
           try { cfg[k.replace('Json', '')] = JSON.parse(cfg[k]); } catch { /* keep raw */ }
           delete cfg[k];
         }
+      }
+      // transform.rename stores its mapping as JSON text in the form.
+      if (typeof cfg.mapping === 'string') {
+        try { cfg.mapping = JSON.parse(cfg.mapping); } catch { /* keep raw */ }
       }
       return {
         id: n.id, type: n.data.nodeType, activityType: n.data.activityType,
@@ -263,6 +320,24 @@ export default function PipelineCanvasPage() {
       ? { ...n, data: { ...n.data, status: results[n.id].status,
           recordCount: results[n.id].meta?.recordCount } } : n));
 
+  // ─── Mermaid round-trip panel ───
+  const openMermaidPanel = () => {
+    const def = buildDefinition();
+    setMermaidDraft(definitionToMermaid(def.nodes as any, def.edges as any));
+    setShowMermaid(true);
+  };
+  const applyMermaid = () => {
+    const { nodes: parsed, edges: pEdges, warnings } = mermaidToDefinition(mermaidDraft, CATALOG);
+    const prevData = new Map(nodes.map(n => [n.id, n.data]));
+    const flow = definitionToFlow({ nodes: parsed, edges: pEdges });
+    flow.nodes.forEach(n => {
+      const prev = prevData.get(n.id);
+      if (prev) { n.data.config = prev.config; if (prev.ingestion) n.data.ingestion = prev.ingestion; }
+    });
+    setNodes(flow.nodes); setEdges(flow.edges); setSelected(null);
+    setMsg(warnings.length ? `Applied Mermaid · ${warnings.length} warning(s)` : 'Applied Mermaid');
+  };
+
   const palette = useMemo(() => {
     const groups: Record<string, CatalogEntry[]> = {};
     CATALOG.forEach(c => (groups[c.nodeType] ??= []).push(c));
@@ -275,6 +350,10 @@ export default function PipelineCanvasPage() {
         <input className="glass-input w-56" value={name} onChange={e => setName(e.target.value)} />
         <TriggerEditor trigger={trigger} onChange={setTrigger} />
         <div className="flex-1" />
+        <button className="glass-btn-ghost"
+          onClick={() => (showMermaid ? setShowMermaid(false) : openMermaidPanel())}>
+          {showMermaid ? 'Hide Mermaid' : 'Mermaid'}
+        </button>
         <button className="glass-btn-ghost" onClick={save}>Save</button>
         <button className="glass-btn-ghost" onClick={activate}>Activate</button>
         <button className="glass-btn-success" onClick={run}>▶ Run now</button>
@@ -305,6 +384,20 @@ export default function PipelineCanvasPage() {
       </div>
 
       <div className="border-l border-white/10 p-2.5 overflow-auto">
+        {showMermaid && (
+          <div className="glass-panel p-3 mb-3">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="m-0 text-sm font-semibold">Mermaid</h3>
+              <button className="glass-btn-ghost text-xs" onClick={applyMermaid}>Apply to canvas</button>
+            </div>
+            <textarea className="glass-input font-mono text-[11px] h-40 w-full"
+              value={mermaidDraft} onChange={e => setMermaidDraft(e.target.value)} />
+            <div className="mt-2"><MermaidPreview source={mermaidDraft} /></div>
+            <p className="text-[10px] opacity-50 mt-1">
+              Structure only — node config is preserved by id across edits.
+            </p>
+          </div>
+        )}
         {selected
           ? <ConfigPanel node={nodes.find(n => n.id === selected.id) ?? selected}
               onChange={patchNode} onDelete={deleteNode} />

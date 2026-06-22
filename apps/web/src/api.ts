@@ -38,6 +38,13 @@ export const api = {
       body: JSON.stringify(encryptedDek ? { encryptedDek } : {}),
     }).then(j),
   listPipelines: () => request('/api/pipelines').then(j),
+
+  // AI builder (Ollama). Returns { mermaid, definition }.
+  generatePipeline: (prompt: string) =>
+    request('/api/ai/generate', { method: 'POST', body: JSON.stringify({ prompt }) }).then(j),
+  refinePipeline: (definition: any, prompt: string) =>
+    request('/api/ai/refine', { method: 'POST', body: JSON.stringify({ definition, prompt }) }).then(j),
+
   listExecutions: () => request('/api/executions').then(j),
   executionStatus: (id: string) => request(`/api/executions/${id}/status`).then(j),
   signal: (id: string, action: string) => request(`/api/executions/${id}/${action}`, { method: 'POST' }).then(j),

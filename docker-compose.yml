@@ -41,6 +41,10 @@ x-app-env: &app-env
   RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
   OAUTH_TOKEN_ENCRYPTION_KEY: ${OAUTH_TOKEN_ENCRYPTION_KEY:-}
   WORKER_PUBLIC_KEY_PEM: ${WORKER_PUBLIC_KEY_PEM:-}
+  # AI builder (opt-in via `--profile ai`). When the ollama service is not
+  # running the /api/ai/* routes return 503; the rest of the stack is unaffected.
+  OLLAMA_URL: http://ollama:11434
+  OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
 
 services:
   # ───────── infrastructure ─────────────────────────────────────────────────
@@ -182,6 +186,33 @@ services:
     mem_limit: 64m
     networks: [dataflow]
 
+  # ───────── AI builder  (opt-in: --profile ai) ─────────────────────────────
+  # Local LLM sidecar — no API key. First boot pulls the model (~5 GB for the
+  # 8B default); override with OLLAMA_MODEL for a smaller/larger model.
+  ollama:
+    profiles: [ai]
+    image: ollama/ollama:latest
+    volumes:
+      - ollamadata:/root/.ollama
+    # Generous: an 8B model needs ~6-8 GB resident.
+    mem_limit: 10g
+    networks: [dataflow]
+
+  # One-shot: waits for ollama then pulls the configured model. Idempotent.
+  ollama-init:
+    profiles: [ai]
+    image: ollama/ollama:latest
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until ollama list >/dev/null 2>&1; do echo "waiting for ollama…"; sleep 2; done
+        ollama pull "${OLLAMA_MODEL:-llama3.1:8b}"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on: [ollama]
+    restart: "no"
+    networks: [dataflow]
+
   # ───────── observability  (opt-in: --profile observability) ───────────────
 
   otel-collector:
@@ -234,3 +265,4 @@ networks:
 volumes:
   pgdata:
   chdata:
+  ollamadata:
