@@ -4,6 +4,7 @@
   "scripts": { "dev": "ts-node src/index.ts", "build": "tsc -p ." },
   "dependencies": {
     "@dataflow/shared": "*",
+    "@dataflow/connector-sdk": "*",
     "@temporalio/client": "^1.10.0",
     "express": "^4.19.2",
     "cors": "^2.8.5",

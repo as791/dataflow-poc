@@ -45,6 +45,9 @@ x-app-env: &app-env
   # running the /api/ai/* routes return 503; the rest of the stack is unaffected.
   OLLAMA_URL: http://ollama:11434
   OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
+  # Connector SDK: drop *.manifest.json files in ./connectors/manifests and
+  # they load on restart — no rebuild. The bundled examples ship in the image.
+  CONNECTORS_DIR: /app/connectors/manifests
 
 services:
   # ───────── infrastructure ─────────────────────────────────────────────────
@@ -139,6 +142,9 @@ services:
 
   api:
     build: { context: ., dockerfile: apps/api/Dockerfile }
+    volumes:
+      # User-supplied connector manifests (zero-code REST connectors).
+      - ./connectors/manifests:/app/connectors/manifests:ro
     environment:
       <<: *app-env
       API_PORT: "4000"
@@ -163,6 +169,8 @@ services:
       args: { BUILD_ID: "${BUILD_ID:-dev-local}" }
     volumes:
       - ./secrets/worker-keypair.pem:/secrets/worker-keypair.pem:ro
+      # User-supplied connector manifests (zero-code REST connectors).
+      - ./connectors/manifests:/app/connectors/manifests:ro
     environment:
       <<: *app-env
       BUILD_ID: ${BUILD_ID:-dev-local}

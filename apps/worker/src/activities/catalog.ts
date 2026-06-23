@@ -1,4 +1,4 @@
-import type { IngestionConfig } from '@dataflow/shared';
+import { registry, type SourceFn, type Handler } from '@dataflow/connector-sdk';
 import { zendeskFetch } from './connectors/zendesk';
 import { gsheetsFetch } from './connectors/gsheets';
 import { gdriveFetch } from './connectors/gdrive';
@@ -9,20 +9,9 @@ import { writeRecords } from './clickhouse';
 import axios from 'axios';
 import crypto from 'crypto';
 
-export interface SourceFetchParams {
-  config: Record<string, unknown>;
-  cursor: Record<string, any>;       // loaded from connector_state
-  ingestion?: IngestionConfig;
-  tenantId: string;
-}
-export interface SourceFetchResult {
-  records: any[];
-  nextCursor: Record<string, any>;
-  hasMore: boolean;                  // drives the backfill loop in the workflow
-}
-
-type Handler = (input: any, config: Record<string, unknown>, ctx: HandlerCtx) => Promise<any>;
-interface HandlerCtx { tenantId: string; executionId: string; nodeId: string }
+// Connector runtime contracts now live in the SDK; re-exported so the coded
+// connectors (which import from '../catalog') keep working unchanged.
+export type { SourceFetchParams, SourceFetchResult, Handler, HandlerCtx } from '@dataflow/connector-sdk';
 
 // Safe-ish expression evaluator for map/filter (POC). Prod: isolated-vm.
 function evalExpr(expr: string, record: any): any {
@@ -30,15 +19,19 @@ function evalExpr(expr: string, record: any): any {
   return fn(record);
 }
 
-export const sources: Record<string, (p: SourceFetchParams) => Promise<SourceFetchResult>> = {
+// Coded source connectors (bespoke logic). Manifest-driven sources come from
+// the registry and are merged in below — adding a REST source is then a single
+// JSON file, no code here.
+const codedSources: Record<string, SourceFn> = {
   'zendesk.fetch':  zendeskFetch,
   'gsheets.fetch':  gsheetsFetch,
   'gdrive.fetch':   gdriveFetch,
   'excel.fetch':    excelFetch,
   'http.fetch':     httpFetch,
 };
+export const sources: Record<string, SourceFn> = { ...codedSources, ...registry.getSources() };
 
-export const handlers: Record<string, Handler> = {
+const codedHandlers: Record<string, Handler> = {
   // ─── transforms ───
   'transform.map': async (input, config) =>
     (input as any[]).map(r => evalExpr(config.expression as string, r)),
@@ -95,3 +88,4 @@ export const handlers: Record<string, Handler> = {
     return null;
   },
 };
+export const handlers: Record<string, Handler> = { ...codedHandlers, ...registry.getHandlers() };

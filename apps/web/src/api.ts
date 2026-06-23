@@ -39,6 +39,9 @@ export const api = {
     }).then(j),
   listPipelines: () => request('/api/pipelines').then(j),
 
+  // Connector catalog (coded + manifest-driven). Returns { catalog }.
+  getConnectorCatalog: () => request('/api/connectors/catalog').then(j),
+
   // AI builder (Ollama). Returns { mermaid, definition }.
   generatePipeline: (prompt: string) =>
     request('/api/ai/generate', { method: 'POST', body: JSON.stringify({ prompt }) }).then(j),

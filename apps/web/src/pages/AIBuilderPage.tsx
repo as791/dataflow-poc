@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { mermaidToDefinition } from '@dataflow/shared';
-import { CATALOG } from '../catalog';
+import { useCatalog } from '../context/CatalogContext';
 import { api } from '../api';
 import { MermaidPreview } from '../components/MermaidPreview';
 
@@ -14,6 +14,7 @@ interface Definition {
 
 export default function AIBuilderPage() {
   const nav = useNavigate();
+  const { catalog } = useCatalog();
   const [prompt, setPrompt] = useState('Pull Zendesk tickets every 5 minutes, drop deleted ones, and write them to Postgres.');
   const [mermaid, setMermaid] = useState('');
   const [definition, setDefinition] = useState<Definition | null>(null);
@@ -41,7 +42,7 @@ export default function AIBuilderPage() {
   // Editing the Mermaid text re-derives the structural part of the definition.
   const onMermaidChange = (src: string) => {
     setMermaid(src);
-    const { nodes, edges, warnings } = mermaidToDefinition(src, CATALOG);
+    const { nodes, edges, warnings } = mermaidToDefinition(src, catalog);
     setWarnings(warnings);
     setDefinition(d => ({
       nodes, edges,

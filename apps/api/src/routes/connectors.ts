@@ -19,9 +19,18 @@ import { withTenantTx, withTenant } from '../db';
 import { requireAuth, requireVerified } from '../middleware/auth';
 import { auditLog } from '../middleware/audit';
 import { encryptToken, decryptToken } from '../crypto/tokenEnc';
+import { getCatalog } from '../lib/serverCatalog';
 
 export const connectors = Router();
 connectors.use(requireAuth, requireVerified);
+
+// Connector catalog (UI palette + node config metadata). Combines coded
+// connectors with every manifest-driven connector in the registry, so a new
+// connector dropped in as a JSON manifest appears here — and thus in the canvas
+// palette and AI builder — with zero code changes.
+connectors.get('/catalog', (_req, res) => {
+  res.json({ catalog: getCatalog() });
+});
 
 // ── Redis-backed state store for OAuth CSRF nonces ────────────────────────
 let redis: Redis | null = null;

@@ -1,4 +1,5 @@
 import type { CatalogEntry } from '@dataflow/shared';
+import { registry } from '@dataflow/connector-sdk';
 
 // Server-side mirror of apps/web/src/catalog.ts. Drives AI prompt construction
 // and mermaidToDefinition resolution. Kept minimal (no React/colour concerns).
@@ -38,6 +39,13 @@ export const serverCatalog: CatalogEntry[] = [
     fields: [{ key: 'url', label: 'URL', type: 'text' }, { key: 'secret', label: 'HMAC secret', type: 'text' }] },
 ];
 
+// Coded connectors (rich field/oauth metadata) + manifest-driven connectors
+// from the registry. Deduped by activityType; the coded entry wins because it
+// carries the OAuth picker config the registry can't express. This is the
+// single catalog the AI builder and the /api/connectors/catalog endpoint use.
 export function getCatalog(): CatalogEntry[] {
-  return serverCatalog;
+  const byType = new Map<string, CatalogEntry>();
+  for (const e of registry.getCatalog()) byType.set(e.activityType, e);
+  for (const e of serverCatalog) byType.set(e.activityType, e);
+  return [...byType.values()];
 }
