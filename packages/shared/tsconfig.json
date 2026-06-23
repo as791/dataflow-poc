@@ -6,8 +6,12 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
     "types": ["node"]
   },
   "ts-node": { "transpileOnly": true },
-  "include": ["src/**/*"]
+  "include": ["src/**/*"],
+  "exclude": ["src/**/*.test.ts", "dist"]
 }
