@@ -2,7 +2,7 @@ import { Connection, Client } from '@temporalio/client';
 import { encryptedDataConverter } from './temporal-data-converter';
 import type { PipelineDefinition, DynamicWorkflowInput, DataRef, Environment } from '@dataflow/shared';
 import { pool, withTenant } from './db';
-import { incrementUsage } from './services/usage';
+import { incrementUsage, assertWithinQuota } from './services/usage';
 
 // ─── Per-environment Temporal wiring ───────────────────────────────────────
 // M3: each environment ('test' | 'prod') is its own Temporal namespace and task
@@ -30,6 +30,10 @@ export async function fireExecution(
   def: PipelineDefinition, pipelineRowId: string,
   triggerType: string, env: Environment = 'test', payloadRef?: DataRef,
 ): Promise<string> {
+  // Central enforcement so EVERY trigger path (manual, webhook, event) is
+  // capped — not just manual runs gated by requireQuota. Throws before any
+  // workflow starts, so an over-quota tenant never consumes a unit.
+  await assertWithinQuota(def.tenantId);
   const executionId = `exec-${def.id}-${Date.now()}`;
   const input: DynamicWorkflowInput = {
     definition: def,                                  // frozen — replay safe

@@ -1,11 +1,27 @@
-# DataFlow POC
+# DataFlow
 
-Self-serve data pipeline platform. Users build DAG workflows in a visual editor;
-one generic Temporal workflow interprets them. Zendesk, Google Sheets, Google
-Drive, and custom REST APIs as sources; cron / webhook / event triggers declared
-**inside the pipeline definition**; historical backfill + incremental ingestion
-with durable cursor state; dev→prod promotion via Temporal worker Build IDs;
-full observability (OTel → Prometheus/Grafana/Jaeger).
+Self-serve, open-core data pipeline platform — an n8n-shaped product on a
+Temporal-durable engine. Build DAG workflows visually **or** describe them in
+natural language and let a local LLM draft them; one generic Temporal workflow
+interprets every pipeline.
+
+**What sets it apart from n8n:**
+- **AI + Mermaid authoring.** Describe a pipeline in English → a local **Ollama**
+  model drafts an editable **Mermaid** diagram kept in sync with the canvas. No
+  API key, opt-in. See [docs/AI_BUILDER.md](docs/AI_BUILDER.md).
+- **Plug-and-play connectors.** Add a REST source with a single JSON manifest —
+  no code, no redeploy. See [docs/CONNECTORS.md](docs/CONNECTORS.md).
+- **Temporal-durable execution.** Pause/resume/cancel, durable cursors, crash-safe
+  backfill, replay-deterministic by construction.
+- **Test → production environments.** Iterate in `test`, promote a tested version
+  to `prod`; each environment is its own Temporal namespace + worker pool.
+- **Open core.** The whole product is free in the community edition; an
+  `EDITION=enterprise` seam unlocks governance features (audit export, …).
+
+Sources: Zendesk, Google Sheets, Google Drive, Microsoft Excel, custom REST, plus
+any manifest connector. Triggers (cron / webhook / event) are declared **inside
+the pipeline definition**. Historical backfill + incremental ingestion with
+durable cursor state. Full observability (OTel → Prometheus/Grafana/Jaeger).
 
 ## Architecture in one paragraph
 
@@ -20,25 +36,43 @@ backfill survives crashes and seamlessly hands off to incremental mode;
 `continueAsNew` bounds history on long backfills. Payloads travel as `DataRef`
 pointers — Temporal history holds IDs, never data.
 
-## Run it — fully isolated (recommended)
+## Run it — one command
 
 Everything runs in containers on one private Docker network. No Node, no npm,
-no Postgres on your host. Credentials enter only via `.env` at runtime — they
-are never baked into images.
+no Postgres on your host. The bootstrap script generates `.env`, the worker RSA
+keypair, and random encryption keys, then starts the stack (idempotent):
 
 ```bash
-cp .env.example .env            # connector creds (optional for smoke test)
-docker compose up -d --build    # ~2-3 min first build
+./scripts/bootstrap.sh          # generate config + secrets, then start
+./scripts/bootstrap.sh --ai     # also start the Ollama AI builder
 ./scripts/smoke-test.sh         # end-to-end verification, no creds needed
 ```
 
 | Service     | URL                    |
 |-------------|------------------------|
-| Pipeline UI | http://localhost:3000  |
-| Temporal UI | http://localhost:8080  |
+| Pipeline UI | http://localhost:3002  |
+| Temporal UI | http://localhost:8082  |
 | Grafana     | http://localhost:3001  |
 | Jaeger      | http://localhost:16686 |
 | Prometheus  | http://localhost:9090  |
+
+> Connector OAuth still expects `APP_URL=http://localhost:3000`; the web app is
+> served on `:3002` and proxies `/api` internally.
+
+## Editions
+
+DataFlow is open core. Everything that makes it a product — visual + AI
+authoring, all connectors, test/prod environments, execution, observability — is
+free in the **community** edition. Set `EDITION=enterprise` to unlock governance
+features behind the seam in `apps/api/src/lib/edition.ts` (audit-log export
+today; SSO/SAML and advanced RBAC are scaffolded). `GET /api/edition` reports the
+active edition and feature flags.
+
+**Encryption status (honest):** Temporal workflow history is encrypted by a
+custom data converter, and OAuth tokens are encrypted at rest (AES-256-GCM). The
+per-tenant DEK path for encrypting large `node_payloads` rows at rest is
+scaffolded (`apps/worker/src/activities/crypto.ts`) but **not yet wired into the
+data plane** — treat at-rest payload encryption as roadmap, not a guarantee.
 
 The API is **not** exposed to the host by default — the web container proxies
 `/api` to it over the internal network (nginx). To expose it for the smoke test

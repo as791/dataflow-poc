@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      # npm ci runs the shared + connector-sdk `prepare` builds, so their dist
+      # exists before the app typechecks resolve @dataflow/* .d.ts files.
+      - run: npm ci
+
+      - name: Unit tests — shared (mermaid round-trip)
+        run: npm -w @dataflow/shared test
+      - name: Unit tests — connector-sdk (executor + registry)
+        run: npm -w @dataflow/connector-sdk test
+
+      - name: Typecheck API
+        run: npm -w @dataflow/api exec tsc -- -p . --noEmit
+      - name: Typecheck worker
+        run: npm -w @dataflow/worker exec tsc -- -p . --noEmit
+      - name: Build web
+        run: npm -w @dataflow/web run build
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate docker-compose
+        run: docker compose config --quiet
