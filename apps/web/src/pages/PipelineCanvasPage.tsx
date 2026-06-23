@@ -307,7 +307,14 @@ export default function PipelineCanvasPage() {
   const activate = async () => {
     if (!savedRowId) return setMsg('Save first');
     const r = await api.activate(savedRowId);
-    setMsg(`Activated · trigger: ${r.trigger.type}`);
+    setMsg(`Activated in ${r.environment ?? 'test'} · trigger: ${r.trigger.type}`);
+  };
+  const promote = async () => {
+    if (!savedRowId) return setMsg('Save first');
+    try {
+      const r = await api.promote(savedRowId);
+      setMsg(`Promoted to production · prod v${r.version}`);
+    } catch (e: any) { setMsg(`Promote failed: ${e.message}`); }
   };
   const run = async () => {
     if (!savedRowId) return setMsg('Save first');
@@ -358,9 +365,11 @@ export default function PipelineCanvasPage() {
           onClick={() => (showMermaid ? setShowMermaid(false) : openMermaidPanel())}>
           {showMermaid ? 'Hide Mermaid' : 'Mermaid'}
         </button>
+        <span className="glass-badge" title="Pipelines are edited in test, then promoted to prod">test</span>
         <button className="glass-btn-ghost" onClick={save}>Save</button>
         <button className="glass-btn-ghost" onClick={activate}>Activate</button>
         <button className="glass-btn-success" onClick={run}>▶ Run now</button>
+        <button className="glass-btn-ghost" onClick={promote} title="Copy this version to production">Promote →</button>
         <span className="text-[11px] opacity-70">{msg}</span>
       </div>
 

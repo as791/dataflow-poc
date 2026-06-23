@@ -2,6 +2,11 @@
 
 export type NodeType = 'source' | 'transform' | 'sink' | 'fork' | 'merge';
 
+// M3: a pipeline version lives in exactly one environment. Each environment is
+// a separate Temporal namespace + task queue (dynamic-dag-<env>).
+export type Environment = 'test' | 'prod';
+export const ENVIRONMENTS: Environment[] = ['test', 'prod'];
+
 export interface PipelineDefinition {
   id: string;
   version: number;            // immutable; editing creates a new version

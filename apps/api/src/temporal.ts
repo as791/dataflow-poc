@@ -1,24 +1,34 @@
-import { Connection, Client, ScheduleClient } from '@temporalio/client';
+import { Connection, Client } from '@temporalio/client';
 import { encryptedDataConverter } from './temporal-data-converter';
-import type { PipelineDefinition, DynamicWorkflowInput, DataRef } from '@dataflow/shared';
+import type { PipelineDefinition, DynamicWorkflowInput, DataRef, Environment } from '@dataflow/shared';
 import { pool, withTenant } from './db';
 import { incrementUsage } from './services/usage';
 
-let client: Client;
-export async function temporal(): Promise<Client> {
+// ─── Per-environment Temporal wiring ───────────────────────────────────────
+// M3: each environment ('test' | 'prod') is its own Temporal namespace and task
+// queue, served by its own worker pool (compose: worker-test / worker-prod).
+// Clients share one Connection but are cached per namespace.
+export function namespaceFor(env: Environment): string { return env; }
+export function taskQueueFor(env: Environment): string { return `dynamic-dag-${env}`; }
+
+let connection: Connection;
+const clients = new Map<string, Client>();
+
+export async function temporal(namespace = process.env.TEMPORAL_NAMESPACE ?? 'default'): Promise<Client> {
+  let client = clients.get(namespace);
   if (!client) {
-    const connection = await Connection.connect({
-      address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233' });
-    client = new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE ?? 'default', dataConverter: encryptedDataConverter });
+    if (!connection) {
+      connection = await Connection.connect({ address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233' });
+    }
+    client = new Client({ connection, namespace, dataConverter: encryptedDataConverter });
+    clients.set(namespace, client);
   }
   return client;
 }
 
-const TASK_QUEUE = process.env.TASK_QUEUE ?? 'dynamic-dag';
-
 export async function fireExecution(
   def: PipelineDefinition, pipelineRowId: string,
-  triggerType: string, payloadRef?: DataRef
+  triggerType: string, env: Environment = 'test', payloadRef?: DataRef,
 ): Promise<string> {
   const executionId = `exec-${def.id}-${Date.now()}`;
   const input: DynamicWorkflowInput = {
@@ -27,15 +37,15 @@ export async function fireExecution(
     executionId,
     trigger: { type: triggerType, payloadRef, firedAt: new Date().toISOString() },
   };
-  const c = await temporal();
+  const c = await temporal(namespaceFor(env));
   await c.workflow.start('DynamicDAGWorkflow', {
-    args: [input], taskQueue: TASK_QUEUE, workflowId: executionId,
+    args: [input], taskQueue: taskQueueFor(env), workflowId: executionId,
   });
   // Must run inside withTenant so the RLS policy on `executions` resolves correctly.
   await withTenant(def.tenantId, client => client.query(
-    `INSERT INTO executions (id, pipeline_id, tenant_id, trigger_type, build_id)
-     VALUES ($1,$2,$3,$4,$5)`,
-    [executionId, pipelineRowId, def.tenantId, triggerType, process.env.BUILD_ID ?? null]));
+    `INSERT INTO executions (id, pipeline_id, tenant_id, trigger_type, build_id, environment)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [executionId, pipelineRowId, def.tenantId, triggerType, process.env.BUILD_ID ?? null, env]));
   // Phase 3 metering. Central call so cron-triggered executions
   // (which fire from inside Temporal, not via an Express route) also count.
   // requireQuota gates *before* this on the routes that have a request context.
@@ -44,9 +54,11 @@ export async function fireExecution(
 }
 
 // ─── Cron trigger → Temporal Schedule (defined inside the pipeline itself) ───
-export async function syncSchedule(def: PipelineDefinition, pipelineRowId: string) {
-  const c = await temporal();
-  const scheduleId = `sched-${def.id}`;
+// Schedules are env-scoped so a pipeline's test and prod crons run independently
+// in their own namespaces.
+export async function syncSchedule(def: PipelineDefinition, pipelineRowId: string, env: Environment = 'test') {
+  const c = await temporal(namespaceFor(env));
+  const scheduleId = `sched-${def.id}-${env}`;
   // remove stale schedule, then recreate if the definition declares cron
   try { await (await c.schedule.getHandle(scheduleId)).delete(); } catch { /* none */ }
   if (def.trigger.type !== 'cron') return;
@@ -56,13 +68,13 @@ export async function syncSchedule(def: PipelineDefinition, pipelineRowId: strin
     action: {
       type: 'startWorkflow',
       workflowType: 'DynamicDAGWorkflow',
-      taskQueue: TASK_QUEUE,
+      taskQueue: taskQueueFor(env),
       args: [{
         definition: def, tenantId: def.tenantId,
-        executionId: `exec-${def.id}-{{.ScheduledTime.Unix}}`,
+        executionId: `exec-${def.id}-${env}-{{.ScheduledTime.Unix}}`,
         trigger: { type: 'cron', firedAt: new Date().toISOString() },
       }],
-      workflowId: `exec-${def.id}-cron`,
+      workflowId: `exec-${def.id}-${env}-cron`,
     },
     policies: { overlap: 'SKIP' },  // never double-run the same pipeline
   } as any);

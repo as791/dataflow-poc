@@ -49,6 +49,27 @@ x-app-env: &app-env
   # they load on restart — no rebuild. The bundled examples ship in the image.
   CONNECTORS_DIR: /app/connectors/manifests
 
+# Shared config for the per-environment worker pools (M3). Each pool overrides
+# TEMPORAL_NAMESPACE + TASK_QUEUE for its environment.
+x-worker-build: &worker-build
+  context: .
+  dockerfile: apps/worker/Dockerfile
+  args: { BUILD_ID: "${BUILD_ID:-dev-local}" }
+
+x-worker-volumes: &worker-volumes
+  - ./secrets/worker-keypair.pem:/secrets/worker-keypair.pem:ro
+  - ./connectors/manifests:/app/connectors/manifests:ro
+
+x-worker-env: &worker-env
+  <<: *app-env
+  BUILD_ID: ${BUILD_ID:-dev-local}
+  USE_VERSIONING: "false"
+  ZENDESK_SUBDOMAIN: ${ZENDESK_SUBDOMAIN:-}
+  ZENDESK_EMAIL: ${ZENDESK_EMAIL:-}
+  ZENDESK_API_TOKEN: ${ZENDESK_API_TOKEN:-}
+  GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: ${GOOGLE_SERVICE_ACCOUNT_JSON_BASE64:-}
+  WORKER_PRIVATE_KEY_PATH: /secrets/worker-keypair.pem
+
 services:
   # ───────── infrastructure ─────────────────────────────────────────────────
 
@@ -67,6 +88,7 @@ services:
       - ./db/005_billing.sql:/docker-entrypoint-initdb.d/005_billing.sql:ro
       - ./db/006_dashboards.sql:/docker-entrypoint-initdb.d/006_dashboards.sql:ro
       - ./db/007_kms.sql:/docker-entrypoint-initdb.d/007_kms.sql:ro
+      - ./db/008_environments.sql:/docker-entrypoint-initdb.d/008_environments.sql:ro
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dataflow"]
@@ -138,6 +160,26 @@ services:
     mem_limit: 128m
     networks: [dataflow]
 
+  # One-shot: register the test + prod namespaces the worker pools and API
+  # client use. Idempotent (ignores "already exists"); the worker pools wait for
+  # this to complete. Tries both tctl retention flag styles for version safety.
+  temporal-namespaces:
+    image: temporalio/admin-tools:1.22.7
+    depends_on: [temporal]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until tctl --address temporal:7233 namespace list >/dev/null 2>&1; do
+          echo "waiting for temporal frontend…"; sleep 2; done
+        for ns in test prod; do
+          tctl --address temporal:7233 --namespace "$$ns" namespace register --retention 72h 2>/dev/null \
+            || tctl --address temporal:7233 --namespace "$$ns" namespace register --rd 3 2>/dev/null \
+            || echo "namespace $$ns already exists or registered"
+        done
+        echo "namespaces test + prod ready"
+    restart: "no"
+    networks: [dataflow]
+
   # ───────── application ────────────────────────────────────────────────────
 
   api:
@@ -153,37 +195,42 @@ services:
       ZENDESK_API_TOKEN: ${ZENDESK_API_TOKEN:-}
       GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: ${GOOGLE_SERVICE_ACCOUNT_JSON_BASE64:-}
     depends_on:
-      postgres:   { condition: service_healthy }
-      redis:      { condition: service_healthy }
-      clickhouse: { condition: service_healthy }
-      temporal:   { condition: service_started }
-      mailhog:    { condition: service_started }
+      postgres:            { condition: service_healthy }
+      redis:               { condition: service_healthy }
+      clickhouse:          { condition: service_healthy }
+      temporal:            { condition: service_started }
+      temporal-namespaces: { condition: service_completed_successfully }
+      mailhog:             { condition: service_started }
     mem_limit: 512m
     networks: [dataflow]
     ports: ["4000:4000"]
 
-  worker:
-    build:
-      context: .
-      dockerfile: apps/worker/Dockerfile
-      args: { BUILD_ID: "${BUILD_ID:-dev-local}" }
-    volumes:
-      - ./secrets/worker-keypair.pem:/secrets/worker-keypair.pem:ro
-      # User-supplied connector manifests (zero-code REST connectors).
-      - ./connectors/manifests:/app/connectors/manifests:ro
+  # One worker pool per environment. Identical image; they differ only by the
+  # namespace + task queue they poll (M3). Both wait for the namespaces to exist.
+  worker-test:
+    build: *worker-build
+    volumes: *worker-volumes
     environment:
-      <<: *app-env
-      BUILD_ID: ${BUILD_ID:-dev-local}
-      USE_VERSIONING: "false"
-      ZENDESK_SUBDOMAIN: ${ZENDESK_SUBDOMAIN:-}
-      ZENDESK_EMAIL: ${ZENDESK_EMAIL:-}
-      ZENDESK_API_TOKEN: ${ZENDESK_API_TOKEN:-}
-      GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: ${GOOGLE_SERVICE_ACCOUNT_JSON_BASE64:-}
-      WORKER_PRIVATE_KEY_PATH: /secrets/worker-keypair.pem
+      <<: *worker-env
+      TEMPORAL_NAMESPACE: test
+      TASK_QUEUE: dynamic-dag-test
     depends_on:
-      postgres: { condition: service_healthy }
-      temporal: { condition: service_started }
+      postgres:            { condition: service_healthy }
+      temporal-namespaces: { condition: service_completed_successfully }
     # Temporal bundles workflow code with webpack at process start — needs headroom.
+    mem_limit: 1536m
+    networks: [dataflow]
+
+  worker-prod:
+    build: *worker-build
+    volumes: *worker-volumes
+    environment:
+      <<: *worker-env
+      TEMPORAL_NAMESPACE: prod
+      TASK_QUEUE: dynamic-dag-prod
+    depends_on:
+      postgres:            { condition: service_healthy }
+      temporal-namespaces: { condition: service_completed_successfully }
     mem_limit: 1536m
     networks: [dataflow]
 
