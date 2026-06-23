@@ -1,3 +1,4 @@
 export * from './types';
 export * from './catalog-types';
-export * from './mermaid';
+export { definitionToMermaid, mermaidToDefinition } from './mermaid';
+export type { MermaidParseResult } from './mermaid';

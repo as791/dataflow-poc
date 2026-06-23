@@ -6,7 +6,8 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { definitionToMermaid, mermaidToDefinition } from '@dataflow/shared';
-import { CATALOG, byType, type CatalogEntry, type FieldSpec } from '../catalog';
+import { type CatalogEntry, type FieldSpec } from '../catalog';
+import { useCatalog } from '../context/CatalogContext';
 import { MermaidPreview } from '../components/MermaidPreview';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
@@ -16,6 +17,7 @@ import { ExcelPicker } from '../components/connectors/ExcelPicker';
 import { ZendeskPicker } from '../components/connectors/ZendeskPicker';
 
 function FlowNode({ data }: { data: any }) {
+  const { byType } = useCatalog();
   const entry: CatalogEntry = byType[data.activityType];
   const statusRing =
     data.status === 'failed' ? 'ring-2 ring-rose-400/70'
@@ -53,6 +55,7 @@ function OAuthPickerField({ field, value, onChange }: {
 function ConfigPanel({ node, onChange, onDelete }: {
   node: Node; onChange: (id: string, patch: any) => void; onDelete: (id: string) => void;
 }) {
+  const { byType } = useCatalog();
   const entry: CatalogEntry = byType[node.data.activityType];
   if (!entry) return null;
   const cfg = node.data.config ?? {};
@@ -197,7 +200,7 @@ function configToForm(cfg: Record<string, any> = {}): Record<string, any> {
 }
 
 // PipelineDefinition (or AI/mermaid output) → ReactFlow nodes + edges.
-function definitionToFlow(def: any): { nodes: Node[]; edges: any[] } {
+function definitionToFlow(def: any, byType: Record<string, CatalogEntry>): { nodes: Node[]; edges: any[] } {
   const nodes: Node[] = (def.nodes ?? []).map((pn: any, i: number) => ({
     id: pn.id,
     type: 'flowNode',
@@ -221,6 +224,7 @@ function definitionToFlow(def: any): { nodes: Node[]; edges: any[] } {
 let nid = 0;
 export default function PipelineCanvasPage() {
   const { wrapDekForWorker } = useAuth();
+  const { catalog, byType } = useCatalog();
   const location = useLocation();
   const hydrated = useRef(false);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -240,7 +244,7 @@ export default function PipelineCanvasPage() {
     const def = (location.state as any)?.definition;
     if (!def || hydrated.current) return;
     hydrated.current = true;
-    const { nodes: ns, edges: es } = definitionToFlow(def);
+    const { nodes: ns, edges: es } = definitionToFlow(def, byType);
     setNodes(ns); setEdges(es);
     if (def.name) setName(def.name);
     if (def.trigger) setTrigger(def.trigger);
@@ -327,9 +331,9 @@ export default function PipelineCanvasPage() {
     setShowMermaid(true);
   };
   const applyMermaid = () => {
-    const { nodes: parsed, edges: pEdges, warnings } = mermaidToDefinition(mermaidDraft, CATALOG);
+    const { nodes: parsed, edges: pEdges, warnings } = mermaidToDefinition(mermaidDraft, catalog);
     const prevData = new Map(nodes.map(n => [n.id, n.data]));
-    const flow = definitionToFlow({ nodes: parsed, edges: pEdges });
+    const flow = definitionToFlow({ nodes: parsed, edges: pEdges }, byType);
     flow.nodes.forEach(n => {
       const prev = prevData.get(n.id);
       if (prev) { n.data.config = prev.config; if (prev.ingestion) n.data.ingestion = prev.ingestion; }
@@ -340,9 +344,9 @@ export default function PipelineCanvasPage() {
 
   const palette = useMemo(() => {
     const groups: Record<string, CatalogEntry[]> = {};
-    CATALOG.forEach(c => (groups[c.nodeType] ??= []).push(c));
+    catalog.forEach(c => (groups[c.nodeType] ??= []).push(c));
     return groups;
-  }, []);
+  }, [catalog]);
 
   return (
     <div className="grid h-[calc(100vh-56px)]" style={{ gridTemplateColumns: '200px 1fr 300px', gridTemplateRows: '56px 1fr' }}>

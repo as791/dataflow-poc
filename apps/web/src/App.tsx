@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { CatalogProvider } from './context/CatalogContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AppShell } from './components/AppShell';
 import PipelineCanvasPage from './pages/PipelineCanvasPage';
@@ -21,7 +22,7 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/accept-invite" element={<AcceptInvitePage />} />
 
-          <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
+          <Route element={<ProtectedRoute><CatalogProvider><AppShell /></CatalogProvider></ProtectedRoute>}>
             <Route index element={<PipelineCanvasPage />} />
             <Route path="ai-builder" element={<AIBuilderPage />} />
             <Route path="connectors" element={<ConnectorsPage />} />
