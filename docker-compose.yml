@@ -41,6 +41,8 @@ x-app-env: &app-env
   RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
   OAUTH_TOKEN_ENCRYPTION_KEY: ${OAUTH_TOKEN_ENCRYPTION_KEY:-}
   WORKER_PUBLIC_KEY_PEM: ${WORKER_PUBLIC_KEY_PEM:-}
+  # Open-core edition: 'community' (default) or 'enterprise'.
+  EDITION: ${EDITION:-community}
   # AI builder (opt-in via `--profile ai`). When the ollama service is not
   # running the /api/ai/* routes return 503; the rest of the stack is unaffected.
   OLLAMA_URL: http://ollama:11434

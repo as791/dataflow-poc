@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import Redis from 'ioredis';
 import { pool, withTenant } from '../db';
 import { fireExecution } from '../temporal';
+import { QuotaExceededError } from '../services/usage';
 import { executionsStarted } from '../metrics';
 import type { PipelineDefinition, DataRef, Environment } from '@dataflow/shared';
 
@@ -41,10 +42,17 @@ triggers.post('/hooks/:path', async (req, res) => {
        VALUES ($1,'webhook','trigger',$2) RETURNING id`, [tenantId, json]));
     payloadRef = { type: 'pg', key: insRow.rows[0].id, tenantId, sizeBytes: json.length };
   }
-  // Metering happens inside fireExecution() — see apps/api/src/temporal.ts.
-  const executionId = await fireExecution(def, rows[0].id, 'webhook', env, payloadRef);
-  executionsStarted.inc({ trigger: 'webhook' });
-  res.json({ executionId });
+  // Metering + quota enforcement happen inside fireExecution() — see temporal.ts.
+  try {
+    const executionId = await fireExecution(def, rows[0].id, 'webhook', env, payloadRef);
+    executionsStarted.inc({ trigger: 'webhook' });
+    res.json({ executionId });
+  } catch (e) {
+    if (e instanceof QuotaExceededError) {
+      return res.status(402).json({ error: 'Quota exceeded', used: e.used, limit: e.limit });
+    }
+    throw e;
+  }
 });
 
 export async function startEventSubscriber() {
@@ -62,8 +70,14 @@ export async function startEventSubscriber() {
       const payloadRef: DataRef = {
         type: 'inline', key: Buffer.from(message).toString('base64'),
         tenantId: row.tenant_id, sizeBytes: message.length };
-      await fireExecution(def, row.id, 'event', env, payloadRef);
-      executionsStarted.inc({ trigger: 'event' });
+      // Per-row guard: an over-quota (or otherwise failing) tenant must not
+      // abort delivery to the others subscribed to this topic.
+      try {
+        await fireExecution(def, row.id, 'event', env, payloadRef);
+        executionsStarted.inc({ trigger: 'event' });
+      } catch (e) {
+        console.error('event trigger fireExecution failed', { pipeline: row.id, error: (e as Error).message });
+      }
     }
   });
 }
