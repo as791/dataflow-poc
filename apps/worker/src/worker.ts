@@ -28,6 +28,7 @@ async function main() {
 
   const worker = await Worker.create({
     connection,
+    namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
     workflowsPath: require.resolve('./workflows/dynamic-dag'),
     activities,
     taskQueue: process.env.TASK_QUEUE ?? 'dynamic-dag',

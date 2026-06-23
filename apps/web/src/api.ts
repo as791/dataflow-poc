@@ -32,6 +32,7 @@ export const api = {
   // Pipelines / executions
   savePipeline: (def: any) => request('/api/pipelines', { method: 'POST', body: JSON.stringify(def) }).then(j),
   activate:     (rowId: string) => request(`/api/pipelines/${rowId}/activate`, { method: 'POST' }).then(j),
+  promote:      (rowId: string) => request(`/api/pipelines/${rowId}/promote`, { method: 'POST' }).then(j),
   run:          (rowId: string, encryptedDek?: string) =>
     request(`/api/pipelines/${rowId}/run`, {
       method: 'POST',

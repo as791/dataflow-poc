@@ -4,7 +4,7 @@ import Redis from 'ioredis';
 import { pool, withTenant } from '../db';
 import { fireExecution } from '../temporal';
 import { executionsStarted } from '../metrics';
-import type { PipelineDefinition, DataRef } from '@dataflow/shared';
+import type { PipelineDefinition, DataRef, Environment } from '@dataflow/shared';
 
 export const triggers = Router();
 
@@ -15,10 +15,13 @@ triggers.post('/hooks/:path', async (req, res) => {
   const { rows } = await pool.query(
     `SELECT * FROM pipelines WHERE status='active'
        AND definition->'trigger'->>'type'='webhook'
-       AND definition->'trigger'->>'path'=$1`, [req.params.path]);
+       AND definition->'trigger'->>'path'=$1
+     ORDER BY (environment='prod') DESC`, [req.params.path]);
   if (!rows.length) return res.status(404).json({ error: 'no active pipeline on this hook' });
 
+  // Prefer the prod version when both environments are active on this path.
   const def = rows[0].definition as PipelineDefinition;
+  const env = (rows[0].environment ?? 'test') as Environment;
   const tenantId = rows[0].tenant_id as string;
   const secret = (def.trigger as any).secret as string;
   const sig = req.headers['x-signature-sha256'] as string | undefined;
@@ -39,7 +42,7 @@ triggers.post('/hooks/:path', async (req, res) => {
     payloadRef = { type: 'pg', key: insRow.rows[0].id, tenantId, sizeBytes: json.length };
   }
   // Metering happens inside fireExecution() — see apps/api/src/temporal.ts.
-  const executionId = await fireExecution(def, rows[0].id, 'webhook', payloadRef);
+  const executionId = await fireExecution(def, rows[0].id, 'webhook', env, payloadRef);
   executionsStarted.inc({ trigger: 'webhook' });
   res.json({ executionId });
 });
@@ -55,10 +58,11 @@ export async function startEventSubscriber() {
          AND definition->'trigger'->>'topic'=$1`, [topic]);
     for (const row of rows) {
       const def = row.definition as PipelineDefinition;
+      const env = (row.environment ?? 'test') as Environment;
       const payloadRef: DataRef = {
         type: 'inline', key: Buffer.from(message).toString('base64'),
         tenantId: row.tenant_id, sizeBytes: message.length };
-      await fireExecution(def, row.id, 'event', payloadRef);
+      await fireExecution(def, row.id, 'event', env, payloadRef);
       executionsStarted.inc({ trigger: 'event' });
     }
   });

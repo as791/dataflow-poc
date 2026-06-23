@@ -5,8 +5,9 @@ import { syncSchedule, fireExecution } from '../temporal';
 import { executionsStarted } from '../metrics';
 import { auditLog } from '../middleware/audit';
 import { requireQuota } from '../middleware/quota';
+import { requireOwner } from '../middleware/auth';
 import { validatePipeline } from '../lib/validatePipeline';
-import type { PipelineDefinition } from '@dataflow/shared';
+import type { PipelineDefinition, Environment } from '@dataflow/shared';
 
 export const pipelines = Router();
 
@@ -39,34 +40,66 @@ pipelines.post('/:rowId/activate', async (req, res) => {
     const { rows } = await client.query(`SELECT * FROM pipelines WHERE id=$1`, [req.params.rowId]);
     if (!rows.length) return null;
     const def = rows[0].definition as PipelineDefinition;
+    const env = (rows[0].environment ?? 'test') as Environment;
+    // Only one active version per (pipeline_key, environment).
     await client.query(`UPDATE pipelines SET status='archived'
-      WHERE pipeline_key=$1 AND status='active'`, [rows[0].pipeline_key]);
+      WHERE pipeline_key=$1 AND environment=$2 AND status='active'`, [rows[0].pipeline_key, env]);
     await client.query(`UPDATE pipelines SET status='active' WHERE id=$1`, [req.params.rowId]);
-    return def;
+    return { def, env };
   });
   if (!out) return res.status(404).json({ error: 'not found' });
-  await syncSchedule(out, req.params.rowId);
-  auditLog(req, 'pipeline.activated', req.params.rowId, { trigger: out.trigger?.type });
-  res.json({ ok: true, trigger: out.trigger });
+  await syncSchedule(out.def, req.params.rowId, out.env);
+  auditLog(req, 'pipeline.activated', req.params.rowId, { trigger: out.def.trigger?.type, environment: out.env });
+  res.json({ ok: true, trigger: out.def.trigger, environment: out.env });
 });
 
 pipelines.post('/:rowId/run', requireQuota, async (req, res) => {
-  const def = await withTenantTx(req, async client => {
+  const row = await withTenantTx(req, async client => {
     const { rows } = await client.query(`SELECT * FROM pipelines WHERE id=$1`, [req.params.rowId]);
-    return rows[0]?.definition as PipelineDefinition | undefined;
+    return rows[0] as { definition: PipelineDefinition; environment?: string } | undefined;
   });
-  if (!def) return res.status(404).json({ error: 'not found' });
+  if (!row) return res.status(404).json({ error: 'not found' });
+  const env = (row.environment ?? 'test') as Environment;
   // fireExecution() centrally calls incrementUsage() so cron + manual + webhook
   // + event triggers all meter consistently. Quota gate above checks BEFORE.
-  const executionId = await fireExecution(def, req.params.rowId, 'manual');
+  const executionId = await fireExecution(row.definition, req.params.rowId, 'manual', env);
   executionsStarted.inc({ trigger: 'manual' });
-  auditLog(req, 'execution.started', executionId, { trigger: 'manual' });
-  res.json({ executionId });
+  auditLog(req, 'execution.started', executionId, { trigger: 'manual', environment: env });
+  res.json({ executionId, environment: env });
+});
+
+// Promote a tested version to production: copy its definition into a new
+// active prod version, record where it came from, and register the prod
+// schedule. Owner-gated.
+pipelines.post('/:rowId/promote', requireOwner, async (req, res) => {
+  const out = await withTenantTx(req, async client => {
+    const { rows } = await client.query(`SELECT * FROM pipelines WHERE id=$1`, [req.params.rowId]);
+    if (!rows.length) return null;
+    const src = rows[0];
+    const def = src.definition as PipelineDefinition;
+    const { rows: mx } = await client.query(
+      `SELECT MAX(version) v FROM pipelines WHERE pipeline_key=$1`, [src.pipeline_key]);
+    const version = (mx[0]?.v ?? 0) + 1;
+    def.version = version;
+    // Archive the current active prod version, then insert the promoted one.
+    await client.query(`UPDATE pipelines SET status='archived'
+      WHERE pipeline_key=$1 AND environment='prod' AND status='active'`, [src.pipeline_key]);
+    const ins = await client.query(
+      `INSERT INTO pipelines (pipeline_key, version, tenant_id, name, definition, status, environment, promoted_from_version)
+       VALUES ($1,$2,$3,$4,$5,'active','prod',$6) RETURNING id`,
+      [src.pipeline_key, version, src.tenant_id, src.name, JSON.stringify(def), src.version]);
+    return { def, rowId: ins.rows[0].id as string, fromVersion: src.version as number, version };
+  });
+  if (!out) return res.status(404).json({ error: 'not found' });
+  await syncSchedule(out.def, out.rowId, 'prod');
+  auditLog(req, 'pipeline.promoted', out.rowId, { fromVersion: out.fromVersion, version: out.version });
+  res.json({ ok: true, rowId: out.rowId, environment: 'prod', version: out.version });
 });
 
 pipelines.get('/', async (req, res) => {
   const rows = await withTenantTx(req, c => c.query(
-    `SELECT id, pipeline_key, version, name, status, created_at FROM pipelines ORDER BY created_at DESC`));
+    `SELECT id, pipeline_key, version, name, status, environment, promoted_from_version, created_at
+       FROM pipelines ORDER BY created_at DESC`));
   res.json(rows.rows);
 });
 

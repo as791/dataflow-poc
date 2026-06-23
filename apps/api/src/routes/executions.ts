@@ -1,8 +1,19 @@
 import { Router } from 'express';
 import { withTenantTx } from '../db';
-import { temporal } from '../temporal';
+import { temporal, namespaceFor } from '../temporal';
+import type { Environment } from '@dataflow/shared';
 
 export const executions = Router();
+
+// Each execution lives in its environment's Temporal namespace, so status
+// queries and signals must target that namespace.
+async function envForExecution(req: any, id: string): Promise<Environment> {
+  const env = await withTenantTx(req, async client => {
+    const { rows } = await client.query(`SELECT environment FROM executions WHERE id=$1`, [id]);
+    return rows[0]?.environment as Environment | undefined;
+  });
+  return env ?? 'test';
+}
 
 executions.get('/', async (req, res) => {
   const rows = await withTenantTx(req, c => c.query(
@@ -16,9 +27,9 @@ executions.get('/:id/status', async (req, res) => {
   // Always read the DB phase — markExecution writes it when the workflow
   // finishes, and the Temporal query handler never returns 'completed'/'failed'.
   const dbRow = await withTenantTx(req, async client => {
-    const { rows: e } = await client.query(`SELECT phase FROM executions WHERE id=$1`, [id]);
+    const { rows: e } = await client.query(`SELECT phase, environment FROM executions WHERE id=$1`, [id]);
     const { rows: nr } = await client.query(`SELECT * FROM node_runs WHERE execution_id=$1`, [id]);
-    return { dbPhase: e[0]?.phase ?? null, nodeRuns: nr };
+    return { dbPhase: e[0]?.phase ?? null, env: (e[0]?.environment ?? 'test') as Environment, nodeRuns: nr };
   });
 
   // If the DB already marks this execution terminal, return immediately.
@@ -30,7 +41,7 @@ executions.get('/:id/status', async (req, res) => {
 
   // Workflow still running — query the live status from Temporal.
   try {
-    const c = await temporal();
+    const c = await temporal(namespaceFor(dbRow.env));
     const handle = c.workflow.getHandle(id);
     const status = await handle.query('status');
     res.json(status);
@@ -42,7 +53,8 @@ executions.get('/:id/status', async (req, res) => {
 
 for (const action of ['pause', 'resume', 'cancel'] as const) {
   executions.post(`/:id/${action}`, async (req, res) => {
-    const c = await temporal();
+    const env = await envForExecution(req, req.params.id);
+    const c = await temporal(namespaceFor(env));
     await c.workflow.getHandle(req.params.id).signal(action);
     res.json({ ok: true });
   });
