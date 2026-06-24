@@ -10,7 +10,6 @@ import { type CatalogEntry, type FieldSpec } from '../catalog';
 import { useCatalog } from '../context/CatalogContext';
 import { MermaidPreview } from '../components/MermaidPreview';
 import { api } from '../api';
-import { useAuth } from '../context/AuthContext';
 import { SheetPicker } from '../components/connectors/SheetPicker';
 import { DrivePicker } from '../components/connectors/DrivePicker';
 import { ExcelPicker } from '../components/connectors/ExcelPicker';
@@ -223,7 +222,6 @@ function definitionToFlow(def: any, byType: Record<string, CatalogEntry>): { nod
 
 let nid = 0;
 export default function PipelineCanvasPage() {
-  const { wrapDekForWorker } = useAuth();
   const { catalog, byType } = useCatalog();
   const location = useLocation();
   const hydrated = useRef(false);
@@ -319,8 +317,7 @@ export default function PipelineCanvasPage() {
   const run = async () => {
     if (!savedRowId) return setMsg('Save first');
     try {
-      const encryptedDek = await wrapDekForWorker();
-      const r = await api.run(savedRowId, encryptedDek ?? undefined);
+      const r = await api.run(savedRowId);
       setExecutionId(r.executionId);
       setMsg('Running…');
     } catch (e: any) { setMsg(`Run failed: ${e.message}`); }

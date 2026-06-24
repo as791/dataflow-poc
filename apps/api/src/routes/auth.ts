@@ -1,17 +1,17 @@
 import { Router } from 'express';
-import bcrypt from 'bcrypt';
 import crypto from 'node:crypto';
-import { pool, withTenant, withTenantTx } from '../db';
+import { google } from 'googleapis';
+import { pool } from '../db';
 import { signAccessToken, requireAuth } from '../middleware/auth';
 import { auditAs } from '../middleware/audit';
 import { rateLimit, ipKey } from '../middleware/rateLimit';
-import { sendVerificationEmail } from '../email/mailer';
 
 export const auth = Router();
 
 const REFRESH_TTL_DAYS = 30;
-const VERIFY_TTL_HOURS = 24;
-const BCRYPT_COST = 12;
+const STATE_TTL_MINUTES = 10;
+const APP_URL = process.env.APP_URL ?? 'http://localhost:3000';
+const isProd = process.env.NODE_ENV === 'production';
 
 const sha256 = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 const randomToken = () => crypto.randomBytes(32).toString('base64url');
@@ -20,7 +20,7 @@ function setRefreshCookie(res: any, token: string) {
   res.cookie('refresh_token', token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: isProd,
     maxAge: REFRESH_TTL_DAYS * 24 * 3600 * 1000,
     path: '/api/auth',
   });
@@ -36,134 +36,146 @@ async function issueRefreshToken(userId: string): Promise<string> {
   return token;
 }
 
-// ─── POST /register ─────────────────────────────────────────────────────────
-auth.post('/register',
-  rateLimit({ scope: 'register', keyFn: ipKey, limit: 5, windowSeconds: 60 }),
-  async (req, res) => {
-    const { email, password, tenantName } = req.body ?? {};
-    if (!email || !password || !tenantName) return res.status(400).json({ error: 'email, password, tenantName required' });
-    if (password.length < 8) return res.status(400).json({ error: 'password too short' });
+// ─── Google OAuth ─────────────────────────────────────────────────────────────
 
-    const existing = await pool.query(`SELECT 1 FROM users WHERE email=$1`, [email]);
-    if (existing.rowCount) return res.status(409).json({ error: 'email already registered' });
+function oauthClient() {
+  return new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI,
+  );
+}
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const t = await client.query(`INSERT INTO tenants (name) VALUES ($1) RETURNING id`, [tenantName]);
-      const tenantId = t.rows[0].id;
-      const hash = await bcrypt.hash(password, BCRYPT_COST);
-      const u = await client.query(
-        `INSERT INTO users (tenant_id, email, password_hash, role, email_verified)
-         VALUES ($1,$2,$3,'owner',false) RETURNING id`,
-        [tenantId, email, hash]);
-      const userId = u.rows[0].id;
+// Resolve a verified Google identity to a local user, provisioning as needed.
+// Returns the user id so the caller can mint a session.
+async function resolveGoogleUser(
+  sub: string,
+  email: string,
+  ip: string | null,
+  ua: string | null,
+): Promise<string> {
+  // 1. Known Google identity → sign in.
+  const bySub = await pool.query(
+    `SELECT id, tenant_id FROM users WHERE google_sub=$1`, [sub]);
+  if (bySub.rows.length) {
+    const { id, tenant_id } = bySub.rows[0];
+    auditAs(tenant_id, id, 'auth.login', ip, ua, { provider: 'google' });
+    return id;
+  }
 
-      const token = randomToken();
-      await client.query(
-        `INSERT INTO email_verifications (token_hash, user_id, expires_at)
-         VALUES ($1,$2, now() + ($3 || ' hours')::interval)`,
-        [sha256(token), userId, String(VERIFY_TTL_HOURS)]);
-      await client.query('COMMIT');
+  // 2. Existing account with this email (invited/legacy) → link google_sub.
+  const byEmail = await pool.query(
+    `SELECT id, tenant_id FROM users WHERE email=$1`, [email]);
+  if (byEmail.rows.length) {
+    const { id, tenant_id } = byEmail.rows[0];
+    await pool.query(
+      `UPDATE users SET google_sub=$1, email_verified=true WHERE id=$2`, [sub, id]);
+    auditAs(tenant_id, id, 'auth.login', ip, ua, { provider: 'google', linked: true });
+    return id;
+  }
 
-      // Best-effort email; verification can be re-requested if this fails.
-      sendVerificationEmail(email, token).catch(e =>
-        console.error('verification email send failed', e.message));
-
-      auditAs(tenantId, userId, 'auth.register',
-        (req.ip ?? null), req.get('user-agent') ?? null, { email });
-
-      res.status(201).json({ message: 'Check your email to verify your account.' });
-    } catch (e: any) {
-      await client.query('ROLLBACK').catch(() => {});
-      console.error('register failed', e);
-      res.status(500).json({ error: 'registration failed' });
-    } finally {
-      client.release();
-    }
-  });
-
-// ─── GET /verify ────────────────────────────────────────────────────────────
-auth.get('/verify', async (req, res) => {
-  const token = String(req.query.token ?? '');
-  if (!token) return res.status(400).json({ error: 'token required' });
-  const { rows } = await pool.query(
-    `SELECT user_id FROM email_verifications WHERE token_hash=$1 AND expires_at > now()`,
-    [sha256(token)]);
-  if (!rows.length) return res.status(400).json({ error: 'invalid or expired token' });
-  const userId = rows[0].user_id;
+  // 3. First sign-in: join a pending invitation, else auto-create a workspace.
+  const inv = await pool.query(
+    `SELECT tenant_id, role FROM user_invitations
+       WHERE email=$1 AND accepted_at IS NULL AND expires_at > now()
+       ORDER BY expires_at DESC LIMIT 1`,
+    [email]);
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query(`UPDATE users SET email_verified=true WHERE id=$1`, [userId]);
-    await client.query(`DELETE FROM email_verifications WHERE user_id=$1`, [userId]);
+    let tenantId: string;
+    let role: string;
+    if (inv.rows.length) {
+      tenantId = inv.rows[0].tenant_id;
+      role = inv.rows[0].role;
+      await client.query(
+        `UPDATE user_invitations SET accepted_at=now()
+           WHERE email=$1 AND accepted_at IS NULL`, [email]);
+    } else {
+      role = 'owner';
+      const t = await client.query(
+        `INSERT INTO tenants (name) VALUES ($1) RETURNING id`, [email.split('@')[0]]);
+      tenantId = t.rows[0].id;
+    }
+    const u = await client.query(
+      `INSERT INTO users (tenant_id, email, google_sub, role, email_verified)
+       VALUES ($1,$2,$3,$4,true) RETURNING id`,
+      [tenantId, email, sub, role]);
     await client.query('COMMIT');
+    const userId = u.rows[0].id;
+    auditAs(tenantId, userId, 'auth.register', ip, ua,
+      { provider: 'google', invited: inv.rows.length > 0 });
+    return userId;
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
   } finally {
     client.release();
   }
+}
 
-  const u = await pool.query(
-    `SELECT id, tenant_id, email, role, email_verified FROM users WHERE id=$1`, [userId]);
-  const user = u.rows[0];
-  const access = signAccessToken({
-    sub: user.id, tenantId: user.tenant_id, email: user.email,
-    role: user.role, emailVerified: user.email_verified });
-  const refresh = await issueRefreshToken(user.id);
-  setRefreshCookie(res, refresh);
-  auditAs(user.tenant_id, user.id, 'auth.email_verified',
-    req.ip ?? null, req.get('user-agent') ?? null);
-  res.json({ accessToken: access, user });
-});
-
-// ─── POST /resend-verification ──────────────────────────────────────────────
-auth.post('/resend-verification',
-  rateLimit({ scope: 'resend', keyFn: req => String(req.body?.email ?? ipKey(req)), limit: 1, windowSeconds: 60 }),
-  async (req, res) => {
-    const { email } = req.body ?? {};
-    if (!email) return res.status(400).json({ error: 'email required' });
-    const { rows } = await pool.query(
-      `SELECT id, email_verified FROM users WHERE email=$1`, [email]);
-    if (!rows.length || rows[0].email_verified) return res.json({ ok: true });
-
-    const token = randomToken();
-    await pool.query(
-      `INSERT INTO email_verifications (token_hash, user_id, expires_at)
-       VALUES ($1,$2, now() + interval '24 hours')
-       ON CONFLICT (token_hash) DO NOTHING`,
-      [sha256(token), rows[0].id]);
-    sendVerificationEmail(email, token).catch(e => console.error(e.message));
-    res.json({ ok: true });
-  });
-
-// ─── POST /login ────────────────────────────────────────────────────────────
-auth.post('/login',
-  rateLimit({ scope: 'login', keyFn: ipKey, limit: 10, windowSeconds: 60 }),
-  async (req, res) => {
-    const { email, password } = req.body ?? {};
-    if (!email || !password) return res.status(400).json({ error: 'email and password required' });
-
-    const { rows } = await pool.query(
-      `SELECT id, tenant_id, email, password_hash, role, email_verified FROM users WHERE email=$1`, [email]);
-    const user = rows[0];
-    if (!user?.password_hash || !(await bcrypt.compare(password, user.password_hash))) {
-      return res.status(401).json({ error: 'invalid credentials' });
+// ─── GET /google — kick off the OAuth consent flow ───────────────────────────
+auth.get('/google',
+  rateLimit({ scope: 'oauth-start', keyFn: ipKey, limit: 20, windowSeconds: 60 }),
+  (_req, res) => {
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+      return res.status(503).json({ error: 'Google OAuth is not configured' });
     }
-    if (!user.email_verified) return res.status(403).json({ error: 'email not verified' });
-
-    const access = signAccessToken({
-      sub: user.id, tenantId: user.tenant_id, email: user.email,
-      role: user.role, emailVerified: user.email_verified });
-    const refresh = await issueRefreshToken(user.id);
-    setRefreshCookie(res, refresh);
-    auditAs(user.tenant_id, user.id, 'auth.login',
-      req.ip ?? null, req.get('user-agent') ?? null);
-    res.json({
-      accessToken: access,
-      user: { id: user.id, tenantId: user.tenant_id, email: user.email,
-              role: user.role, emailVerified: user.email_verified },
+    const state = randomToken();
+    res.cookie('oauth_state', state, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: isProd,
+      maxAge: STATE_TTL_MINUTES * 60 * 1000,
+      path: '/api/auth',
     });
+    const url = oauthClient().generateAuthUrl({
+      access_type: 'online',
+      scope: ['openid', 'email', 'profile'],
+      prompt: 'select_account',
+      state,
+    });
+    res.redirect(url);
   });
+
+// ─── GET /google/callback — exchange code, provision, set session cookie ─────
+auth.get('/google/callback', async (req, res) => {
+  const code = req.query.code ? String(req.query.code) : '';
+  const state = req.query.state ? String(req.query.state) : '';
+  const cookieState = req.cookies?.oauth_state;
+  res.clearCookie('oauth_state', { path: '/api/auth' });
+
+  if (!code || !state || !cookieState || state !== cookieState) {
+    return res.redirect(`${APP_URL}/login?error=oauth_state`);
+  }
+
+  try {
+    const client = oauthClient();
+    const { tokens } = await client.getToken(code);
+    if (!tokens.id_token) return res.redirect(`${APP_URL}/login?error=oauth_token`);
+
+    const ticket = await client.verifyIdToken({
+      idToken: tokens.id_token,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const sub = payload?.sub;
+    const email = payload?.email?.toLowerCase();
+    if (!sub || !email || payload?.email_verified === false) {
+      return res.redirect(`${APP_URL}/login?error=oauth_profile`);
+    }
+
+    const userId = await resolveGoogleUser(
+      sub, email, req.ip ?? null, req.get('user-agent') ?? null);
+    const refresh = await issueRefreshToken(userId);
+    setRefreshCookie(res, refresh);
+    res.redirect(APP_URL);
+  } catch (e: any) {
+    console.error('google oauth callback failed', e?.message ?? e);
+    res.redirect(`${APP_URL}/login?error=oauth_failed`);
+  }
+});
 
 // ─── POST /refresh ──────────────────────────────────────────────────────────
 auth.post('/refresh', async (req, res) => {
@@ -208,153 +220,14 @@ auth.post('/logout', async (req, res) => {
 // ─── GET /me ────────────────────────────────────────────────────────────────
 auth.get('/me', requireAuth, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT u.id, u.tenant_id, u.email, u.role, u.email_verified, t.name AS tenant_name,
-            u.pbkdf2_salt, u.encrypted_dek_password, u.password_dek_iv
+    `SELECT u.id, u.tenant_id, u.email, u.role, u.email_verified, t.name AS tenant_name
        FROM users u JOIN tenants t ON t.id=u.tenant_id WHERE u.id=$1`,
     [req.tenant.userId]);
   if (!rows.length) return res.status(404).json({ error: 'user not found' });
   res.json({ user: rows[0] });
 });
 
-// ─── Google OAuth — future ───────────────────────────────────────────────────
-auth.get('/google', (_req, res) =>
-  res.status(501).json({ error: 'Google OAuth ships in Phase 1.5' }));
-auth.get('/google/callback', (_req, res) =>
-  res.status(501).json({ error: 'Google OAuth ships in Phase 1.5' }));
-
-// ═══ Phase 6 KMS — /keys/* endpoints ══════════════════════════════════════════
-
-// ─── POST /keys/init ─────────────────────────────────────────────────────────
-// Store all encrypted key blobs produced by the browser at signup.
-// The server stores opaque ciphertext — it can never decrypt any of them.
-auth.post('/keys/init', requireAuth, async (req, res) => {
-  const {
-    encDekPassword, dekIv, encDekRecovery, recoveryDekIv, salt,
-    publicKey, encryptedPrivateKey, privateKeyIv,
-  } = req.body ?? {};
-
-  if (!encDekPassword || !dekIv || !encDekRecovery || !recoveryDekIv ||
-      !salt || !publicKey || !encryptedPrivateKey || !privateKeyIv) {
-    return res.status(400).json({ error: 'missing key material fields' });
-  }
-
-  await pool.query(
-    `UPDATE users SET
-       pbkdf2_salt=$1, encrypted_dek_password=$2, password_dek_iv=$3,
-       encrypted_dek_recovery=$4, recovery_dek_iv=$5,
-       public_key=$6, encrypted_private_key=$7
-     WHERE id=$8`,
-    [salt, encDekPassword, dekIv, encDekRecovery, recoveryDekIv,
-     publicKey, encryptedPrivateKey, req.tenant.userId]);
-
-  res.json({ ok: true });
-});
-
-// ─── GET /keys/recovery-info ─────────────────────────────────────────────────
-// Returns public key material needed for password recovery. No auth required.
-auth.get('/keys/recovery-info', async (req, res) => {
-  const email = String(req.query.email ?? '');
-  if (!email) return res.status(400).json({ error: 'email required' });
-
-  const { rows } = await pool.query(
-    `SELECT pbkdf2_salt, encrypted_dek_recovery, recovery_dek_iv
-       FROM users WHERE email=$1`,
-    [email]);
-
-  if (!rows.length || !rows[0].pbkdf2_salt) {
-    return res.status(404).json({ error: 'not found' });
-  }
-  res.json(rows[0]);
-});
-
-// ─── POST /keys/rotate-password ──────────────────────────────────────────────
-// Updates the password-encrypted DEK blob after recovery via phrase.
-auth.post(
-  '/keys/rotate-password',
-  rateLimit({ scope: 'key-rotate', keyFn: ipKey, limit: 5, windowSeconds: 60 }),
-  async (req, res) => {
-    const { email, newEncDekPassword, newDekIv, newSalt } = req.body ?? {};
-    if (!email || !newEncDekPassword || !newDekIv || !newSalt) {
-      return res.status(400).json({ error: 'missing fields' });
-    }
-
-    const { rows } = await pool.query(
-      `SELECT id, tenant_id FROM users WHERE email=$1`, [email]);
-    if (!rows.length) return res.status(404).json({ error: 'user not found' });
-    const { id: userId, tenant_id: tenantId } = rows[0];
-
-    await pool.query(
-      `UPDATE users SET
-         pbkdf2_salt=$1, encrypted_dek_password=$2, password_dek_iv=$3,
-         recovery_phrase_used_at=now()
-       WHERE id=$4`,
-      [newSalt, newEncDekPassword, newDekIv, userId]);
-
-    // Audit log
-    await pool.query(
-      `INSERT INTO key_rotation_log (tenant_id, user_id, reason) VALUES ($1,$2,$3)`,
-      [tenantId, userId, 'password_recovery']);
-
-    auditAs(tenantId, userId, 'auth.key_rotate',
-      req.ip ?? null, req.get('user-agent') ?? null, { reason: 'password_recovery' });
-
-    res.json({ ok: true });
-  });
-
-// ─── GET /keys/share/:userId ──────────────────────────────────────────────────
-// Owner fetches a sub-user's public key so it can encrypt the DEK for them.
-auth.get('/keys/share/:userId', requireAuth, async (req, res) => {
-  if (req.tenant.role !== 'owner') return res.status(403).json({ error: 'owner only' });
-
-  const { rows } = await pool.query(
-    `SELECT public_key FROM users WHERE id=$1 AND tenant_id=$2`,
-    [req.params.userId, req.tenant.tenantId]);
-  if (!rows.length) return res.status(404).json({ error: 'user not found' });
-  res.json({ publicKey: rows[0].public_key });
-});
-
-// ─── POST /keys/share ────────────────────────────────────────────────────────
-// Owner encrypts its DEK with the sub-user's public key and stores it.
-auth.post('/keys/share', requireAuth, async (req, res) => {
-  if (req.tenant.role !== 'owner') return res.status(403).json({ error: 'owner only' });
-
-  const { targetUserId, encryptedDek } = req.body ?? {};
-  if (!targetUserId || !encryptedDek) {
-    return res.status(400).json({ error: 'missing fields' });
-  }
-
-  await withTenantTx(req, c => c.query(
-    `INSERT INTO user_key_shares (from_user_id, to_user_id, tenant_id, encrypted_dek)
-       VALUES ($1,$2,$3,$4)
-       ON CONFLICT (tenant_id, to_user_id)
-       DO UPDATE SET encrypted_dek=$4, from_user_id=$1`,
-    [req.tenant.userId, targetUserId, req.tenant.tenantId, encryptedDek]));
-
-  res.json({ ok: true });
-});
-
-// ─── GET /keys/my-share ───────────────────────────────────────────────────────
-// Sub-user retrieves its RSA-wrapped DEK share, then decrypts with private key.
-auth.get('/keys/my-share', requireAuth, async (req, res) => {
-  const result = await withTenantTx(req, c => c.query(
-    `SELECT encrypted_dek FROM user_key_shares
-       WHERE to_user_id=$1 AND tenant_id=$2`,
-    [req.tenant.userId, req.tenant.tenantId]));
-
-  if (!result.rows.length) return res.status(404).json({ error: 'no share found' });
-  res.json({ encryptedDek: result.rows[0].encrypted_dek });
-});
-
-// ─── GET /keys/worker-public-key ─────────────────────────────────────────────
-// Returns the worker's RSA public key so the browser can wrap the DEK before
-// dispatching a workflow. Authenticated — must be signed-in user.
-auth.get('/keys/worker-public-key', requireAuth, async (_req, res) => {
-  const pub = process.env.WORKER_PUBLIC_KEY_PEM;
-  if (!pub) return res.status(503).json({ error: 'worker public key not configured' });
-  res.json({ publicKeyPem: pub });
-});
-
-// ─── Accept-invite: validate token (used by /accept-invite UI) ──────────────
+// ─── GET /accept-invite — validate token (used by the /accept-invite UI) ─────
 auth.get('/accept-invite', async (req, res) => {
   const token = String(req.query.token ?? '');
   if (!token) return res.status(400).json({ error: 'token required' });
@@ -367,52 +240,3 @@ auth.get('/accept-invite', async (req, res) => {
   if (new Date(rows[0].expires_at) < new Date()) return res.status(400).json({ error: 'token expired' });
   res.json({ email: rows[0].email, role: rows[0].role, tenantName: rows[0].tenant_name });
 });
-
-auth.post('/accept-invite',
-  rateLimit({ scope: 'accept-invite', keyFn: ipKey, limit: 10, windowSeconds: 60 }),
-  async (req, res) => {
-    const { token, password } = req.body ?? {};
-    if (!token || !password) return res.status(400).json({ error: 'token and password required' });
-    if (password.length < 8) return res.status(400).json({ error: 'password too short' });
-
-    const { rows } = await pool.query(
-      `SELECT tenant_id, email, role, expires_at, accepted_at FROM user_invitations WHERE token_hash=$1`,
-      [sha256(token)]);
-    const inv = rows[0];
-    if (!inv) return res.status(400).json({ error: 'invalid token' });
-    if (inv.accepted_at) return res.status(400).json({ error: 'invite already used' });
-    if (new Date(inv.expires_at) < new Date()) return res.status(400).json({ error: 'invite expired' });
-
-    const existing = await pool.query(`SELECT 1 FROM users WHERE email=$1`, [inv.email]);
-    if (existing.rowCount) return res.status(409).json({ error: 'email already registered' });
-
-    const hash = await bcrypt.hash(password, BCRYPT_COST);
-    const client = await pool.connect();
-    let userId: string;
-    try {
-      await client.query('BEGIN');
-      const u = await client.query(
-        `INSERT INTO users (tenant_id, email, password_hash, role, email_verified)
-         VALUES ($1,$2,$3,$4,true) RETURNING id`,
-        [inv.tenant_id, inv.email, hash, inv.role]);
-      userId = u.rows[0].id;
-      await client.query(
-        `UPDATE user_invitations SET accepted_at=now() WHERE token_hash=$1`, [sha256(token)]);
-      await client.query('COMMIT');
-    } catch (e) {
-      await client.query('ROLLBACK').catch(() => {});
-      throw e;
-    } finally {
-      client.release();
-    }
-
-    const access = signAccessToken({
-      sub: userId, tenantId: inv.tenant_id, email: inv.email,
-      role: inv.role, emailVerified: true });
-    const refresh = await issueRefreshToken(userId);
-    setRefreshCookie(res, refresh);
-    auditAs(inv.tenant_id, userId, 'auth.invite_accepted',
-      req.ip ?? null, req.get('user-agent') ?? null, { email: inv.email });
-    res.json({ accessToken: access, user: { id: userId, tenantId: inv.tenant_id,
-      email: inv.email, role: inv.role, emailVerified: true } });
-  });

@@ -33,11 +33,8 @@ export const api = {
   savePipeline: (def: any) => request('/api/pipelines', { method: 'POST', body: JSON.stringify(def) }).then(j),
   activate:     (rowId: string) => request(`/api/pipelines/${rowId}/activate`, { method: 'POST' }).then(j),
   promote:      (rowId: string) => request(`/api/pipelines/${rowId}/promote`, { method: 'POST' }).then(j),
-  run:          (rowId: string, encryptedDek?: string) =>
-    request(`/api/pipelines/${rowId}/run`, {
-      method: 'POST',
-      body: JSON.stringify(encryptedDek ? { encryptedDek } : {}),
-    }).then(j),
+  run:          (rowId: string) =>
+    request(`/api/pipelines/${rowId}/run`, { method: 'POST', body: JSON.stringify({}) }).then(j),
   listPipelines: () => request('/api/pipelines').then(j),
 
   // Connector catalog (coded + manifest-driven). Returns { catalog }.
@@ -53,25 +50,12 @@ export const api = {
   executionStatus: (id: string) => request(`/api/executions/${id}/status`).then(j),
   signal: (id: string, action: string) => request(`/api/executions/${id}/${action}`, { method: 'POST' }).then(j),
 
-  // Auth
-  register: (body: { email: string; password: string; tenantName: string }) =>
-    request('/api/auth/register', { method: 'POST', body: JSON.stringify(body) }).then(j),
-  login: (body: { email: string; password: string }) =>
-    request('/api/auth/login', { method: 'POST', body: JSON.stringify(body) }).then(j),
+  // Auth (Google SSO — sign-in happens via the /api/auth/google browser redirect)
   logout: () => request('/api/auth/logout', { method: 'POST' }).then(j),
   refresh: () => request('/api/auth/refresh', { method: 'POST' }, false).then(j),
   me: () => request('/api/auth/me').then(j),
-  verifyEmail: (token: string) =>
-    request(`/api/auth/verify?token=${encodeURIComponent(token)}`).then(j),
-  resendVerification: (email: string) =>
-    request('/api/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) }).then(j),
   inviteInfo: (token: string) =>
     request(`/api/auth/accept-invite?token=${encodeURIComponent(token)}`).then(j),
-  acceptInvite: (body: { token: string; password: string }) =>
-    request('/api/auth/accept-invite', { method: 'POST', body: JSON.stringify(body) }).then(j),
-
-  // KMS / key material
-  getWorkerPublicKey: () => request('/api/auth/keys/worker-public-key').then(j),
 
   // Team
   listMembers: () => request('/api/team/members').then(j),

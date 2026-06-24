@@ -5,7 +5,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { AppShell } from './components/AppShell';
 import PipelineCanvasPage from './pages/PipelineCanvasPage';
 import AIBuilderPage from './pages/AIBuilderPage';
-import { LoginPage, RegisterPage, VerifyEmailPage, ForgotPasswordPage, AcceptInvitePage } from './pages/auth';
+import { LoginPage, AcceptInvitePage } from './pages/auth';
 import { TeamPage } from './pages/TeamPage';
 import { ConnectorsPage } from './pages/ConnectorsPage';
 import { BillingPage } from './pages/BillingPage';
@@ -17,9 +17,6 @@ export default function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/verify-email" element={<VerifyEmailPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/accept-invite" element={<AcceptInvitePage />} />
 
           <Route element={<ProtectedRoute><CatalogProvider><AppShell /></CatalogProvider></ProtectedRoute>}>
