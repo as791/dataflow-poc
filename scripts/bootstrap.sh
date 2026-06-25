@@ -62,14 +62,14 @@ PROFILES=()
 [ "${1:-}" = "--ai" ] && PROFILES=(--profile ai)
 if [ -n "${NO_UP:-}" ]; then
   echo "▶ NO_UP set — skipping startup. Start later with:"
-  echo "    docker compose ${PROFILES[*]} up -d --build"
+  echo "    docker compose ${PROFILES[*]:-} up -d --build"
   exit 0
 fi
 if ! command -v docker >/dev/null 2>&1; then
   echo "▶ docker not found. Generated config is ready; install Docker then run:"
-  echo "    docker compose ${PROFILES[*]} up -d --build"
+  echo "    docker compose ${PROFILES[*]:-} up -d --build"
   exit 0
 fi
-echo "▶ starting stack: docker compose ${PROFILES[*]} up -d --build"
-docker compose "${PROFILES[@]}" up -d --build
+echo "▶ starting stack: docker compose ${PROFILES[*]:-} up -d --build"
+docker compose ${PROFILES[@]+"${PROFILES[@]}"} up -d --build
 echo "✓ DataFlow is starting. Web: http://localhost:3002  ·  Temporal UI: http://localhost:8082"

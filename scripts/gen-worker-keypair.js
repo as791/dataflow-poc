@@ -39,6 +39,16 @@ const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
 const privPath = path.join(dir, 'worker-keypair.pem');
 const pubPath  = path.join(dir, 'worker-keypair.pub');
 
+// Guard against the Docker bind-mount footgun: if `docker compose up` ran before
+// this key existed, Docker creates the mount target as an (empty) directory, and
+// writeFileSync below would fail with EISDIR. Remove such a stray directory first.
+for (const p of [privPath, pubPath]) {
+  if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
+    fs.rmSync(p, { recursive: true });
+    console.warn(`⚠ removed stray directory at ${p} (was a Docker bind-mount placeholder)`);
+  }
+}
+
 fs.writeFileSync(privPath, privateKey, { mode: 0o600 });
 fs.writeFileSync(pubPath,  publicKey);
 

@@ -1,7 +1,12 @@
 # DataFlow Platform — Implementation Plan
 
-Status: **Complete**
-Last updated: 2026-06-17
+Status: **Superseded by implementation and ADR-001**
+Last updated: 2026-06-25
+
+> Historical implementation plan. Current Temporal persistence and worker
+> architecture are defined in `docs/ADR-001-TEMPORAL-RUNTIME.md`: Cassandra
+> stores Temporal history, Elasticsearch provides advanced visibility, Go owns
+> workflows, and TypeScript owns activities.
 
 This document captures the full plan to evolve the dataflow-poc into a multi-tenant SaaS platform with E2E encryption, OAuth connectors, billing, and analytics. Review and approve before implementation begins.
 

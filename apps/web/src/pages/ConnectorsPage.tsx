@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { RefreshCw, ShieldCheck } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -307,25 +308,24 @@ export function ConnectorsPage() {
   ];
 
   return (
-    <div className="max-w-3xl mx-auto mt-10 px-6 space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6 px-6 py-10">
       {/* Page header */}
-      <div className="glass-panel p-6">
+      <div>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-semibold">Connectors</h1>
-            <p className="text-xs text-white/50 mt-1">
+            <h1 className="page-heading">Connect accounts</h1>
+            <p className="page-subtitle mt-1">
               OAuth integrations — tokens are stored encrypted per-tenant.
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="glass-badge">Phase 2 · OAuth</span>
             <button
               className="glass-btn-ghost text-sm flex items-center gap-1.5"
               onClick={refresh}
               disabled={loading}
               title="Refresh"
             >
-              <span className={loading ? 'animate-spin inline-block' : 'inline-block'}>↻</span>
+              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
               {loading ? 'Loading…' : 'Refresh'}
             </button>
           </div>
@@ -363,7 +363,9 @@ export function ConnectorsPage() {
       )}
 
       {/* Info panel */}
-      <div className="glass-panel p-5 text-xs text-white/50 space-y-1">
+      <div className="glass-panel flex gap-3 p-5 text-xs text-white/50">
+        <ShieldCheck size={18} className="mt-0.5 shrink-0 text-emerald-300" />
+        <div className="space-y-1">
         <p>
           <span className="text-white/70 font-medium">Security note:</span>{' '}
           OAuth tokens are AES-256 encrypted and stored per-tenant. Revoking a connection
@@ -372,6 +374,7 @@ export function ConnectorsPage() {
         <p>
           After connecting, you can reference these accounts in your pipeline nodes.
         </p>
+        </div>
       </div>
 
       {/* Zendesk modal */}

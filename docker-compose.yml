@@ -41,6 +41,7 @@ x-app-env: &app-env
   RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
   RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
   OAUTH_TOKEN_ENCRYPTION_KEY: ${OAUTH_TOKEN_ENCRYPTION_KEY:-}
+  TEMPORAL_PAYLOAD_ENCRYPTION_KEY: ${TEMPORAL_PAYLOAD_ENCRYPTION_KEY:-}
   WORKER_PUBLIC_KEY_PEM: ${WORKER_PUBLIC_KEY_PEM:-}
   # Open-core edition: 'community' (default) or 'enterprise'.
   EDITION: ${EDITION:-community}
@@ -92,6 +93,7 @@ services:
       - ./db/006_dashboards.sql:/docker-entrypoint-initdb.d/006_dashboards.sql:ro
       - ./db/007_kms.sql:/docker-entrypoint-initdb.d/007_kms.sql:ro
       - ./db/008_environments.sql:/docker-entrypoint-initdb.d/008_environments.sql:ro
+      - ./db/009_temporal_execution_identity.sql:/docker-entrypoint-initdb.d/009_temporal_execution_identity.sql:ro
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dataflow"]
@@ -99,6 +101,40 @@ services:
       timeout: 3s
       retries: 10
     mem_limit: 512m
+    networks: [dataflow]
+
+  cassandra:
+    image: cassandra:4.1.7
+    environment:
+      CASSANDRA_CLUSTER_NAME: dataflow-temporal
+      MAX_HEAP_SIZE: 768M
+      HEAP_NEWSIZE: 192M
+    volumes:
+      - cassdata:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE CLUSTER' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    mem_limit: 1536m
+    networks: [dataflow]
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.27
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+    mem_limit: 1g
     networks: [dataflow]
 
   redis:
@@ -136,21 +172,21 @@ services:
     mem_limit: 64m
     networks: [dataflow]
 
-  # Temporal uses Postgres as its persistence backend — no Cassandra needed.
-  # auto-setup creates `temporal` and `temporal_visibility` databases on the
-  # shared Postgres instance automatically on first boot.
+  # Temporal workflow history is stored only in Cassandra. Elasticsearch is
+  # the advanced visibility store queried by Temporal UI.
   temporal:
-    image: temporalio/auto-setup:1.22.7
+    image: temporalio/auto-setup:1.28.1
     environment:
-      - DB=postgresql
-      - DB_PORT=5432
-      - POSTGRES_SEEDS=postgres
-      - POSTGRES_USER=dataflow
-      - POSTGRES_PWD=dataflow
-      - VISIBILITY_DB=postgresql
-      - ENABLE_ES=false
+      - DB=cassandra
+      - CASSANDRA_SEEDS=cassandra
+      - CASSANDRA_PORT=9042
+      - ENABLE_ES=true
+      - ES_SEEDS=elasticsearch
+      - ES_VERSION=v7
+      - ES_VIS_INDEX=temporal_visibility_v1_dev
     depends_on:
-      postgres: { condition: service_healthy }
+      cassandra: { condition: service_healthy }
+      elasticsearch: { condition: service_healthy }
     mem_limit: 512m
     networks: [dataflow]
 
@@ -216,7 +252,7 @@ services:
     environment:
       <<: *worker-env
       TEMPORAL_NAMESPACE: test
-      TASK_QUEUE: dynamic-dag-test
+      TASK_QUEUE: dynamic-activities-test
     depends_on:
       postgres:            { condition: service_healthy }
       temporal-namespaces: { condition: service_completed_successfully }
@@ -230,11 +266,39 @@ services:
     environment:
       <<: *worker-env
       TEMPORAL_NAMESPACE: prod
-      TASK_QUEUE: dynamic-dag-prod
+      TASK_QUEUE: dynamic-activities-prod
     depends_on:
       postgres:            { condition: service_healthy }
       temporal-namespaces: { condition: service_completed_successfully }
     mem_limit: 1536m
+    networks: [dataflow]
+
+  workflow-test:
+    build:
+      context: .
+      dockerfile: apps/workflow-go/Dockerfile
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: test
+      TASK_QUEUE: dynamic-dag-test
+      TEMPORAL_PAYLOAD_ENCRYPTION_KEY: ${TEMPORAL_PAYLOAD_ENCRYPTION_KEY:-}
+    depends_on:
+      temporal-namespaces: { condition: service_completed_successfully }
+    mem_limit: 256m
+    networks: [dataflow]
+
+  workflow-prod:
+    build:
+      context: .
+      dockerfile: apps/workflow-go/Dockerfile
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: prod
+      TASK_QUEUE: dynamic-dag-prod
+      TEMPORAL_PAYLOAD_ENCRYPTION_KEY: ${TEMPORAL_PAYLOAD_ENCRYPTION_KEY:-}
+    depends_on:
+      temporal-namespaces: { condition: service_completed_successfully }
+    mem_limit: 256m
     networks: [dataflow]
 
   web:
@@ -322,5 +386,7 @@ networks:
 
 volumes:
   pgdata:
+  cassdata:
+  esdata:
   chdata:
   ollamadata:

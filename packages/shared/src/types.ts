@@ -58,6 +58,8 @@ export interface DataRef {
   tenantId: string;
   sizeBytes: number;
   recordCount?: number;
+  encrypted?: boolean;
+  iv?: string;
 }
 
 export interface NodeResult {
@@ -80,6 +82,9 @@ export interface DynamicWorkflowInput {
   definition: PipelineDefinition;   // FULL frozen definition — never fetched inside workflow
   tenantId: string;
   executionId: string;
+  pipelineRowId?: string;
+  environment?: Environment;
+  executionPrepared?: boolean;
   trigger: { type: string; payloadRef?: DataRef; firedAt: string };
   // Phase 6: DEK wrapped with worker's RSA public key. Worker decrypts once at workflow
   // start; downstream activities receive plaintext DEK in workflow context.

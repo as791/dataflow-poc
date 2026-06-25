@@ -1,0 +1,655 @@
+{
+  "communities": {
+    "0": [
+      "apps_api_src_db_ts",
+      "apps_api_src_middleware_audit_ts",
+      "apps_api_src_middleware_quota_ts",
+      "apps_api_src_routes_connectors_ts",
+      "apps_api_src_routes_executions_ts",
+      "middleware_audit_auditas",
+      "middleware_audit_auditlog",
+      "middleware_quota_requirequota",
+      "routes_connectors_consumestate",
+      "routes_connectors_extractmsalrefreshtoken",
+      "routes_connectors_getconnection",
+      "routes_connectors_getlivetoken",
+      "routes_connectors_googleoauth",
+      "routes_connectors_graphcall",
+      "routes_connectors_mintstate",
+      "routes_connectors_msalclient",
+      "routes_connectors_pickconnection",
+      "routes_connectors_r",
+      "routes_connectors_refreshprovidertoken",
+      "routes_connectors_upsertconnection",
+      "routes_executions_envforexecution",
+      "src_db_withtenant",
+      "src_db_withtenanttx"
+    ],
+    "1": [
+      "apps_web_src_lib_crypto_ts",
+      "apps_web_src_pages_auth_tsx",
+      "lib_crypto_decryptwithkey",
+      "lib_crypto_derivekek",
+      "lib_crypto_encryptwithkey",
+      "lib_crypto_exportkeyraw",
+      "lib_crypto_exportprivatekey",
+      "lib_crypto_exportpublickeyjwk",
+      "lib_crypto_frombase64url",
+      "lib_crypto_generatedek",
+      "lib_crypto_generatersakeypair",
+      "lib_crypto_importkeyraw",
+      "lib_crypto_importprivatekey",
+      "lib_crypto_importpublickeyjwk",
+      "lib_crypto_randombytes",
+      "lib_crypto_rsadecrypt",
+      "lib_crypto_rsaencrypt",
+      "lib_crypto_subtle",
+      "lib_crypto_tobase64url",
+      "pages_auth_authshell",
+      "pages_auth_handlephraseconfirmed",
+      "pages_auth_submit"
+    ],
+    "2": [
+      "apps_worker_src_activities_connectors_http_ts",
+      "connectors_http_httpfetch",
+      "packages_connector_sdk_src_executor_ts",
+      "packages_connector_sdk_src_manifest_ts",
+      "packages_connector_sdk_src_registry_ts",
+      "src_executor_dig",
+      "src_executor_interpolate",
+      "src_executor_makemanifestsource",
+      "src_executor_runhttpsource",
+      "src_manifest_isstr",
+      "src_manifest_manifesttocatalogentry",
+      "src_manifest_validatemanifest",
+      "src_registry_connectorregistry",
+      "src_registry_connectorregistry_getcatalog",
+      "src_registry_connectorregistry_gethandlers",
+      "src_registry_connectorregistry_getsources",
+      "src_registry_connectorregistry_list",
+      "src_registry_connectorregistry_loadmanifestsfromdir",
+      "src_registry_connectorregistry_registermanifest",
+      "src_registry_connectorregistry_registerplugin"
+    ],
+    "3": [
+      "apps_api_src_lib_ollama_ts",
+      "apps_api_src_lib_validatepipeline_ts",
+      "apps_api_src_routes_ai_ts",
+      "apps_web_src_pages_aibuilderpage_tsx",
+      "lib_ollama_chatjson",
+      "lib_ollama_ollamaunavailableerror",
+      "lib_ollama_rawchat",
+      "lib_validatepipeline_validatepipeline",
+      "packages_shared_src_mermaid_ts",
+      "pages_aibuilderpage_generate",
+      "pages_aibuilderpage_onmermaidchange",
+      "pages_aibuilderpage_openincanvas",
+      "routes_ai_build",
+      "routes_ai_catalogforprompt",
+      "routes_ai_systemprompt",
+      "routes_ai_todefinition",
+      "src_mermaid_defaultnodetype",
+      "src_mermaid_definitiontomermaid",
+      "src_mermaid_escapelabel",
+      "src_mermaid_mermaidtodefinition"
+    ],
+    "4": [
+      "activities_clickhouse_clickhouseclient",
+      "activities_clickhouse_withretry",
+      "activities_clickhouse_writeexecutionmetric",
+      "activities_clickhouse_writerecords",
+      "activities_db_loadcursor",
+      "activities_db_readpayload",
+      "activities_db_recordnoderun",
+      "activities_db_savecursor",
+      "activities_db_writepayload",
+      "activities_index_dispatchnode",
+      "activities_index_emitmetric",
+      "activities_index_evaledgecondition",
+      "activities_index_fetchsourcepage",
+      "activities_index_markexecution",
+      "activities_index_mergerefs",
+      "activities_index_pipelineidfor",
+      "apps_worker_src_activities_clickhouse_ts",
+      "apps_worker_src_activities_db_ts",
+      "apps_worker_src_activities_index_ts"
+    ],
+    "5": [
+      "apps_worker_src_activities_connectors_excel_ts",
+      "apps_worker_src_activities_connectors_gdrive_ts",
+      "apps_worker_src_activities_connectors_gsheets_ts",
+      "apps_worker_src_activities_connectors_oauth_client_ts",
+      "apps_worker_src_activities_connectors_zendesk_ts",
+      "connectors_excel_excelfetch",
+      "connectors_gdrive_gdrivefetch",
+      "connectors_gsheets_gsheetsfetch",
+      "connectors_oauth_client_decrypt",
+      "connectors_oauth_client_dorefreshtoken",
+      "connectors_oauth_client_encrypt",
+      "connectors_oauth_client_ensurefresh",
+      "connectors_oauth_client_getoauthconnection",
+      "connectors_oauth_client_getoauthtoken",
+      "connectors_oauth_client_key",
+      "connectors_oauth_client_loadconnection",
+      "connectors_zendesk_zendeskfetch"
+    ],
+    "6": [
+      "apps_web_src_pages_connectorspage_tsx",
+      "pages_connectorspage_byprovider",
+      "pages_connectorspage_deleteconnector",
+      "pages_connectorspage_handleconnectgoogle",
+      "pages_connectorspage_handleconnectmicrosoft",
+      "pages_connectorspage_handleconnectzendesk",
+      "pages_connectorspage_handledisconnect",
+      "pages_connectorspage_handlesubmit",
+      "pages_connectorspage_listconnectors",
+      "pages_connectorspage_providericon",
+      "pages_connectorspage_startoauth",
+      "pages_connectorspage_startzendeskoauth",
+      "pages_connectorspage_timeago"
+    ],
+    "7": [
+      "apps_api_src_services_usage_ts",
+      "apps_api_src_temporal_ts",
+      "services_usage_assertwithinquota",
+      "services_usage_incrementusage",
+      "services_usage_quotaexceedederror",
+      "services_usage_quotaexceedederror_constructor",
+      "services_usage_startofmonthutc",
+      "src_temporal_fireexecution",
+      "src_temporal_namespacefor",
+      "src_temporal_syncschedule",
+      "src_temporal_taskqueuefor",
+      "src_temporal_temporal"
+    ],
+    "8": [
+      "apps_api_src_temporal_data_converter_ts",
+      "apps_worker_src_temporal_data_converter_ts",
+      "src_temporal_data_converter_decrypt",
+      "src_temporal_data_converter_encrypt",
+      "src_temporal_data_converter_encryptioncodec",
+      "src_temporal_data_converter_encryptioncodec_decode",
+      "src_temporal_data_converter_encryptioncodec_encode",
+      "src_temporal_data_converter_getkey"
+    ],
+    "9": [
+      "apps_web_src_context_catalogcontext_tsx",
+      "apps_web_src_pages_pipelinecanvaspage_tsx",
+      "context_catalogcontext_catalogprovider",
+      "context_catalogcontext_usecatalog",
+      "pages_pipelinecanvaspage_catch",
+      "pages_pipelinecanvaspage_flownode",
+      "pages_pipelinecanvaspage_oauthpickerfield"
+    ],
+    "10": [
+      "apps_web_src_pages_billingpage_tsx",
+      "pages_billingpage_buy",
+      "pages_billingpage_fmtdate",
+      "pages_billingpage_fmtinr",
+      "pages_billingpage_loadrazorpay",
+      "pages_billingpage_refresh",
+      "pages_billingpage_startpostpaymentpoll"
+    ],
+    "11": [
+      "apps_api_src_lib_querybuilder_ts",
+      "lib_querybuilder_buildquery",
+      "lib_querybuilder_inferschema",
+      "lib_querybuilder_jsonfield",
+      "lib_querybuilder_validatefield",
+      "lib_querybuilder_validatefn",
+      "lib_querybuilder_validateop"
+    ],
+    "12": [
+      "apps_web_src_api_ts",
+      "src_api_j",
+      "src_api_onunauthorized",
+      "src_api_request",
+      "src_api_setaccesstoken",
+      "src_api_setunauthorizedhandler"
+    ],
+    "13": [
+      "apps_api_src_middleware_auth_ts",
+      "middleware_auth_requireauth",
+      "middleware_auth_requireowner",
+      "middleware_auth_requireverified",
+      "middleware_auth_signaccesstoken",
+      "middleware_auth_verifyaccesstoken"
+    ],
+    "14": [
+      "apps_web_src_lib_bip39_ts",
+      "lib_bip39_entropytomnemonic",
+      "lib_bip39_generatemnemonic",
+      "lib_bip39_mnemonictoseed",
+      "lib_bip39_validatemnemonic"
+    ],
+    "15": [
+      "apps_api_src_lib_edition_ts",
+      "lib_edition_edition",
+      "lib_edition_features",
+      "lib_edition_isenterprise",
+      "lib_edition_requireenterprise"
+    ],
+    "16": [
+      "apps_api_src_routes_auth_ts",
+      "routes_auth_issuerefreshtoken",
+      "routes_auth_randomtoken",
+      "routes_auth_setrefreshcookie",
+      "routes_auth_sha256"
+    ],
+    "17": [
+      "apps_worker_src_workflows_dynamic_dag_ts",
+      "workflows_dynamic_dag_dynamicdagworkflow",
+      "workflows_dynamic_dag_plan",
+      "workflows_dynamic_dag_runnode",
+      "workflows_dynamic_dag_runsource"
+    ],
+    "18": [
+      "activities_crypto_decryptdekfromworkflowinput",
+      "activities_crypto_decryptpayload",
+      "activities_crypto_encryptpayload",
+      "activities_crypto_getworkerprivatekey",
+      "apps_worker_src_activities_crypto_ts"
+    ],
+    "19": [
+      "apps_web_src_pages_analyticspage_tsx",
+      "pages_analyticspage_apifetch",
+      "pages_analyticspage_handlesave",
+      "pages_analyticspage_loaddashboard"
+    ],
+    "20": [
+      "apps_web_src_pages_teampage_tsx",
+      "pages_teampage_invite",
+      "pages_teampage_refresh",
+      "pages_teampage_revoke"
+    ],
+    "21": [
+      "apps_api_src_middleware_ratelimit_ts",
+      "middleware_ratelimit_ipkey",
+      "middleware_ratelimit_r",
+      "middleware_ratelimit_ratelimit"
+    ],
+    "22": [
+      "apps_api_src_email_mailer_ts",
+      "email_mailer_render",
+      "email_mailer_sendinviteemail",
+      "email_mailer_sendverificationemail"
+    ],
+    "23": [
+      "apps_worker_src_otel_ts",
+      "apps_worker_src_worker_ts",
+      "src_otel_initotel",
+      "src_worker_main"
+    ],
+    "24": [
+      "packages_connector_sdk_src_executor_test_ts",
+      "src_executor_test_check",
+      "src_executor_test_stub"
+    ],
+    "25": [
+      "packages_shared_src_mermaid_test_ts",
+      "src_mermaid_test_check",
+      "src_mermaid_test_edgekey"
+    ],
+    "26": [
+      "apps_web_src_components_recoveryphrasemodal_tsx",
+      "components_recoveryphrasemodal_handlecopy",
+      "components_recoveryphrasemodal_handledownload"
+    ],
+    "27": [
+      "apps_api_src_routes_team_ts",
+      "routes_team_randomtoken",
+      "routes_team_sha256"
+    ],
+    "28": [
+      "apps_api_src_routes_billing_ts",
+      "routes_billing_daysuntilmonthreset",
+      "routes_billing_rzp"
+    ],
+    "29": [
+      "apps_web_src_app_tsx",
+      "src_app_app"
+    ],
+    "30": [
+      "apps_web_src_context_authcontext_tsx",
+      "context_authcontext_authprovider"
+    ],
+    "31": [
+      "apps_web_src_components_protectedroute_tsx",
+      "components_protectedroute_protectedroute"
+    ],
+    "32": [
+      "apps_web_src_components_appshell_tsx",
+      "components_appshell_async"
+    ],
+    "33": [
+      "apps_web_src_components_mermaidpreview_tsx",
+      "components_mermaidpreview_mermaidpreview"
+    ],
+    "34": [
+      "apps_web_src_components_connectors_sheetpicker_tsx",
+      "connectors_sheetpicker_apifetch"
+    ],
+    "35": [
+      "apps_web_src_components_connectors_excelpicker_tsx",
+      "connectors_excelpicker_apifetch"
+    ],
+    "36": [
+      "apps_web_src_components_connectors_zendeskpicker_tsx",
+      "connectors_zendeskpicker_apifetch"
+    ],
+    "37": [
+      "apps_web_src_components_connectors_drivepicker_tsx",
+      "connectors_drivepicker_apifetch"
+    ],
+    "38": [
+      "analytics_savedashboardmodal_handlesave",
+      "apps_web_src_components_analytics_savedashboardmodal_tsx"
+    ],
+    "39": [
+      "analytics_addwidgetmodal_handleadd",
+      "apps_web_src_components_analytics_addwidgetmodal_tsx"
+    ],
+    "40": [
+      "apps_api_src_lib_servercatalog_ts",
+      "lib_servercatalog_getcatalog"
+    ],
+    "41": [
+      "apps_api_src_lib_clickhouse_ts",
+      "lib_clickhouse_chclient"
+    ],
+    "42": [
+      "apps_api_src_routes_analytics_ts",
+      "routes_analytics_parserecordrows"
+    ],
+    "43": [
+      "apps_api_src_routes_edition_ts",
+      "routes_edition_esc"
+    ],
+    "44": [
+      "apps_api_src_routes_triggers_ts",
+      "routes_triggers_starteventsubscriber"
+    ],
+    "45": [
+      "activities_catalog_evalexpr",
+      "apps_worker_src_activities_catalog_ts"
+    ],
+    "46": [
+      "scripts_gen_worker_keypair_js"
+    ],
+    "47": [
+      "scripts_promote_build_js"
+    ],
+    "48": [
+      "packages_connector_sdk_src_plugin_ts"
+    ],
+    "49": [
+      "packages_connector_sdk_src_runtime_types_ts"
+    ],
+    "50": [
+      "packages_connector_sdk_src_index_ts"
+    ],
+    "51": [
+      "packages_shared_src_catalog_types_ts"
+    ],
+    "52": [
+      "packages_shared_src_types_ts"
+    ],
+    "53": [
+      "packages_shared_src_index_ts"
+    ],
+    "54": [
+      "apps_web_tailwind_config_js"
+    ],
+    "55": [
+      "apps_web_vite_config_ts"
+    ],
+    "56": [
+      "apps_web_postcss_config_js"
+    ],
+    "57": [
+      "apps_web_src_main_tsx"
+    ],
+    "58": [
+      "apps_web_src_catalog_ts"
+    ],
+    "59": [
+      "apps_web_src_components_connectors_sheetpreview_tsx"
+    ],
+    "60": [
+      "apps_web_src_components_analytics_chartrenderer_tsx"
+    ],
+    "61": [
+      "apps_web_src_components_analytics_types_ts"
+    ],
+    "62": [
+      "apps_web_src_pages_stubs_tsx"
+    ],
+    "63": [
+      "apps_api_src_index_ts"
+    ],
+    "64": [
+      "apps_api_src_metrics_ts"
+    ],
+    "65": [
+      "apps_api_src_middleware_tenantpg_ts"
+    ],
+    "66": [
+      "apps_api_src_routes_pipelines_ts"
+    ]
+  },
+  "cohesion": {
+    "0": 0.13,
+    "1": 0.22,
+    "2": 0.13,
+    "3": 0.13,
+    "4": 0.19,
+    "5": 0.18,
+    "6": 0.21,
+    "7": 0.3,
+    "8": 0.43,
+    "9": 0.29,
+    "10": 0.33,
+    "11": 0.48,
+    "12": 0.4,
+    "13": 0.4,
+    "14": 0.4,
+    "15": 0.6,
+    "16": 0.6,
+    "17": 0.6,
+    "18": 0.5,
+    "19": 0.5,
+    "20": 0.83,
+    "21": 0.5,
+    "22": 0.83,
+    "23": 0.5,
+    "24": 0.67,
+    "25": 0.67,
+    "26": 0.67,
+    "27": 0.67,
+    "28": 0.67,
+    "29": 1.0,
+    "30": 1.0,
+    "31": 1.0,
+    "32": 1.0,
+    "33": 1.0,
+    "34": 1.0,
+    "35": 1.0,
+    "36": 1.0,
+    "37": 1.0,
+    "38": 1.0,
+    "39": 1.0,
+    "40": 1.0,
+    "41": 1.0,
+    "42": 1.0,
+    "43": 1.0,
+    "44": 1.0,
+    "45": 1.0,
+    "46": 1.0,
+    "47": 1.0,
+    "48": 1.0,
+    "49": 1.0,
+    "50": 1.0,
+    "51": 1.0,
+    "52": 1.0,
+    "53": 1.0,
+    "54": 1.0,
+    "55": 1.0,
+    "56": 1.0,
+    "57": 1.0,
+    "58": 1.0,
+    "59": 1.0,
+    "60": 1.0,
+    "61": 1.0,
+    "62": 1.0,
+    "63": 1.0,
+    "64": 1.0,
+    "65": 1.0,
+    "66": 1.0
+  },
+  "gods": [
+    {
+      "id": "lib_crypto_subtle",
+      "label": "subtle()",
+      "degree": 14
+    },
+    {
+      "id": "pages_auth_submit",
+      "label": "submit()",
+      "degree": 13
+    },
+    {
+      "id": "src_db_withtenant",
+      "label": "withTenant()",
+      "degree": 11
+    },
+    {
+      "id": "src_registry_connectorregistry",
+      "label": "ConnectorRegistry",
+      "degree": 8
+    },
+    {
+      "id": "src_temporal_fireexecution",
+      "label": "fireExecution()",
+      "degree": 7
+    },
+    {
+      "id": "lib_crypto_encryptwithkey",
+      "label": "encryptWithKey()",
+      "degree": 6
+    },
+    {
+      "id": "routes_ai_build",
+      "label": "build()",
+      "degree": 6
+    },
+    {
+      "id": "activities_index_fetchsourcepage",
+      "label": "fetchSourcePage()",
+      "degree": 6
+    },
+    {
+      "id": "connectors_oauth_client_getoauthtoken",
+      "label": "getOAuthToken()",
+      "degree": 6
+    },
+    {
+      "id": "connectors_oauth_client_ensurefresh",
+      "label": "ensureFresh()",
+      "degree": 6
+    }
+  ],
+  "surprises": [
+    {
+      "source": "httpFetch()",
+      "target": "runHttpSource()",
+      "source_files": [
+        "apps/worker/src/activities/connectors/http.ts",
+        "packages/connector-sdk/src/executor.ts"
+      ],
+      "confidence": "INFERRED",
+      "relation": "calls",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories"
+    },
+    {
+      "source": "build()",
+      "target": "definitionToMermaid()",
+      "source_files": [
+        "apps/api/src/routes/ai.ts",
+        "packages/shared/src/mermaid.ts"
+      ],
+      "confidence": "INFERRED",
+      "relation": "calls",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories"
+    },
+    {
+      "source": "onMermaidChange()",
+      "target": "mermaidToDefinition()",
+      "source_files": [
+        "apps/web/src/pages/AIBuilderPage.tsx",
+        "packages/shared/src/mermaid.ts"
+      ],
+      "confidence": "INFERRED",
+      "relation": "calls",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories"
+    },
+    {
+      "source": "submit()",
+      "target": "setAccessToken()",
+      "source_files": [
+        "apps/web/src/pages/auth.tsx",
+        "apps/web/src/api.ts"
+      ],
+      "confidence": "INFERRED",
+      "relation": "calls",
+      "why": "inferred connection - not explicitly stated in source; bridges separate communities; peripheral node `setAccessToken()` unexpectedly reaches hub `submit()`"
+    },
+    {
+      "source": "submit()",
+      "target": "generateMnemonic()",
+      "source_files": [
+        "apps/web/src/pages/auth.tsx",
+        "apps/web/src/lib/bip39.ts"
+      ],
+      "confidence": "INFERRED",
+      "relation": "calls",
+      "why": "inferred connection - not explicitly stated in source; bridges separate communities; peripheral node `generateMnemonic()` unexpectedly reaches hub `submit()`"
+    }
+  ],
+  "questions": [
+    {
+      "type": "bridge_node",
+      "question": "Why does `withTenant()` connect `Community 0` to `Community 7`?",
+      "why": "High betweenness centrality (0.008) - this node is a cross-community bridge."
+    },
+    {
+      "type": "bridge_node",
+      "question": "Why does `submit()` connect `Community 1` to `Community 12`, `Community 14`?",
+      "why": "High betweenness centrality (0.007) - this node is a cross-community bridge."
+    },
+    {
+      "type": "bridge_node",
+      "question": "Why does `fireExecution()` connect `Community 7` to `Community 0`?",
+      "why": "High betweenness centrality (0.003) - this node is a cross-community bridge."
+    },
+    {
+      "type": "verify_inferred",
+      "question": "Are the 12 inferred relationships involving `submit()` (e.g. with `generateDEK()` and `randomBytes()`) actually correct?",
+      "why": "`submit()` has 12 INFERRED edges - model-reasoned connections that need verification."
+    },
+    {
+      "type": "verify_inferred",
+      "question": "Are the 9 inferred relationships involving `withTenant()` (e.g. with `fireExecution()` and `auditLog()`) actually correct?",
+      "why": "`withTenant()` has 9 INFERRED edges - model-reasoned connections that need verification."
+    },
+    {
+      "type": "verify_inferred",
+      "question": "Are the 3 inferred relationships involving `fireExecution()` (e.g. with `assertWithinQuota()` and `withTenant()`) actually correct?",
+      "why": "`fireExecution()` has 3 INFERRED edges - model-reasoned connections that need verification."
+    },
+    {
+      "type": "isolated_nodes",
+      "question": "What connects `OllamaUnavailableError` to the rest of the system?",
+      "why": "1 weakly-connected nodes found - possible documentation gaps or missing edges."
+    }
+  ]
+}

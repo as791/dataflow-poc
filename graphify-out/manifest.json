@@ -1,0 +1,458 @@
+{
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/scripts/gen-worker-keypair.js": {
+    "mtime": 1782242239.3938344,
+    "hash": "69e4e41aae24d12f811e193ed3298a93"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/scripts/promote-build.js": {
+    "mtime": 1781083003.0,
+    "hash": "dd4dd5e74756397dae2d7c49fd18aae9"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/packages/connector-sdk/src/executor.test.ts": {
+    "mtime": 1782241711.092917,
+    "hash": "d0f3bcc19ba65867fe6ab5af87a78ad4"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/packages/connector-sdk/src/executor.ts": {
+    "mtime": 1782241711.0930226,
+    "hash": "1a932332b353718d24eaa638d059b4ec"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/packages/connector-sdk/src/plugin.ts": {
+    "mtime": 1782241711.0934076,
+    "hash": "e683771ad3e54c3891022ec0429bfcbe"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/packages/connector-sdk/src/runtime-types.ts": {
+    "mtime": 1782241711.0936048,
+    "hash": "3bd06529ecdb45bba7bc37c555c9027c"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/packages/connector-sdk/src/registry.ts": {
+    "mtime": 1782241711.093501,
+    "hash": "888a7eeee12d1f9214965fbc56781da7"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/packages/connector-sdk/src/manifest.ts": {
+    "mtime": 1782241711.0931897,
+    "hash": "898845db3767c395292a6f8122e32e0b"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/packages/connector-sdk/src/index.ts": {
+    "mtime": 1782241711.0931058,
+    "hash": "a7043547f54a40b8a585cd8b4dedab6d"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/packages/shared/src/mermaid.test.ts": {
+    "mtime": 1782241711.0942316,
+    "hash": "37464f3faf79db5859806aae0e18c749"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/packages/shared/src/catalog-types.ts": {
+    "mtime": 1782241711.0940309,
+    "hash": "cc92735d1aad749350ba7873af4a5e53"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/packages/shared/src/types.ts": {
+    "mtime": 1782241711.0945482,
+    "hash": "0f98dfe785ca692957c75c2b7605054d"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/packages/shared/src/mermaid.ts": {
+    "mtime": 1782241711.0943253,
+    "hash": "1bac962b58f0016d31848b54c0ce3d54"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/packages/shared/src/index.ts": {
+    "mtime": 1782241711.0941489,
+    "hash": "f22e3250cb78537c54c25f77ba67f259"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/db/003_rls.sql": {
+    "mtime": 1781431224.852601,
+    "hash": "6d3fb9265493a60b574980b9b5069e0a"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/db/004_oauth.sql": {
+    "mtime": 1781447196.874561,
+    "hash": "2f442483c7de013d5f3da56ba5a26b09"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/db/008_environments.sql": {
+    "mtime": 1782241711.091431,
+    "hash": "e542c718cf2a42d7280db8de8ecf9657"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/db/006_dashboards.sql": {
+    "mtime": 1781448057.787332,
+    "hash": "49828e257aed176fe3eac93a0aa894b1"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/db/001_init.sql": {
+    "mtime": 1781430956.019023,
+    "hash": "00a10e832d7155640d71cf3202117688"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/db/005_billing.sql": {
+    "mtime": 1781447217.466268,
+    "hash": "a82d413012a6b1eb3b259e7b453d5df8"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/db/002_auth.sql": {
+    "mtime": 1781430971.1204176,
+    "hash": "87b54b1d86f03a3ee26b932407187771"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/db/007_kms.sql": {
+    "mtime": 1781448058.1739917,
+    "hash": "0ee62ce22a5c499a76e0a754d43df388"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/db/clickhouse/init.sql": {
+    "mtime": 1781727506.2613506,
+    "hash": "b3329b115be870aaf9da05947025cc81"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/tailwind.config.js": {
+    "mtime": 1781429198.2781472,
+    "hash": "004c1b466edf0bba78011d8b6cb5e3e4"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/vite.config.ts": {
+    "mtime": 1782241711.0903327,
+    "hash": "2f5d559b16c7471de4d630f30435fe79"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/postcss.config.js": {
+    "mtime": 1781429199.5187976,
+    "hash": "c735540bb63936a123bc867d950c9f69"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/App.tsx": {
+    "mtime": 1782241711.0888548,
+    "hash": "102e13b32c2e2856bd6cf78ec35b3c76"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/main.tsx": {
+    "mtime": 1781429250.0463808,
+    "hash": "4d4ff13545f32e3d909132d4d61b28c4"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/api.ts": {
+    "mtime": 1782241711.089061,
+    "hash": "9a26cc6c326c7592f1ee9b6d87f11a61"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/catalog.ts": {
+    "mtime": 1782241711.0893083,
+    "hash": "efb5ed94c769ce1d19303f14c70c29ea"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/context/AuthContext.tsx": {
+    "mtime": 1781637661.3349993,
+    "hash": "c8fc1595c97cde8593f9e19d30a99a5e"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/context/CatalogContext.tsx": {
+    "mtime": 1782241711.0897017,
+    "hash": "50c5d07deb1b83d5e49294fb30f847bc"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/components/RecoveryPhraseModal.tsx": {
+    "mtime": 1781448127.69337,
+    "hash": "6b9a00cb16bb04b5595d361c40cd624a"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/components/ProtectedRoute.tsx": {
+    "mtime": 1781446336.958586,
+    "hash": "d73ab7b2e0dc64a1e20fde051ae0e093"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/components/AppShell.tsx": {
+    "mtime": 1782241711.0895596,
+    "hash": "053e6a17d98c7a17b5f96368c733a3e5"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/components/MermaidPreview.tsx": {
+    "mtime": 1782241711.0896292,
+    "hash": "702ca9c8938d327064ed078968b5dfe3"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/components/connectors/SheetPicker.tsx": {
+    "mtime": 1781637556.1508172,
+    "hash": "e30251af82542bf6d53bfa8f5b73a487"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/components/connectors/ExcelPicker.tsx": {
+    "mtime": 1781637584.223956,
+    "hash": "60025889ca34b0bf872b0da70ac3a499"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/components/connectors/ZendeskPicker.tsx": {
+    "mtime": 1781637594.860414,
+    "hash": "2823de9adabd2e0c6e40b38ff46e3a0a"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/components/connectors/DrivePicker.tsx": {
+    "mtime": 1781637565.0729442,
+    "hash": "12f6b555f0d233c9e8ad9ab0ec19f519"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/components/connectors/SheetPreview.tsx": {
+    "mtime": 1781637532.0159676,
+    "hash": "78eb99c332650c43b52e6770d0c82890"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/components/analytics/SaveDashboardModal.tsx": {
+    "mtime": 1781637718.1275742,
+    "hash": "58be6a78283bd9c4ebbb0b73ad839d93"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/components/analytics/ChartRenderer.tsx": {
+    "mtime": 1781637689.6589158,
+    "hash": "4c6c3c43df08c1edabb8ff38445fdabe"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/components/analytics/types.ts": {
+    "mtime": 1781637535.7708788,
+    "hash": "c25960daa3262a6dd65c52f112251b68"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/components/analytics/AddWidgetModal.tsx": {
+    "mtime": 1781637707.5470564,
+    "hash": "44814505af1316432aaa10539b9154d8"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/lib/bip39.ts": {
+    "mtime": 1781448108.5867136,
+    "hash": "56e38ff5ea440cf769c0486ea5407b43"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/lib/crypto.ts": {
+    "mtime": 1781448090.4855256,
+    "hash": "ab4d4ac77e393eae69454adeaa5a95a3"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/pages/auth.tsx": {
+    "mtime": 1781448195.9521627,
+    "hash": "b8bc3e9969ce81cae3996bfd3c76471c"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/pages/AnalyticsPage.tsx": {
+    "mtime": 1781637762.7792587,
+    "hash": "a1a3963715ddd2bbf8ee6cc7e19cfb21"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/pages/PipelineCanvasPage.tsx": {
+    "mtime": 1782241711.0900178,
+    "hash": "a6fa110a132157e05741daf6bff27316"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/pages/BillingPage.tsx": {
+    "mtime": 1781447393.3887413,
+    "hash": "69b6894462cdfe27e2f5fc56410bb696"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/pages/TeamPage.tsx": {
+    "mtime": 1781446328.6849806,
+    "hash": "5bda34b9bc43450974b6f864f5ecd3a3"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/pages/ConnectorsPage.tsx": {
+    "mtime": 1781448125.886483,
+    "hash": "046826ce9d81a61e78ef3a4d07c56b7c"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/pages/stubs.tsx": {
+    "mtime": 1781448229.9254029,
+    "hash": "72e6c6983243ecefea84dcdecd84a4cb"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/src/pages/AIBuilderPage.tsx": {
+    "mtime": 1782241711.0897722,
+    "hash": "c3f707d8c8210960ee28f2f61b14780d"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/index.ts": {
+    "mtime": 1782241711.0862796,
+    "hash": "579e2ba415242184490796b2b3051972"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/temporal-data-converter.ts": {
+    "mtime": 1781637172.4491088,
+    "hash": "530d7c99eeffb54f1e3dd586ad4ee66a"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/temporal.ts": {
+    "mtime": 1782241711.0886295,
+    "hash": "51264181574043a3afc5abd24a6ab554"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/db.ts": {
+    "mtime": 1781640956.2194524,
+    "hash": "1ec796029bedb818d26b446966444e3d"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/metrics.ts": {
+    "mtime": 1781083060.0,
+    "hash": "5cddc1a1754435eaf6e234ff103e5259"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/middleware/tenantPg.ts": {
+    "mtime": 1781431054.1558216,
+    "hash": "a25e1092cd151eac4d8665d938ba8676"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/middleware/rateLimit.ts": {
+    "mtime": 1781431076.0869412,
+    "hash": "f623c61e76e7a40ff6645712fa5d13f2"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/middleware/quota.ts": {
+    "mtime": 1781447233.303019,
+    "hash": "3ce36d2e3d4dc4c6b6a145cea3c4beb7"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/middleware/audit.ts": {
+    "mtime": 1781431070.2998521,
+    "hash": "31d48d6b73c04b7dc1f96f33acf94129"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/middleware/auth.ts": {
+    "mtime": 1781431062.5948915,
+    "hash": "2a3953619567dadfef36375c32670c0a"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/lib/queryBuilder.ts": {
+    "mtime": 1781448088.5096803,
+    "hash": "fddc4218a2634ab776a9366e0bfd0b93"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/lib/ollama.ts": {
+    "mtime": 1782241711.0864902,
+    "hash": "4ac7d2323fd258e10adc5056cf7cf6f4"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/lib/serverCatalog.ts": {
+    "mtime": 1782241711.0866072,
+    "hash": "7665a8db6ab3c330ceb4f96568ae1dc5"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/lib/edition.ts": {
+    "mtime": 1782241711.086407,
+    "hash": "3eab645eeff95ce54bc52e0c3fb8ed1f"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/lib/clickhouse.ts": {
+    "mtime": 1781448048.7072728,
+    "hash": "fd0f72d6389d372bada917aaef659251"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/lib/validatePipeline.ts": {
+    "mtime": 1782241711.0866787,
+    "hash": "e31e68ef67b9627ecbe05ba2781c08f1"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/routes/pipelines.ts": {
+    "mtime": 1782241711.0877037,
+    "hash": "f92bd09893a143dd70ddf27d78ec3a33"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/routes/analytics.ts": {
+    "mtime": 1781448135.2371078,
+    "hash": "ce9e3c3e20142725d251392e4f29f1f7"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/routes/edition.ts": {
+    "mtime": 1782241711.0871544,
+    "hash": "2e92fa0ad9ce3ca8770e65106111141a"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/routes/team.ts": {
+    "mtime": 1781431166.6993916,
+    "hash": "56544b833509da1478e9b915491a85eb"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/routes/ai.ts": {
+    "mtime": 1782241711.0867767,
+    "hash": "849196b9e6d0dd368ca5e953e1fe5875"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/routes/billing.ts": {
+    "mtime": 1781447298.1548545,
+    "hash": "a43ba1d7461bac4e8a706da1fcb3ec1d"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/routes/triggers.ts": {
+    "mtime": 1782241711.088047,
+    "hash": "b1e9e369c68a8cd31eb6fb97de4b6168"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/routes/connectors.ts": {
+    "mtime": 1782241711.0870516,
+    "hash": "b2a6e2b976590acb639d9b58448100f9"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/routes/auth.ts": {
+    "mtime": 1781448239.6550863,
+    "hash": "6fb13576a09458ce0868241a31dd8922"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/routes/executions.ts": {
+    "mtime": 1782241711.087385,
+    "hash": "2b28c639b12a3b48c5f47358dbbd83e2"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/email/mailer.ts": {
+    "mtime": 1781448232.7920008,
+    "hash": "fe710ed64284a6b2bdf7cb7bd8d45b20"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/services/usage.ts": {
+    "mtime": 1782241711.0883946,
+    "hash": "f392cf26e12690a0eec3d4343673b2a5"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/worker/src/otel.ts": {
+    "mtime": 1781082875.0,
+    "hash": "829c6a7e728f72f7e669ffdcca5e28f1"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/worker/src/temporal-data-converter.ts": {
+    "mtime": 1781637121.80053,
+    "hash": "94036cffd06e1236df2e9f2e5476712f"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/worker/src/worker.ts": {
+    "mtime": 1782241711.0911736,
+    "hash": "fe630b96025b05773cabe984d44daf7b"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/worker/src/workflows/dynamic-dag.ts": {
+    "mtime": 1781083003.0,
+    "hash": "0150ee276dd2e8ee93d2bdda9061a3df"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/worker/src/activities/crypto.ts": {
+    "mtime": 1781448268.176858,
+    "hash": "99cbafb975f98bff12f009d43351ad0c"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/worker/src/activities/index.ts": {
+    "mtime": 1781641694.2293494,
+    "hash": "8b06cab2d4101c5b5bb5f69aa5d0c16f"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/worker/src/activities/clickhouse.ts": {
+    "mtime": 1781447356.0876384,
+    "hash": "ac2788a1ec701ae492a75995f6795e2b"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/worker/src/activities/db.ts": {
+    "mtime": 1781641675.082203,
+    "hash": "64496c23b896ea06887435b590729559"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/worker/src/activities/catalog.ts": {
+    "mtime": 1782241711.0908499,
+    "hash": "031475f278beb384d787922e059628b5"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/worker/src/activities/connectors/gsheets.ts": {
+    "mtime": 1781447341.7061937,
+    "hash": "9b27b4826091046ac2ee3273218660e6"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/worker/src/activities/connectors/gdrive.ts": {
+    "mtime": 1781447351.717315,
+    "hash": "c3fea9d1cc06342796e2ada0d1d14c84"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/worker/src/activities/connectors/http.ts": {
+    "mtime": 1782241711.090974,
+    "hash": "21746a794ee9900f768aa03ea001fc69"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/worker/src/activities/connectors/excel.ts": {
+    "mtime": 1781447370.5041933,
+    "hash": "d3187160fc3951c59345acdaf003753d"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/worker/src/activities/connectors/zendesk.ts": {
+    "mtime": 1781447360.269311,
+    "hash": "b1364475167977a2dce9065a50955d9a"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/worker/src/activities/connectors/oauth-client.ts": {
+    "mtime": 1781641493.4262748,
+    "hash": "2942ccee694092cf3d0ced9c67fcc057"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/docker-compose.override.yml": {
+    "mtime": 1782326250.4016829,
+    "hash": "8bcb52dadfc4eb5db00da5e83bc38db7"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/README.md": {
+    "mtime": 1782241711.0857246,
+    "hash": "c8c56b7023202a80d896b647ddef760a"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/CONTRIBUTING.md": {
+    "mtime": 1782241711.0853164,
+    "hash": "8d5ba8850050d25467de1534ea4ab757"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/docker-compose.yml": {
+    "mtime": 1782241711.0917454,
+    "hash": "88726580447bff01ec16ccd715c5fe39"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/connectors/manifests/README.md": {
+    "mtime": 1782241711.0913432,
+    "hash": "c20596ee2adaf8b7ffe6507b32c541d1"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/docs/AI_BUILDER.md": {
+    "mtime": 1782241711.0918489,
+    "hash": "a73972658c3d1c865deb674f8ee64824"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/docs/SETUP.md": {
+    "mtime": 1781447413.1085954,
+    "hash": "235de05ca30c879df90815b637b35dba"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/docs/CONNECTORS.md": {
+    "mtime": 1782241711.0919762,
+    "hash": "b3dc1e2ddad259a0af2c73e53d5a1373"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/docs/PLAN.md": {
+    "mtime": 1781637190.6443045,
+    "hash": "61a7eb49710fa7918f05a03304fa08b3"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/observability/otel-collector.yml": {
+    "mtime": 1781082848.0,
+    "hash": "2ba835cb514cc07fa8e8bed4213dc99b"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/observability/grafana-datasources.yml": {
+    "mtime": 1781448327.0418706,
+    "hash": "3e2a12560e2b2d8e1e4d19717b2805b2"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/observability/prometheus.yml": {
+    "mtime": 1781097315.0,
+    "hash": "bdc6cc4f2c9bcafafeca9888ad5f194d"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/observability/grafana-dashboards.yml": {
+    "mtime": 1781082848.0,
+    "hash": "2ecf70a8d38f8877bde124706f3075ec"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/web/index.html": {
+    "mtime": 1781083079.0,
+    "hash": "cb813fabcefce3fface8c2efa2d8a2a9"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/email/templates/invite.html": {
+    "mtime": 1781431092.3135786,
+    "hash": "a0094d58b424f71cfa6ae67e91a7633d"
+  },
+  "/Users/aryaman.sinha/Downloads/dataflow-poc/apps/api/src/email/templates/verify.html": {
+    "mtime": 1781431088.0564282,
+    "hash": "7643cb6bc7b0ae825c03768a900d6158"
+  }
+}

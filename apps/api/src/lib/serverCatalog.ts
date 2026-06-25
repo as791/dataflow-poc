@@ -21,9 +21,9 @@ export const serverCatalog: CatalogEntry[] = [
     fields: [{ key: 'url', label: 'URL', type: 'text' }, { key: 'recordsPath', label: 'Records path', type: 'text' }] },
   // ── Transforms ──
   { activityType: 'transform.map', nodeType: 'transform', label: 'Map', color: '',
-    fields: [{ key: 'expression', label: 'Expression (r => …)', type: 'textarea' }] },
+    fields: [{ key: 'expression', label: 'Safe projection expression', type: 'textarea' }] },
   { activityType: 'transform.filter', nodeType: 'transform', label: 'Filter', color: '',
-    fields: [{ key: 'predicate', label: 'Predicate', type: 'textarea' }] },
+    fields: [{ key: 'predicate', label: 'Safe predicate', type: 'textarea' }] },
   { activityType: 'transform.rename', nodeType: 'transform', label: 'Rename', color: '',
     fields: [{ key: 'mapping', label: 'Field mapping (JSON)', type: 'textarea' }] },
   { activityType: 'transform.dedupe', nodeType: 'transform', label: 'Dedupe', color: '',

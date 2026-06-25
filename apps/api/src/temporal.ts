@@ -1,8 +1,9 @@
 import { Connection, Client } from '@temporalio/client';
+import { randomUUID } from 'crypto';
 import { encryptedDataConverter } from './temporal-data-converter';
 import type { PipelineDefinition, DynamicWorkflowInput, DataRef, Environment } from '@dataflow/shared';
 import { pool, withTenant } from './db';
-import { incrementUsage, assertWithinQuota } from './services/usage';
+import { consumeExecutionQuota, releaseExecutionQuota } from './services/usage';
 
 // ─── Per-environment Temporal wiring ───────────────────────────────────────
 // M3: each environment ('test' | 'prod') is its own Temporal namespace and task
@@ -29,32 +30,42 @@ export async function temporal(namespace = process.env.TEMPORAL_NAMESPACE ?? 'de
 export async function fireExecution(
   def: PipelineDefinition, pipelineRowId: string,
   triggerType: string, env: Environment = 'test', payloadRef?: DataRef,
+  encryptedDek?: string,
 ): Promise<string> {
   // Central enforcement so EVERY trigger path (manual, webhook, event) is
   // capped — not just manual runs gated by requireQuota. Throws before any
   // workflow starts, so an over-quota tenant never consumes a unit.
-  await assertWithinQuota(def.tenantId);
-  const executionId = `exec-${def.id}-${Date.now()}`;
+  await consumeExecutionQuota(def.tenantId);
+  const executionId = `exec-${randomUUID()}`;
   const input: DynamicWorkflowInput = {
     definition: def,                                  // frozen — replay safe
     tenantId: def.tenantId,
     executionId,
     trigger: { type: triggerType, payloadRef, firedAt: new Date().toISOString() },
+    encryptedDek,
   };
   const c = await temporal(namespaceFor(env));
-  await c.workflow.start('DynamicDAGWorkflow', {
-    args: [input], taskQueue: taskQueueFor(env), workflowId: executionId,
-  });
-  // Must run inside withTenant so the RLS policy on `executions` resolves correctly.
-  await withTenant(def.tenantId, client => client.query(
-    `INSERT INTO executions (id, pipeline_id, tenant_id, trigger_type, build_id, environment)
-     VALUES ($1,$2,$3,$4,$5,$6)`,
-    [executionId, pipelineRowId, def.tenantId, triggerType, process.env.BUILD_ID ?? null, env]));
-  // Phase 3 metering. Central call so cron-triggered executions
-  // (which fire from inside Temporal, not via an Express route) also count.
-  // requireQuota gates *before* this on the routes that have a request context.
-  await incrementUsage(def.tenantId);
-  return executionId;
+  let handle: Awaited<ReturnType<typeof c.workflow.start>> | undefined;
+  try {
+    const started = await c.workflow.start('DynamicDAGWorkflow', {
+      args: [input], taskQueue: taskQueueFor(env), workflowId: executionId,
+    });
+    handle = started;
+    // Must run inside withTenant so the RLS policy on `executions` resolves correctly.
+    await withTenant(def.tenantId, client => client.query(
+      `INSERT INTO executions
+         (id, pipeline_id, tenant_id, trigger_type, build_id, environment, workflow_id, run_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        executionId, pipelineRowId, def.tenantId, triggerType,
+        process.env.BUILD_ID ?? null, env, executionId, started.firstExecutionRunId,
+      ]));
+    return executionId;
+  } catch (error) {
+    await handle?.terminate('execution metadata insert failed').catch(() => {});
+    await releaseExecutionQuota(def.tenantId).catch(() => {});
+    throw error;
+  }
 }
 
 // ─── Cron trigger → Temporal Schedule (defined inside the pipeline itself) ───
@@ -75,10 +86,13 @@ export async function syncSchedule(def: PipelineDefinition, pipelineRowId: strin
       taskQueue: taskQueueFor(env),
       args: [{
         definition: def, tenantId: def.tenantId,
-        executionId: `exec-${def.id}-${env}-{{.ScheduledTime.Unix}}`,
-        trigger: { type: 'cron', firedAt: new Date().toISOString() },
+        executionId: '',
+        pipelineRowId,
+        environment: env,
+        trigger: { type: 'cron', firedAt: '' },
       }],
-      workflowId: `exec-${def.id}-${env}-cron`,
+      workflowId: `schedule-${def.id}-${env}`,
+      workflowIdReusePolicy: 'ALLOW_DUPLICATE',
     },
     policies: { overlap: 'SKIP' },  // never double-run the same pipeline
   } as any);

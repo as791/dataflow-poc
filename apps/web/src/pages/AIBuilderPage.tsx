@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { ArrowRight, Code2, Sparkles, WandSparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { mermaidToDefinition } from '@dataflow/shared';
 import { useCatalog } from '../context/CatalogContext';
@@ -63,16 +64,17 @@ export default function AIBuilderPage() {
   }, [definition]);
 
   return (
-    <div className="grid h-[calc(100vh-56px)]" style={{ gridTemplateColumns: '320px 1fr 240px' }}>
+    <div className="grid h-[calc(100vh-64px)] bg-black/10" style={{ gridTemplateColumns: '340px 1fr 260px' }}>
       {/* ── Prompt ── */}
-      <div className="border-r border-white/10 p-4 overflow-auto flex flex-col gap-3">
-        <h2 className="text-sm font-semibold m-0">Describe your pipeline</h2>
+      <div className="flex flex-col gap-3 overflow-auto border-r border-white/[0.07] bg-white/[0.018] p-5">
+        <span className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl border border-brand-300/20 bg-brand-500/10 text-brand-300"><Sparkles size={18} /></span>
+        <h2 className="m-0 text-sm font-semibold">Describe pipeline</h2>
         <textarea className="glass-input h-40 text-[13px]" value={prompt}
           onChange={e => setPrompt(e.target.value)}
           placeholder="e.g. Every hour, fetch new GitHub issues, keep only open ones, and send them to a webhook." />
         <div className="flex gap-2">
-          <button className="glass-btn-success flex-1" disabled={busy} onClick={() => generate(false)}>
-            {busy ? '…' : 'Generate'}
+          <button className="glass-btn-primary flex-1" disabled={busy} onClick={() => generate(false)}>
+            <WandSparkles size={15} /> {busy ? 'Generating…' : 'Generate'}
           </button>
           <button className="glass-btn-ghost" disabled={busy || !definition} onClick={() => generate(true)}>
             Refine
@@ -96,8 +98,8 @@ export default function AIBuilderPage() {
       </div>
 
       {/* ── Mermaid editor + preview ── */}
-      <div className="p-4 overflow-auto grid grid-rows-[auto_1fr_1fr] gap-2">
-        <div className="text-xs opacity-70">Mermaid (editable)</div>
+      <div className="grid grid-rows-[auto_1fr_1fr] gap-3 overflow-auto p-5">
+        <div className="flex items-center gap-2 text-xs text-white/45"><Code2 size={14} /> Mermaid source</div>
         <textarea className="glass-input font-mono text-[12px]" value={mermaid}
           onChange={e => onMermaidChange(e.target.value)}
           placeholder="flowchart TD&#10;  src[&quot;Zendesk (zendesk.fetch)&quot;] --> snk[&quot;Postgres sink (sink.postgres)&quot;]" />
@@ -107,7 +109,7 @@ export default function AIBuilderPage() {
       </div>
 
       {/* ── Open in canvas ── */}
-      <div className="border-l border-white/10 p-4 flex flex-col gap-3">
+      <div className="flex flex-col gap-3 border-l border-white/[0.07] bg-white/[0.018] p-5">
         <h3 className="text-sm font-semibold m-0">Review</h3>
         {definition ? (
           <div className="text-[12px] opacity-80 space-y-1">
@@ -116,8 +118,8 @@ export default function AIBuilderPage() {
             {triggerSummary && <div>Trigger: {triggerSummary}</div>}
           </div>
         ) : <div className="text-[12px] opacity-60">Generate a pipeline to begin.</div>}
-        <button className="glass-btn-success mt-2" disabled={!canOpen} onClick={openInCanvas}>
-          Open in canvas →
+        <button className="glass-btn-primary mt-2" disabled={!canOpen} onClick={openInCanvas}>
+          Open in canvas <ArrowRight size={15} />
         </button>
       </div>
     </div>

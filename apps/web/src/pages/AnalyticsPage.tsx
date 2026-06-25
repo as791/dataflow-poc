@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { BarChart3, Plus, Save, X } from 'lucide-react';
 import GridLayout, { Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -147,7 +148,7 @@ export function AnalyticsPage() {
     return (
       <div className="max-w-2xl mx-auto mt-16 px-6">
         <div className="glass-panel p-8 text-center space-y-4">
-          <div className="text-5xl mb-2">📊</div>
+          <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-2xl border border-brand-300/20 bg-brand-500/10 text-brand-300"><BarChart3 size={24} /></div>
           <h1 className="text-xl font-semibold">No datasets yet</h1>
           <p className="text-sm text-white/60 leading-relaxed">
             To use analytics, your pipelines need to push data into ClickHouse collections.
@@ -159,9 +160,9 @@ export function AnalyticsPage() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex h-[calc(100vh-64px)] overflow-hidden">
       {/* Left sidebar */}
-      <aside className="w-56 flex-shrink-0 border-r border-white/10 flex flex-col">
+      <aside className="w-60 flex-shrink-0 border-r border-white/[0.07] bg-white/[0.018] flex flex-col">
         <div className="p-4 border-b border-white/10">
           <h2 className="text-sm font-semibold text-white/80">Datasets</h2>
         </div>
@@ -208,12 +209,12 @@ export function AnalyticsPage() {
           </div>
           <div className="flex items-center gap-2">
             {error && <span className="text-xs text-danger/80 max-w-xs truncate">{error}</span>}
-            <button className="glass-btn-ghost text-sm" onClick={() => setShowAddModal(true)}>+ Add widget</button>
+            <button className="glass-btn-ghost text-sm" onClick={() => setShowAddModal(true)}><Plus size={15} /> Add widget</button>
             <button
               className={`glass-btn-primary text-sm ${!dirty ? 'opacity-50' : ''}`}
               onClick={() => setShowSaveModal(true)}
               disabled={!dirty && !!activeDashboard}>
-              💾 Save
+              <Save size={15} /> Save
             </button>
           </div>
         </div>
@@ -221,10 +222,10 @@ export function AnalyticsPage() {
         <div ref={containerRef} className="flex-1 overflow-auto p-4">
           {widgets.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center space-y-3">
-              <div className="text-4xl opacity-40">📈</div>
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.04] text-white/30"><BarChart3 size={24} /></div>
               <p className="text-white/40 text-sm">No widgets yet.</p>
               <button className="glass-btn-primary text-sm" onClick={() => setShowAddModal(true)}>
-                + Add your first widget
+                <Plus size={15} /> Add first widget
               </button>
             </div>
           ) : (
@@ -251,7 +252,7 @@ export function AnalyticsPage() {
                       onMouseDown={e => e.stopPropagation()}
                       onClick={() => removeWidget(widget.id)}
                       title="Remove">
-                      ✕
+                      <X size={13} />
                     </button>
                   </div>
                   <div className="flex-1 min-h-0 px-1 pb-2">
