@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { UserPlus, Users } from 'lucide-react';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 
@@ -42,13 +43,15 @@ export function TeamPage() {
   const isOwner = user?.role === 'owner';
 
   return (
-    <div className="max-w-3xl mx-auto py-10 px-6">
-      <h1 className="text-2xl font-semibold mb-1">Team</h1>
-      <p className="text-xs opacity-60 mb-6">Manage members and pending invitations.</p>
+    <div className="mx-auto max-w-4xl px-6 py-10">
+      <div className="mb-6">
+        <h1 className="page-heading">Workspace team</h1>
+        <p className="page-subtitle mt-1">Manage members and pending invitations.</p>
+      </div>
 
       {isOwner && (
         <section className="glass-panel p-5 mb-6">
-          <h2 className="text-sm font-semibold mb-3">Invite a teammate</h2>
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><UserPlus size={16} className="text-brand-300" /> Invite teammate</h2>
           <form onSubmit={invite} className="flex flex-wrap gap-2 items-end">
             <label className="glass-label flex-1 min-w-[200px]">Email
               <input className="glass-input" type="email" required value={email}
@@ -61,14 +64,14 @@ export function TeamPage() {
                 <option value="owner">owner</option>
               </select>
             </label>
-            <button className="glass-btn-primary" disabled={busy} type="submit">Send invite</button>
+            <button className="glass-btn-primary" disabled={busy} type="submit"><UserPlus size={15} /> Send invite</button>
           </form>
           {msg && <div className="text-xs opacity-70 mt-3">{msg}</div>}
         </section>
       )}
 
       <section className="glass-panel p-5 mb-6">
-        <h2 className="text-sm font-semibold mb-3">Members ({members.length})</h2>
+        <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Users size={16} className="text-cyan" /> Members ({members.length})</h2>
         <ul className="text-sm divide-y divide-white/5">
           {members.map(m => (
             <li key={m.id} className="py-2 flex justify-between items-center">

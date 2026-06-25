@@ -5,31 +5,33 @@ export default {
     extend: {
       colors: {
         glass: {
-          white: 'rgba(255,255,255,0.08)',
-          border: 'rgba(255,255,255,0.15)',
-          hover: 'rgba(255,255,255,0.13)',
-          active: 'rgba(255,255,255,0.18)',
+          white: 'rgba(255,255,255,0.055)',
+          border: 'rgba(255,255,255,0.09)',
+          hover: 'rgba(255,255,255,0.09)',
+          active: 'rgba(255,255,255,0.13)',
         },
         brand: {
-          400: '#818cf8',
-          500: '#6366f1',
-          600: '#4f46e5',
+          300: '#a89df8',
+          400: '#8c7cf4',
+          500: '#7c6cf2',
+          600: '#6757df',
         },
+        cyan: '#52d6e8',
         success: '#34d399',
         warning: '#fbbf24',
         danger: '#f87171',
       },
       backdropBlur: {
-        glass: '12px',
-        'glass-heavy': '24px',
+        glass: '16px',
+        'glass-heavy': '28px',
       },
       backgroundImage: {
         'canvas-gradient':
-          'radial-gradient(ellipse at 20% 20%, #1e1b4b 0%, transparent 50%), radial-gradient(ellipse at 80% 80%, #312e81 0%, transparent 50%), linear-gradient(135deg, #0f0c29 0%, #1a1639 50%, #0a0820 100%)',
+          'radial-gradient(ellipse at 18% 0%, rgba(124,108,242,.15) 0%, transparent 38%), radial-gradient(ellipse at 90% 82%, rgba(82,214,232,.08) 0%, transparent 34%), linear-gradient(145deg, #080a10 0%, #0b0e17 48%, #080a10 100%)',
       },
       boxShadow: {
-        glass: '0 8px 32px rgba(0,0,0,0.37)',
-        'glass-glow': '0 0 24px rgba(99,102,241,0.4)',
+        glass: '0 18px 50px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.045)',
+        'glass-glow': '0 12px 40px rgba(124,108,242,.22), inset 0 1px 0 rgba(255,255,255,.08)',
       },
       animation: {
         'pulse-glow': 'pulse-glow 2s ease-in-out infinite',

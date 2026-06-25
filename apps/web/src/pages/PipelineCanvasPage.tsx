@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import {
+  AlertCircle, ArrowDownToLine, Braces, Check, CircleDot,
+  Code2, Database, GitFork, Layers3, Merge, MoreHorizontal, PanelLeft,
+  Pause, Play, Rocket, RotateCcw, Save, Search, Settings2, Trash2, X,
+  XCircle,
+} from 'lucide-react';
 import ReactFlow, {
   Background, Controls, MiniMap, addEdge, useNodesState, useEdgesState,
   type Node, type Connection, Handle, Position,
@@ -18,19 +24,37 @@ import { ZendeskPicker } from '../components/connectors/ZendeskPicker';
 function FlowNode({ data }: { data: any }) {
   const { byType } = useCatalog();
   const entry: CatalogEntry = byType[data.activityType];
+  const NodeIcon =
+    data.nodeType === 'source' ? Database
+    : data.nodeType === 'sink' ? ArrowDownToLine
+    : data.nodeType === 'fork' ? GitFork
+    : data.nodeType === 'merge' ? Merge
+    : Braces;
   const statusRing =
-    data.status === 'failed' ? 'ring-2 ring-rose-400/70'
-    : data.status === 'success' ? 'ring-2 ring-emerald-400/60'
+    data.status === 'failed' ? 'ring-1 ring-rose-400/60 shadow-[0_0_24px_rgba(251,113,133,.13)]'
+    : data.status === 'success' ? 'ring-1 ring-emerald-400/50 shadow-[0_0_24px_rgba(52,211,153,.10)]'
     : '';
   return (
-    <div className={`glass-card px-3.5 py-2.5 min-w-[150px] text-[13px] ${statusRing}`}
-         style={{ borderColor: `${entry?.color ?? '#888'}88` }}>
+    <div className={`relative min-w-[176px] overflow-hidden rounded-[14px] border border-white/[0.10] bg-[#11141d]/88 px-3.5 py-3 text-[13px] shadow-[0_16px_35px_rgba(0,0,0,.28)] backdrop-blur-xl transition-all duration-200 hover:-translate-y-0.5 hover:border-white/[0.16] ${statusRing}`}>
+      <div className="absolute inset-y-0 left-0 w-[3px]" style={{ background: entry?.color ?? '#8c7cf4' }} />
       <Handle type="target" position={Position.Left} />
-      <div className="font-semibold" style={{ color: entry?.color }}>{entry?.label ?? data.activityType}</div>
-      <div className="text-[11px] opacity-70">
-        {data.label || data.activityType}
-        {data.status && <span> · {data.status}{data.recordCount != null ? ` · ${data.recordCount} rec` : ''}</span>}
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-8 w-8 items-center justify-center rounded-[10px] border border-white/[0.08] bg-white/[0.045]" style={{ color: entry?.color }}>
+          <NodeIcon size={16} strokeWidth={1.8} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-semibold text-white/90">{data.label || entry?.label || data.activityType}</div>
+          <div className="truncate text-[10px] text-white/35">{entry?.label ?? data.activityType}</div>
+        </div>
+        {data.status && (
+          <span className={`h-2 w-2 rounded-full ${
+            data.status === 'failed' ? 'bg-rose-400'
+            : data.status === 'success' ? 'bg-emerald-400'
+            : 'animate-pulse bg-amber-300'
+          }`} title={data.status} />
+        )}
       </div>
+      {data.recordCount != null && <div className="mt-2 text-[10px] text-white/35">{data.recordCount.toLocaleString()} records</div>}
       <Handle type="source" position={Position.Right} />
     </div>
   );
@@ -61,8 +85,16 @@ function ConfigPanel({ node, onChange, onDelete }: {
   const ing = node.data.ingestion ?? { mode: 'incremental' };
 
   return (
-    <div className="glass-panel p-3 mb-3">
-      <h3 className="m-0 mb-1 text-sm font-semibold">{entry.label}</h3>
+    <div>
+      <div className="mb-5 flex items-center gap-3">
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.05]" style={{ color: entry.color }}>
+          <Settings2 size={18} />
+        </span>
+        <div>
+          <h3 className="m-0 text-sm font-semibold text-white/90">{entry.label}</h3>
+          <p className="text-[11px] text-white/35">{node.data.activityType}</p>
+        </div>
+      </div>
       <label className="glass-label">Label
         <input className="glass-input" value={node.data.label ?? ''}
           onChange={e => onChange(node.id, { label: e.target.value })} />
@@ -92,7 +124,7 @@ function ConfigPanel({ node, onChange, onDelete }: {
       ))}
 
       {entry.supportsIngestion && (
-        <fieldset className="border border-white/10 rounded-md p-2 my-2">
+        <fieldset className="my-4 rounded-[14px] border border-white/[0.08] bg-black/10 p-3">
           <legend className="text-[11px] opacity-70 px-1">Ingestion mode</legend>
           <select className="glass-select" value={ing.mode}
             onChange={e => onChange(node.id, { ingestion: { ...ing, mode: e.target.value } })}>
@@ -114,15 +146,17 @@ function ConfigPanel({ node, onChange, onDelete }: {
         </fieldset>
       )}
 
-      <button className="glass-btn-danger w-full mt-2" onClick={() => onDelete(node.id)}>Delete node</button>
+      <button className="glass-btn-danger mt-4 w-full" onClick={() => onDelete(node.id)}>
+        <Trash2 size={15} /> Delete node
+      </button>
     </div>
   );
 }
 
 function TriggerEditor({ trigger, onChange }: { trigger: any; onChange: (t: any) => void }) {
   return (
-    <div className="flex gap-2 items-center flex-wrap">
-      <span className="text-xs opacity-70">Trigger:</span>
+    <div className="flex items-center gap-2">
+      <CircleDot size={14} className="text-white/35" />
       <select className="glass-select w-auto" value={trigger.type}
         onChange={e => onChange({ type: e.target.value,
           ...(e.target.value === 'cron' ? { schedule: '*/5 * * * *' } : {}),
@@ -141,7 +175,7 @@ function TriggerEditor({ trigger, onChange }: { trigger: any; onChange: (t: any)
           onChange={e => onChange({ ...trigger, path: e.target.value })} placeholder="hook path" />
         <input className="glass-input w-auto" value={trigger.secret}
           onChange={e => onChange({ ...trigger, secret: e.target.value })} placeholder="HMAC secret" />
-        <code className="text-[10px] opacity-60">POST /api/hooks/{trigger.path}</code>
+        <code className="hidden text-[10px] opacity-60 xl:inline">POST /api/hooks/{trigger.path}</code>
       </>}
       {trigger.type === 'event' &&
         <input className="glass-input w-auto" value={trigger.topic}
@@ -175,13 +209,20 @@ function ExecutionMonitor({ executionId, onNodeStatus }: {
     : status?.phase === 'completed' ? 'text-emerald-400'
     : 'text-amber-400';
   return (
-    <div className="glass-panel p-3 max-h-52 overflow-auto">
-      <div className="text-xs">
-        <b>{executionId.slice(0, 30)}…</b> — <span className={phaseColor}>{status?.phase ?? 'starting'}</span>
+    <div className="glass-panel flex items-center gap-3 rounded-[14px] px-3 py-2.5 shadow-glass-glow">
+      <span className={`flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.055] ${phaseColor}`}>
+        {status?.phase === 'completed' ? <Check size={15} />
+          : status?.phase === 'failed' ? <AlertCircle size={15} />
+          : <CircleDot size={15} className="animate-pulse" />}
+      </span>
+      <div className="min-w-[150px]">
+        <div className="text-xs font-medium text-white/85">{status?.phase ?? 'starting'}</div>
+        <div className="max-w-[190px] truncate font-mono text-[9px] text-white/30">{executionId}</div>
       </div>
-      <div className="flex gap-1.5 my-2">
-        {['pause', 'resume', 'cancel'].map(a =>
-          <button key={a} className="glass-btn-ghost text-xs" onClick={() => api.signal(executionId, a)}>{a}</button>)}
+      <div className="flex gap-1">
+        <button className="icon-button h-8 w-8" title="Pause" onClick={() => api.signal(executionId, 'pause')}><Pause size={14} /></button>
+        <button className="icon-button h-8 w-8" title="Resume" onClick={() => api.signal(executionId, 'resume')}><RotateCcw size={14} /></button>
+        <button className="icon-button h-8 w-8 hover:text-rose-300" title="Cancel" onClick={() => api.signal(executionId, 'cancel')}><XCircle size={14} /></button>
       </div>
     </div>
   );
@@ -234,6 +275,9 @@ export default function PipelineCanvasPage() {
   const [executionId, setExecutionId] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [showMermaid, setShowMermaid] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(true);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState('');
   const [mermaidDraft, setMermaidDraft] = useState('');
 
   // Hydrate from the AI builder ("Open in canvas" passes the definition in
@@ -348,73 +392,130 @@ export default function PipelineCanvasPage() {
 
   const palette = useMemo(() => {
     const groups: Record<string, CatalogEntry[]> = {};
-    catalog.forEach(c => (groups[c.nodeType] ??= []).push(c));
+    catalog
+      .filter(c => !paletteQuery || `${c.label} ${c.activityType}`.toLowerCase().includes(paletteQuery.toLowerCase()))
+      .forEach(c => (groups[c.nodeType] ??= []).push(c));
     return groups;
-  }, [catalog]);
+  }, [catalog, paletteQuery]);
 
   return (
-    <div className="grid h-[calc(100vh-56px)]" style={{ gridTemplateColumns: '200px 1fr 300px', gridTemplateRows: '56px 1fr' }}>
-      <div className="col-span-3 flex items-center gap-2.5 px-4 border-b border-white/10 glass-panel rounded-none">
-        <input className="glass-input w-56" value={name} onChange={e => setName(e.target.value)} />
-        <TriggerEditor trigger={trigger} onChange={setTrigger} />
-        <div className="flex-1" />
-        <button className="glass-btn-ghost"
-          onClick={() => (showMermaid ? setShowMermaid(false) : openMermaidPanel())}>
-          {showMermaid ? 'Hide Mermaid' : 'Mermaid'}
-        </button>
-        <span className="glass-badge" title="Pipelines are edited in test, then promoted to prod">test</span>
-        <button className="glass-btn-ghost" onClick={save}>Save</button>
-        <button className="glass-btn-ghost" onClick={activate}>Activate</button>
-        <button className="glass-btn-success" onClick={run}>▶ Run now</button>
-        <button className="glass-btn-ghost" onClick={promote} title="Copy this version to production">Promote →</button>
-        <span className="text-[11px] opacity-70">{msg}</span>
-      </div>
-
-      <div className="p-2.5 border-r border-white/10 overflow-auto">
-        {Object.entries(palette).map(([group, entries]) => (
-          <div key={group}>
-            <div className="text-[10px] uppercase opacity-55 mt-2.5 mb-1 tracking-wider">{group}</div>
-            {entries.map(e => (
-              <button key={e.activityType}
-                className="glass-btn-ghost w-full mb-1 text-left text-xs"
-                style={{ borderColor: `${e.color}66` }}
-                onClick={() => addNode(e)}>+ {e.label}</button>
-            ))}
-          </div>
-        ))}
-      </div>
-
-      <div>
+    <div className="relative h-[calc(100vh-64px)] overflow-hidden">
+      <div className="absolute inset-0 soft-grid">
         <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes}
           onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
           onConnect={onConnect} onNodeClick={(_, n) => setSelected(n)} fitView>
-          <Background gap={20} size={1} color="rgba(255,255,255,0.08)" />
-          <Controls /><MiniMap />
+          <Background gap={24} size={1} color="rgba(255,255,255,0.018)" />
+          <Controls position="bottom-left" />
+          <MiniMap position="bottom-right" nodeColor={(n) => byType[n.data.activityType]?.color ?? '#7c6cf2'} maskColor="rgba(8,10,16,.7)" />
         </ReactFlow>
       </div>
 
-      <div className="border-l border-white/10 p-2.5 overflow-auto">
-        {showMermaid && (
-          <div className="glass-panel p-3 mb-3">
-            <div className="flex items-center justify-between mb-1">
-              <h3 className="m-0 text-sm font-semibold">Mermaid</h3>
-              <button className="glass-btn-ghost text-xs" onClick={applyMermaid}>Apply to canvas</button>
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-3 p-4">
+        <div className="pointer-events-auto glass-panel flex min-w-0 items-center gap-2 rounded-[14px] p-2">
+          <button className={`icon-button ${paletteOpen ? 'bg-brand-500/15 text-brand-300' : ''}`} title="Toggle node library" onClick={() => setPaletteOpen(v => !v)}>
+            <PanelLeft size={16} />
+          </button>
+          <input className="glass-input w-48 border-transparent bg-transparent font-medium" value={name} onChange={e => setName(e.target.value)} aria-label="Pipeline name" />
+          <div className="h-6 w-px bg-white/[0.08]" />
+          <TriggerEditor trigger={trigger} onChange={setTrigger} />
+          <span className="glass-badge hidden lg:inline-flex">test</span>
+        </div>
+
+        <div className="pointer-events-auto flex items-center gap-2">
+          {msg && <span className="glass-panel hidden max-w-[220px] truncate rounded-[10px] px-3 py-2 text-[11px] text-white/55 xl:block">{msg}</span>}
+          <div className="glass-panel flex items-center gap-1 rounded-[14px] p-1.5">
+            <button className="glass-btn-ghost border-transparent bg-transparent" onClick={save}><Save size={15} /> Save</button>
+            <button className="glass-btn-ghost border-transparent bg-transparent" onClick={activate}><Rocket size={15} /> Activate</button>
+            <button className="glass-btn-success" onClick={run}><Play size={15} fill="currentColor" /> Run</button>
+            <div className="relative">
+              <button className="icon-button border-transparent" aria-label="More pipeline actions" onClick={() => setMoreOpen(v => !v)}>
+                <MoreHorizontal size={17} />
+              </button>
+              {moreOpen && (
+                <div className="absolute right-0 top-11 w-48 rounded-[14px] border border-white/[0.1] bg-[#11141d]/95 p-1.5 shadow-glass backdrop-blur-2xl">
+                  <button className="glass-btn-ghost w-full justify-start border-transparent bg-transparent text-xs" onClick={() => { openMermaidPanel(); setMoreOpen(false); }}>
+                    <Code2 size={14} /> Edit Mermaid
+                  </button>
+                  <button className="glass-btn-ghost w-full justify-start border-transparent bg-transparent text-xs" onClick={() => { promote(); setMoreOpen(false); }}>
+                    <Layers3 size={14} /> Promote to prod
+                  </button>
+                </div>
+              )}
             </div>
-            <textarea className="glass-input font-mono text-[11px] h-40 w-full"
-              value={mermaidDraft} onChange={e => setMermaidDraft(e.target.value)} />
-            <div className="mt-2"><MermaidPreview source={mermaidDraft} /></div>
-            <p className="text-[10px] opacity-50 mt-1">
-              Structure only — node config is preserved by id across edits.
-            </p>
           </div>
-        )}
-        {selected
-          ? <ConfigPanel node={nodes.find(n => n.id === selected.id) ?? selected}
-              onChange={patchNode} onDelete={deleteNode} />
-          : <div className="text-xs opacity-60">Select a node to configure it.<br /><br />
-              Drag from a node's right handle to another node's left handle to connect.</div>}
-        <ExecutionMonitor executionId={executionId} onNodeStatus={onNodeStatus} />
+        </div>
       </div>
+
+      {paletteOpen && (
+        <aside className="glass-panel absolute bottom-4 left-4 top-[84px] z-10 flex w-[232px] flex-col overflow-hidden rounded-[16px]">
+          <div className="border-b border-white/[0.07] p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-white/85">Node library</p>
+                <p className="text-[10px] text-white/35">Add building blocks</p>
+              </div>
+              <button className="icon-button h-7 w-7 border-transparent bg-transparent" onClick={() => setPaletteOpen(false)}><X size={14} /></button>
+            </div>
+            <label className="relative block">
+              <Search className="absolute left-2.5 top-2.5 text-white/25" size={14} />
+              <input className="glass-input pl-8 text-xs" placeholder="Search nodes…" value={paletteQuery} onChange={e => setPaletteQuery(e.target.value)} />
+            </label>
+          </div>
+          <div className="flex-1 overflow-auto p-2.5">
+            {Object.entries(palette).map(([group, entries]) => (
+              <div key={group} className="mb-4">
+                <div className="mb-1.5 px-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-white/25">{group}</div>
+                {entries.map(e => (
+                  <button key={e.activityType}
+                    className="group mb-1 flex w-full items-center gap-2.5 rounded-[11px] border border-transparent px-2.5 py-2 text-left transition hover:border-white/[0.08] hover:bg-white/[0.055]"
+                    onClick={() => addNode(e)}>
+                    <span className="h-2 w-2 rounded-full" style={{ background: e.color }} />
+                    <span className="min-w-0 flex-1 truncate text-xs text-white/65 group-hover:text-white/90">{e.label}</span>
+                    <span className="text-sm text-white/20 group-hover:text-brand-300">+</span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        </aside>
+      )}
+
+      {(selected || showMermaid) && (
+        <aside className="absolute bottom-0 right-0 top-0 z-20 w-full max-w-[380px] border-l border-white/[0.08] bg-[#0d1018]/92 shadow-[-24px_0_60px_rgba(0,0,0,.35)] backdrop-blur-2xl">
+          <div className="flex h-14 items-center justify-between border-b border-white/[0.07] px-4">
+            <div>
+              <p className="text-xs font-semibold text-white/85">{showMermaid ? 'Mermaid editor' : 'Node settings'}</p>
+              <p className="text-[10px] text-white/30">{showMermaid ? 'Edit graph structure as code' : 'Configure selected node'}</p>
+            </div>
+            <button className="icon-button h-8 w-8" onClick={() => { setShowMermaid(false); setSelected(null); }}><X size={15} /></button>
+          </div>
+          <div className="h-[calc(100%-56px)] overflow-auto p-4">
+            {showMermaid ? (
+              <>
+                <textarea className="glass-input h-52 w-full font-mono text-[11px]" value={mermaidDraft} onChange={e => setMermaidDraft(e.target.value)} />
+                <button className="glass-btn-primary mt-3 w-full" onClick={applyMermaid}><Code2 size={15} /> Apply to canvas</button>
+                <div className="mt-4 overflow-hidden rounded-[14px] border border-white/[0.08] bg-black/15 p-2"><MermaidPreview source={mermaidDraft} /></div>
+                <p className="mt-2 text-[10px] text-white/30">Structure only. Node config preserved by matching ID.</p>
+              </>
+            ) : selected ? (
+              <ConfigPanel node={nodes.find(n => n.id === selected.id) ?? selected} onChange={patchNode} onDelete={deleteNode} />
+            ) : null}
+          </div>
+        </aside>
+      )}
+
+      {executionId && (
+        <div className="absolute bottom-5 left-1/2 z-20 -translate-x-1/2">
+          <ExecutionMonitor executionId={executionId} onNodeStatus={onNodeStatus} />
+        </div>
+      )}
+
+      {!nodes.length && !paletteOpen && (
+        <button className="glass-panel absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-3 rounded-[16px] px-5 py-4 text-left hover:border-brand-300/20" onClick={() => setPaletteOpen(true)}>
+          <PanelLeft size={20} className="text-brand-300" />
+          <span><b className="block text-sm">Open node library</b><span className="text-xs text-white/35">Start building pipeline</span></span>
+        </button>
+      )}
     </div>
   );
 }

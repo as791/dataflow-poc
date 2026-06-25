@@ -7,12 +7,20 @@ export const executions = Router();
 
 // Each execution lives in its environment's Temporal namespace, so status
 // queries and signals must target that namespace.
-async function envForExecution(req: any, id: string): Promise<Environment> {
-  const env = await withTenantTx(req, async client => {
-    const { rows } = await client.query(`SELECT environment FROM executions WHERE id=$1`, [id]);
-    return rows[0]?.environment as Environment | undefined;
+async function temporalIdentityForExecution(req: any, id: string): Promise<{
+  env: Environment; workflowId: string; runId?: string;
+}> {
+  return withTenantTx(req, async client => {
+    const { rows } = await client.query(
+      `SELECT environment, workflow_id, run_id FROM executions WHERE id=$1`,
+      [id],
+    );
+    return {
+      env: (rows[0]?.environment ?? 'test') as Environment,
+      workflowId: rows[0]?.workflow_id ?? id,
+      runId: rows[0]?.run_id ?? undefined,
+    };
   });
-  return env ?? 'test';
 }
 
 executions.get('/', async (req, res) => {
@@ -27,9 +35,18 @@ executions.get('/:id/status', async (req, res) => {
   // Always read the DB phase — markExecution writes it when the workflow
   // finishes, and the Temporal query handler never returns 'completed'/'failed'.
   const dbRow = await withTenantTx(req, async client => {
-    const { rows: e } = await client.query(`SELECT phase, environment FROM executions WHERE id=$1`, [id]);
+    const { rows: e } = await client.query(
+      `SELECT phase, environment, workflow_id, run_id FROM executions WHERE id=$1`,
+      [id],
+    );
     const { rows: nr } = await client.query(`SELECT * FROM node_runs WHERE execution_id=$1`, [id]);
-    return { dbPhase: e[0]?.phase ?? null, env: (e[0]?.environment ?? 'test') as Environment, nodeRuns: nr };
+    return {
+      dbPhase: e[0]?.phase ?? null,
+      env: (e[0]?.environment ?? 'test') as Environment,
+      workflowId: e[0]?.workflow_id ?? id,
+      runId: e[0]?.run_id ?? undefined,
+      nodeRuns: nr,
+    };
   });
 
   // If the DB already marks this execution terminal, return immediately.
@@ -42,7 +59,7 @@ executions.get('/:id/status', async (req, res) => {
   // Workflow still running — query the live status from Temporal.
   try {
     const c = await temporal(namespaceFor(dbRow.env));
-    const handle = c.workflow.getHandle(id);
+    const handle = c.workflow.getHandle(dbRow.workflowId, dbRow.runId);
     const status = await handle.query('status');
     res.json(status);
   } catch {
@@ -53,9 +70,9 @@ executions.get('/:id/status', async (req, res) => {
 
 for (const action of ['pause', 'resume', 'cancel'] as const) {
   executions.post(`/:id/${action}`, async (req, res) => {
-    const env = await envForExecution(req, req.params.id);
-    const c = await temporal(namespaceFor(env));
-    await c.workflow.getHandle(req.params.id).signal(action);
+    const identity = await temporalIdentityForExecution(req, req.params.id);
+    const c = await temporal(namespaceFor(identity.env));
+    await c.workflow.getHandle(identity.workflowId, identity.runId).signal(action);
     res.json({ ok: true });
   });
 }

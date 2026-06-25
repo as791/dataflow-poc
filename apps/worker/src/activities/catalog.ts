@@ -1,4 +1,5 @@
 import { registry, type SourceFn, type Handler } from '@dataflow/connector-sdk';
+import { evaluateMapExpression, evaluatePredicate } from '@dataflow/shared';
 import { zendeskFetch } from './connectors/zendesk';
 import { gsheetsFetch } from './connectors/gsheets';
 import { gdriveFetch } from './connectors/gdrive';
@@ -12,12 +13,6 @@ import crypto from 'crypto';
 // Connector runtime contracts now live in the SDK; re-exported so the coded
 // connectors (which import from '../catalog') keep working unchanged.
 export type { SourceFetchParams, SourceFetchResult, Handler, HandlerCtx } from '@dataflow/connector-sdk';
-
-// Safe-ish expression evaluator for map/filter (POC). Prod: isolated-vm.
-function evalExpr(expr: string, record: any): any {
-  const fn = new Function('r', `"use strict"; return (${expr});`);
-  return fn(record);
-}
 
 // Coded source connectors (bespoke logic). Manifest-driven sources come from
 // the registry and are merged in below — adding a REST source is then a single
@@ -34,10 +29,10 @@ export const sources: Record<string, SourceFn> = { ...codedSources, ...registry.
 const codedHandlers: Record<string, Handler> = {
   // ─── transforms ───
   'transform.map': async (input, config) =>
-    (input as any[]).map(r => evalExpr(config.expression as string, r)),
+    (input as any[]).map(r => evaluateMapExpression(config.expression as string, r)),
 
   'transform.filter': async (input, config) =>
-    (input as any[]).filter(r => !!evalExpr(config.predicate as string, r)),
+    (input as any[]).filter(r => evaluatePredicate(config.predicate as string, { r })),
 
   'transform.rename': async (input, config) => {
     const mapping = config.mapping as Record<string, string>;

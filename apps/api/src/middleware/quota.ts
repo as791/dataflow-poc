@@ -7,9 +7,8 @@ import { startOfMonthUTC } from '../services/usage';
 // the tenant has burned through (free_tier_limit + extra_quota) for the
 // current UTC month.
 //
-// Note: this does NOT increment the counter — that happens after fireExecution
-// via incrementUsage(). Keeping the two separate means a failed dispatch
-// doesn't burn a unit, and concurrent runs use the atomic upsert.
+// This is an early UX check. fireExecution performs the authoritative
+// row-locked check and consumption to prevent concurrent over-allocation.
 export const requireQuota: RequestHandler = async (req, res, next) => {
   try {
     const month = startOfMonthUTC();

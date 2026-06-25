@@ -8,9 +8,12 @@ const log = pino({ name: 'worker' });
 
 /**
  * ─── Dev → Prod "actor model" deployment ─────────────────────────────────
- * Every worker image carries a BUILD_ID (e.g. git SHA). Workers register
- * with `useVersioning: true`. Each workflow execution is an isolated actor
- * PINNED to the build that started it:
+ * This process is the TypeScript activity worker. Workflow orchestration is
+ * owned by apps/workflow-go; keeping activities on a separate task queue lets
+ * the Go and TypeScript SDKs cooperate without competing for task types.
+ *
+ * Every activity worker image carries a BUILD_ID (e.g. git SHA). Workers can
+ * register with `useVersioning: true`:
  *
  *   - New executions route to the queue's *default* build ID.
  *   - In-flight executions keep replaying on their original build —
@@ -29,9 +32,8 @@ async function main() {
   const worker = await Worker.create({
     connection,
     namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
-    workflowsPath: require.resolve('./workflows/dynamic-dag'),
     activities,
-    taskQueue: process.env.TASK_QUEUE ?? 'dynamic-dag',
+    taskQueue: process.env.TASK_QUEUE ?? 'dynamic-activities-test',
     buildId,
     useVersioning: process.env.USE_VERSIONING === 'true',
     maxConcurrentActivityTaskExecutions: 20,

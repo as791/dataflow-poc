@@ -2,8 +2,9 @@
 
 Self-serve, open-core data pipeline platform — an n8n-shaped product on a
 Temporal-durable engine. Build DAG workflows visually **or** describe them in
-natural language and let a local LLM draft them; one generic Temporal workflow
-interprets every pipeline.
+natural language and let a local LLM draft them. A generic Go Temporal workflow
+interprets every pipeline while TypeScript activity workers run connectors,
+transforms, and sinks.
 
 **What sets it apart from n8n:**
 - **AI + Mermaid authoring.** Describe a pipeline in English → a local **Ollama**
@@ -27,14 +28,14 @@ durable cursor state. Full observability (OTel → Prometheus/Grafana/Jaeger).
 
 The UI (React Flow) emits a frozen `PipelineDefinition` JSON. The API stores it
 as an immutable version and registers its trigger (Temporal Schedule for cron,
-HTTP route for webhook, Redis subscriber for events). Every firing starts
+HTTP route for webhook, Redis subscriber for events). Every firing starts the Go
 `DynamicDAGWorkflow` with the **full definition as input** — replay-deterministic
-by construction. The workflow topologically sorts the DAG into parallel levels
-and dispatches each node to a catalog of pre-registered activities. Source nodes
-page in a loop using cursors persisted in Postgres (`connector_state`), so
-backfill survives crashes and seamlessly hands off to incremental mode;
-`continueAsNew` bounds history on long backfills. Payloads travel as `DataRef`
-pointers — Temporal history holds IDs, never data.
+by construction. Go workflow workers poll `dynamic-dag-<env>` while TypeScript
+activity workers poll `dynamic-activities-<env>`. The workflow topologically
+sorts the DAG into parallel levels and dispatches each node by stable activity
+name. Source nodes page using cursors persisted in Postgres (`connector_state`);
+`continueAsNew` bounds history on long backfills. Payloads travel as encrypted
+`DataRef` pointers instead of raw datasets.
 
 ## Run it — one command
 
@@ -68,11 +69,10 @@ features behind the seam in `apps/api/src/lib/edition.ts` (audit-log export
 today; SSO/SAML and advanced RBAC are scaffolded). `GET /api/edition` reports the
 active edition and feature flags.
 
-**Encryption status (honest):** Temporal workflow history is encrypted by a
-custom data converter, and OAuth tokens are encrypted at rest (AES-256-GCM). The
-per-tenant DEK path for encrypting large `node_payloads` rows at rest is
-scaffolded (`apps/worker/src/activities/crypto.ts`) but **not yet wired into the
-data plane** — treat at-rest payload encryption as roadmap, not a guarantee.
+**Encryption status:** Temporal workflow history uses a cross-SDK AES-256-GCM
+payload codec, OAuth tokens are encrypted at rest, and intermediate
+`node_payloads` plus oversized webhook payloads are encrypted with the platform
+payload key. Per-tenant customer-managed keys are not currently provided.
 
 The API is **not** exposed to the host by default — the web container proxies
 `/api` to it over the internal network (nginx). To expose it for the smoke test
@@ -161,8 +161,9 @@ previous build ID. A bad deploy can never corrupt a running workflow's replay.
 
 ```
 packages/shared      PipelineDefinition, DataRef, NodeResult types
+apps/workflow-go     Go Temporal workflow state machine + payload codec
 apps/api             control plane: pipeline CRUD, triggers, executions
-apps/worker          Temporal worker: DynamicDAGWorkflow + activity catalog
+apps/worker          TypeScript Temporal activity workers + connector catalog
 apps/web             React Flow self-serve builder + live monitor
 db/init.sql          control plane + cursor state + data plane tables
 observability/       otel-collector, prometheus, grafana provisioning
@@ -174,7 +175,8 @@ examples/            ready-to-import pipeline definitions
 
 - Credentials are env vars → move to the envelope-encrypted vault (KMS + per-user DEK)
   from the main design doc.
-- `transform.map/filter` use `new Function` → swap for `isolated-vm` sandbox.
+- Per-tenant customer-managed payload keys are not implemented.
 - DataRefs store payloads in Postgres → S3 with client-side encryption.
 - Event trigger uses Redis pub/sub → Kafka with consumer groups + DLQ.
-- No authn/z on the API → JWT + tenant RLS.
+- Docker Compose is a development topology; production Cassandra,
+  Elasticsearch, and Temporal require multi-node deployment and backups.

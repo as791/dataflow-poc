@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Activity, CalendarClock, CreditCard, Gauge, Plus } from 'lucide-react';
 import { api } from '../api';
 
 type Usage = {
@@ -136,11 +137,15 @@ export function BillingPage() {
   const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
 
   return (
-    <div className="max-w-3xl mx-auto mt-12 px-6 space-y-6">
+    <div className="mx-auto max-w-4xl space-y-6 px-6 py-10">
+      <div>
+        <h1 className="page-heading">Usage & billing</h1>
+        <p className="page-subtitle mt-1">Track workflow executions and extend monthly capacity.</p>
+      </div>
       <div className="glass-panel p-6">
         <div className="flex items-baseline justify-between mb-4">
-          <h1 className="text-xl font-semibold">Usage this month</h1>
-          <span className="glass-badge">Phase 3 · Billing</span>
+          <h2 className="text-base font-semibold">Usage this month</h2>
+          <span className="glass-badge"><Activity size={12} /> live meter</span>
         </div>
 
         {error && (
@@ -160,12 +165,12 @@ export function BillingPage() {
         </div>
 
         <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-          <div className="glass-card p-3">
-            <dt className="opacity-60">Free tier</dt>
+          <div className="glass-card p-4">
+            <dt className="flex items-center gap-2 text-xs text-white/40"><Gauge size={14} /> Free tier</dt>
             <dd className="text-lg">{usage?.free_tier ?? '—'} / month</dd>
           </div>
-          <div className="glass-card p-3">
-            <dt className="opacity-60">Purchased</dt>
+          <div className="glass-card p-4">
+            <dt className="flex items-center gap-2 text-xs text-white/40"><CreditCard size={14} /> Purchased</dt>
             <dd className="text-lg">
               {usage?.extra_quota ?? 0}
               {usage && usage.extra_quota > 0 && (
@@ -175,8 +180,8 @@ export function BillingPage() {
               )}
             </dd>
           </div>
-          <div className="glass-card p-3">
-            <dt className="opacity-60">Resets in</dt>
+          <div className="glass-card p-4">
+            <dt className="flex items-center gap-2 text-xs text-white/40"><CalendarClock size={14} /> Resets in</dt>
             <dd className="text-lg">{usage?.daysUntilReset ?? '—'} days</dd>
           </div>
         </dl>
@@ -187,7 +192,7 @@ export function BillingPage() {
             disabled={buying}
             onClick={() => buy(1)}
           >
-            {buying ? 'Opening checkout…' : '+ Buy 5 more executions — ₹100'}
+            <Plus size={15} /> {buying ? 'Opening checkout…' : 'Buy 5 executions — ₹100'}
           </button>
         </div>
       </div>

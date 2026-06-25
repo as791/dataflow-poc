@@ -9,6 +9,21 @@ import type { PipelineDefinition, DataRef, Environment } from '@dataflow/shared'
 
 export const triggers = Router();
 
+function encryptTriggerPayload(json: string): { ciphertext: string; iv: string } {
+  const raw = process.env.TEMPORAL_PAYLOAD_ENCRYPTION_KEY;
+  if (!raw) throw new Error('TEMPORAL_PAYLOAD_ENCRYPTION_KEY is required for persisted trigger payloads');
+  const key = Buffer.from(raw, 'base64');
+  if (key.length !== 32) throw new Error('TEMPORAL_PAYLOAD_ENCRYPTION_KEY must decode to 32 bytes');
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([
+    cipher.update(Buffer.from(json)),
+    cipher.final(),
+    cipher.getAuthTag(),
+  ]);
+  return { ciphertext: ciphertext.toString('base64url'), iv: iv.toString('base64url') };
+}
+
 // Webhook triggers are unauthenticated by design — HMAC signature is the
 // auth boundary. We can't use req.tenant, so look up tenantId from the
 // pipeline row and pass it to withTenant manually.
@@ -37,10 +52,16 @@ triggers.post('/hooks/:path', async (req, res) => {
     payloadRef = { type: 'inline', key: Buffer.from(json).toString('base64'),
                    tenantId, sizeBytes: json.length };
   } else {
+    const encrypted = encryptTriggerPayload(json);
     const insRow = await withTenant(tenantId, client => client.query(
-      `INSERT INTO node_payloads (tenant_id, execution_id, node_id, payload)
-       VALUES ($1,'webhook','trigger',$2) RETURNING id`, [tenantId, json]));
-    payloadRef = { type: 'pg', key: insRow.rows[0].id, tenantId, sizeBytes: json.length };
+      `INSERT INTO node_payloads
+         (tenant_id, execution_id, node_id, payload, encrypted, encryption_iv)
+       VALUES ($1,'webhook','trigger',$2,true,$3) RETURNING id`,
+      [tenantId, JSON.stringify(encrypted.ciphertext), encrypted.iv]));
+    payloadRef = {
+      type: 'pg', key: insRow.rows[0].id, tenantId, sizeBytes: json.length,
+      encrypted: true,
+    };
   }
   // Metering + quota enforcement happen inside fireExecution() — see temporal.ts.
   try {

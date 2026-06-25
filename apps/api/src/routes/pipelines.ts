@@ -60,9 +60,12 @@ pipelines.post('/:rowId/run', requireQuota, async (req, res) => {
   });
   if (!row) return res.status(404).json({ error: 'not found' });
   const env = (row.environment ?? 'test') as Environment;
-  // fireExecution() centrally calls incrementUsage() so cron + manual + webhook
-  // + event triggers all meter consistently. Quota gate above checks BEFORE.
-  const executionId = await fireExecution(row.definition, req.params.rowId, 'manual', env);
+  // fireExecution atomically checks and consumes quota. The middleware above
+  // remains an early user-facing rejection for manual runs.
+  const encryptedDek = typeof req.body?.encryptedDek === 'string' ? req.body.encryptedDek : undefined;
+  const executionId = await fireExecution(
+    row.definition, req.params.rowId, 'manual', env, undefined, encryptedDek,
+  );
   executionsStarted.inc({ trigger: 'manual' });
   auditLog(req, 'execution.started', executionId, { trigger: 'manual', environment: env });
   res.json({ executionId, environment: env });

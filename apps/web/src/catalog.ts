@@ -68,13 +68,13 @@ export const CATALOG: CatalogEntry[] = [
   {
     activityType: 'transform.map', nodeType: 'transform', label: 'Map',
     color: '#D85A30',
-    fields: [{ key: 'expression', label: 'Expression (r => …)', type: 'textarea',
+    fields: [{ key: 'expression', label: 'Safe projection expression', type: 'textarea',
       placeholder: '({ id: r.id, subject: r.subject, priority: r.priority })' }],
   },
   {
     activityType: 'transform.filter', nodeType: 'transform', label: 'Filter',
     color: '#D85A30',
-    fields: [{ key: 'predicate', label: 'Predicate', type: 'textarea',
+    fields: [{ key: 'predicate', label: 'Safe predicate', type: 'textarea',
       placeholder: "r.status === 'open'" }],
   },
   {
