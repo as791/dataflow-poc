@@ -1,7 +1,7 @@
 // Single source of truth for OAuth tokens inside worker activities.
 //
 // Activities run as the postgres superuser (bypassing RLS) so we can query
-// oauth_connections directly with tenant_id in the WHERE clause. Tokens on
+// connector_instances directly with tenant_id in the WHERE clause. Tokens on
 // disk are AES-256-GCM encrypted (same format as the API: iv:tag:ct base64).
 //
 // Refresh strategy: if `expires_at < now + 60s` we refresh inline, persist
@@ -32,7 +32,7 @@ function encrypt(plaintext: string): string {
   return [iv.toString('base64'), tag.toString('base64'), ct.toString('base64')].join(':');
 }
 
-function decrypt(blob: string): string {
+export function decrypt(blob: string): string {
   const [ivB64, tagB64, ctB64] = blob.split(':');
   const iv  = Buffer.from(ivB64, 'base64');
   const tag = Buffer.from(tagB64, 'base64');
@@ -74,7 +74,7 @@ export async function getOAuthConnection(connectionId: string, tenantId: string)
 async function loadConnection(connectionId: string, tenantId: string): Promise<ConnectionRow> {
   const { rows } = await pool.query(
     `SELECT id, provider, access_token, refresh_token, expires_at, extra
-       FROM oauth_connections
+       FROM connector_instances
       WHERE id = $1 AND tenant_id = $2`,
     [connectionId, tenantId]);
   if (!rows.length) throw new Error(`oauth_connection ${connectionId} not found for tenant ${tenantId}`);
@@ -86,7 +86,7 @@ async function ensureFresh(conn: ConnectionRow, tenantId: string): Promise<strin
   const refresh = decrypt(conn.refresh_token);
   const { accessToken, refreshToken, expiresAt } = await doRefreshToken(conn.provider, refresh, conn.extra);
   await pool.query(
-    `UPDATE oauth_connections
+    `UPDATE connector_instances
        SET access_token=$1, refresh_token=$2, expires_at=$3
      WHERE id=$4 AND tenant_id=$5`,
     [encrypt(accessToken), encrypt(refreshToken ?? refresh), expiresAt, conn.id, tenantId]);

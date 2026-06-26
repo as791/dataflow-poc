@@ -20,6 +20,7 @@ import { SheetPicker } from '../components/connectors/SheetPicker';
 import { DrivePicker } from '../components/connectors/DrivePicker';
 import { ExcelPicker } from '../components/connectors/ExcelPicker';
 import { ZendeskPicker } from '../components/connectors/ZendeskPicker';
+import { displayEnvironment, StageBadge } from './LifecyclePage';
 
 function FlowNode({ data }: { data: any }) {
   const { byType } = useCatalog();
@@ -75,6 +76,27 @@ function OAuthPickerField({ field, value, onChange }: {
   }
 }
 
+// A6/A3 — pick a connector instance of `provider`; writes config.connectionId.
+function InstancePicker({ provider, value, onChange }: {
+  provider?: string;
+  value: Record<string, string>;
+  onChange: (patch: Record<string, string>) => void;
+}) {
+  const [instances, setInstances] = useState<any[]>([]);
+  useEffect(() => {
+    api.listConnectors()
+      .then((list: any[]) => setInstances(list.filter(i => !provider || i.provider === provider)))
+      .catch(() => setInstances([]));
+  }, [provider]);
+  return (
+    <select className="glass-select" value={value.connectionId ?? ''}
+      onChange={e => onChange({ connectionId: e.target.value })}>
+      <option value="">— select destination —</option>
+      {instances.map(i => <option key={i.id} value={i.id}>{i.name ?? i.email ?? i.id} ({i.provider})</option>)}
+    </select>
+  );
+}
+
 function ConfigPanel({ node, onChange, onDelete }: {
   node: Node; onChange: (id: string, patch: any) => void; onDelete: (id: string) => void;
 }) {
@@ -106,6 +128,12 @@ function ConfigPanel({ node, onChange, onDelete }: {
           {f.type === 'oauth-picker' ? (
             <OAuthPickerField field={f} value={cfg}
               onChange={patch => onChange(node.id, { config: { ...cfg, ...patch } })} />
+          ) : f.type === 'instance-picker' ? (
+            <InstancePicker provider={f.provider} value={cfg}
+              onChange={patch => onChange(node.id, { config: { ...cfg, ...patch } })} />
+          ) : f.type === 'checkbox' ? (
+            <input type="checkbox" className="glass-checkbox" checked={!!cfg[f.key]}
+              onChange={e => onChange(node.id, { config: { ...cfg, [f.key]: e.target.checked } })} />
           ) : f.type === 'select' ? (
             <select className="glass-select" value={cfg[f.key] ?? f.options?.[0]}
               onChange={e => onChange(node.id, { config: { ...cfg, [f.key]: e.target.value } })}>
@@ -257,7 +285,15 @@ function definitionToFlow(def: any, byType: Record<string, CatalogEntry>): { nod
       }),
     },
   }));
-  const edges = (def.edges ?? []).map((e: any) => ({ id: e.id ?? `e${Date.now()}-${e.source}-${e.target}`, source: e.source, target: e.target }));
+  const edges = (def.edges ?? []).map((e: any) => ({
+    id: e.id ?? `e${Date.now()}-${e.source}-${e.target}`,
+    source: e.source, target: e.target,
+    data: { condition: e.condition },
+    label: e.condition || undefined,
+    animated: !!e.condition,
+    style: e.condition ? { stroke: '#f5b342' } : undefined,
+    labelStyle: e.condition ? { fill: '#f5b342', fontSize: 10 } : undefined,
+  }));
   return { nodes, edges };
 }
 
@@ -269,6 +305,7 @@ export default function PipelineCanvasPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selected, setSelected] = useState<Node | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<any | null>(null);
   const [name, setName] = useState('My pipeline');
   const [trigger, setTrigger] = useState<any>({ type: 'manual' });
   const [savedRowId, setSavedRowId] = useState<string | null>(null);
@@ -309,6 +346,16 @@ export default function PipelineCanvasPage() {
   const patchNode = (id: string, patch: any) =>
     setNodes(ns => ns.map(n => n.id === id ? { ...n, data: { ...n.data, ...patch } } : n));
 
+  // A5: per-edge branch condition (conditional fork). The Go engine already
+  // evaluates edge `condition`; this exposes + persists it.
+  const patchEdgeCondition = (id: string, condition: string) =>
+    setEdges(es => es.map(e => e.id === id ? {
+      ...e, data: { ...e.data, condition },
+      label: condition || undefined, animated: !!condition,
+      style: condition ? { stroke: '#f5b342' } : undefined,
+      labelStyle: condition ? { fill: '#f5b342', fontSize: 10 } : undefined,
+    } : e));
+
   const deleteNode = (id: string) => {
     setNodes(ns => ns.filter(n => n.id !== id));
     setEdges(es => es.filter(e => e.source !== id && e.target !== id));
@@ -336,7 +383,8 @@ export default function PipelineCanvasPage() {
         mergeStrategy: cfg.mergeStrategy, joinKey: cfg.joinKey,
       };
     }),
-    edges: edges.map(e => ({ id: e.id, source: e.source, target: e.target })),
+    edges: edges.map(e => ({ id: e.id, source: e.source, target: e.target,
+      condition: (e.data as any)?.condition || undefined })),
   });
 
   const save = async () => {
@@ -349,7 +397,7 @@ export default function PipelineCanvasPage() {
   const activate = async () => {
     if (!savedRowId) return setMsg('Save first');
     const r = await api.activate(savedRowId);
-    setMsg(`Activated in ${r.environment ?? 'test'} · trigger: ${r.trigger.type}`);
+    setMsg(`Activated in ${displayEnvironment(r.environment)} · trigger: ${r.trigger.type}`);
   };
   const promote = async () => {
     if (!savedRowId) return setMsg('Save first');
@@ -403,7 +451,10 @@ export default function PipelineCanvasPage() {
       <div className="absolute inset-0 soft-grid">
         <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes}
           onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
-          onConnect={onConnect} onNodeClick={(_, n) => setSelected(n)} fitView>
+          onConnect={onConnect}
+          onNodeClick={(_, n) => { setSelected(n); setSelectedEdge(null); setShowMermaid(false); }}
+          onEdgeClick={(_, ed) => { setSelectedEdge(ed); setSelected(null); setShowMermaid(false); }}
+          fitView>
           <Background gap={24} size={1} color="rgba(255,255,255,0.018)" />
           <Controls position="bottom-left" />
           <MiniMap position="bottom-right" nodeColor={(n) => byType[n.data.activityType]?.color ?? '#7c6cf2'} maskColor="rgba(8,10,16,.7)" />
@@ -418,7 +469,7 @@ export default function PipelineCanvasPage() {
           <input className="glass-input w-48 border-transparent bg-transparent font-medium" value={name} onChange={e => setName(e.target.value)} aria-label="Pipeline name" />
           <div className="h-6 w-px bg-white/[0.08]" />
           <TriggerEditor trigger={trigger} onChange={setTrigger} />
-          <span className="glass-badge hidden lg:inline-flex">test</span>
+          <span className="hidden lg:inline-flex"><StageBadge stage="draft" /></span>
         </div>
 
         <div className="pointer-events-auto flex items-center gap-2">
@@ -480,14 +531,14 @@ export default function PipelineCanvasPage() {
         </aside>
       )}
 
-      {(selected || showMermaid) && (
+      {(selected || selectedEdge || showMermaid) && (
         <aside className="absolute bottom-0 right-0 top-0 z-20 w-full max-w-[380px] border-l border-white/[0.08] bg-[#0d1018]/92 shadow-[-24px_0_60px_rgba(0,0,0,.35)] backdrop-blur-2xl">
           <div className="flex h-14 items-center justify-between border-b border-white/[0.07] px-4">
             <div>
-              <p className="text-xs font-semibold text-white/85">{showMermaid ? 'Mermaid editor' : 'Node settings'}</p>
-              <p className="text-[10px] text-white/30">{showMermaid ? 'Edit graph structure as code' : 'Configure selected node'}</p>
+              <p className="text-xs font-semibold text-white/85">{showMermaid ? 'Mermaid editor' : selectedEdge ? 'Branch condition' : 'Node settings'}</p>
+              <p className="text-[10px] text-white/30">{showMermaid ? 'Edit graph structure as code' : selectedEdge ? 'Route records on this edge' : 'Configure selected node'}</p>
             </div>
-            <button className="icon-button h-8 w-8" onClick={() => { setShowMermaid(false); setSelected(null); }}><X size={15} /></button>
+            <button className="icon-button h-8 w-8" onClick={() => { setShowMermaid(false); setSelected(null); setSelectedEdge(null); }}><X size={15} /></button>
           </div>
           <div className="h-[calc(100%-56px)] overflow-auto p-4">
             {showMermaid ? (
@@ -497,6 +548,18 @@ export default function PipelineCanvasPage() {
                 <div className="mt-4 overflow-hidden rounded-[14px] border border-white/[0.08] bg-black/15 p-2"><MermaidPreview source={mermaidDraft} /></div>
                 <p className="mt-2 text-[10px] text-white/30">Structure only. Node config preserved by matching ID.</p>
               </>
+            ) : selectedEdge ? (
+              <div>
+                <p className="mb-1 text-xs font-semibold text-white/85">Branch condition</p>
+                <p className="mb-3 text-[10px] text-white/35">Records flow down this edge only when the predicate is true. Leave blank for always.</p>
+                <textarea className="glass-input h-20 w-full font-mono text-[11px]"
+                  placeholder="r.amount > 100"
+                  value={selectedEdge.data?.condition ?? ''}
+                  onChange={e => {
+                    patchEdgeCondition(selectedEdge.id, e.target.value);
+                    setSelectedEdge((s: any) => ({ ...s, data: { ...s.data, condition: e.target.value } }));
+                  }} />
+              </div>
             ) : selected ? (
               <ConfigPanel node={nodes.find(n => n.id === selected.id) ?? selected} onChange={patchNode} onDelete={deleteNode} />
             ) : null}

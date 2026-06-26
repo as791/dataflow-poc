@@ -1,5 +1,5 @@
 import {
-  BarChart3, Boxes, Cable, CreditCard, LogOut, Sparkles, Users, Workflow,
+  BarChart3, Boxes, Cable, CreditCard, History, LogOut, Rocket, Sparkles, Users, Workflow,
 } from 'lucide-react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -7,6 +7,8 @@ import { useAuth } from '../context/AuthContext';
 const navItems = [
   { to: '/', label: 'Pipelines', icon: Workflow, end: true },
   { to: '/ai-builder', label: 'AI Builder', icon: Sparkles },
+  { to: '/lifecycle', label: 'Lifecycle', icon: Rocket },
+  { to: '/runs', label: 'Runs', icon: History },
   { to: '/connectors', label: 'Connectors', icon: Cable },
   { to: '/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/team', label: 'Team', icon: Users },
@@ -16,6 +18,8 @@ const navItems = [
 const pageMeta: Record<string, { title: string; eyebrow: string }> = {
   '/': { title: 'Pipeline Studio', eyebrow: 'Build & orchestrate' },
   '/ai-builder': { title: 'AI Builder', eyebrow: 'Generate with local AI' },
+  '/lifecycle': { title: 'Lifecycle', eyebrow: 'Promote & gate' },
+  '/runs': { title: 'Runs', eyebrow: 'History & observability' },
   '/connectors': { title: 'Connectors', eyebrow: 'Data sources' },
   '/analytics': { title: 'Analytics', eyebrow: 'Explore outcomes' },
   '/team': { title: 'Team', eyebrow: 'Workspace access' },

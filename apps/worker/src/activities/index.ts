@@ -182,6 +182,45 @@ export async function dispatchNode(params: {
 }
 
 // ─── Merge & condition helpers ───
+// Pure merge combinators — strategy chosen via merge-node config. Joins operate
+// on the first two inputs (a,b); set strategies operate on all inputs.
+export function mergeArrays(strategy: string, arrays: any[][], joinKey?: string): any[] {
+  const [a = [], b = []] = arrays;
+  const indexBy = (rows: any[]) => new Map(rows.map(r => [String(r[joinKey!]), r]));
+  const needKey = () => { if (!joinKey) throw new Error(`merge strategy "${strategy}" requires a joinKey`); };
+  switch (strategy) {
+    case 'innerJoin': {
+      needKey();
+      const bi = indexBy(b);
+      return a.filter(r => bi.has(String(r[joinKey!])))
+              .map(r => ({ ...r, ...bi.get(String(r[joinKey!])) }));
+    }
+    case 'leftJoin': {
+      needKey();
+      const bi = indexBy(b);
+      return a.map(r => ({ ...r, ...(bi.get(String(r[joinKey!])) ?? {}) }));
+    }
+    case 'outerJoin': {
+      needKey();
+      const ai = indexBy(a), bi = indexBy(b);
+      return [...new Set([...ai.keys(), ...bi.keys()])]
+        .map(k => ({ ...(ai.get(k) ?? {}), ...(bi.get(k) ?? {}) }));
+    }
+    case 'union': {
+      const seen = new Set<string>();
+      return arrays.flat().filter(r => {
+        const k = JSON.stringify(r);
+        if (seen.has(k)) return false;
+        seen.add(k); return true;
+      });
+    }
+    case 'appendWithSourceTag':
+      return arrays.flatMap((rows, i) => rows.map(r => ({ ...r, _source: i })));
+    default: // concat
+      return arrays.flat();
+  }
+}
+
 export async function mergeRefs(params: {
   inputRefs: DataRef[]; strategy: string; joinKey?: string;
   tenantId: string; executionId: string; nodeId: string;
@@ -193,15 +232,7 @@ export async function mergeRefs(params: {
   const start = Date.now();
   const dek = resolveDek(encryptedDek);
   const arrays = await Promise.all(inputRefs.map(r => readPayload(r, dek))) as any[][];
-  let merged: any[];
-  if (strategy === 'innerJoin' && joinKey) {
-    const [a, b] = arrays;
-    const index = new Map(b.map(r => [String(r[joinKey]), r]));
-    merged = a.filter(r => index.has(String(r[joinKey])))
-              .map(r => ({ ...r, ...index.get(String(r[joinKey])) }));
-  } else {
-    merged = arrays.flat();
-  }
+  const merged = mergeArrays(strategy, arrays, joinKey);
   const outputRef = await writePayload(merged, tenantId, executionId, nodeId, dek);
   await recordNodeRun(executionId, nodeId, tenantId, 'success', Date.now() - start, merged.length);
   return { nodeId, status: 'success', outputRef,

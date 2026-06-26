@@ -117,7 +117,7 @@ async function upsertConnection(
 ): Promise<string> {
   return withTenant(tenantId, async client => {
     const { rows } = await client.query(
-      `INSERT INTO oauth_connections
+      `INSERT INTO connector_instances
          (tenant_id, user_id, provider, provider_account_email,
           scopes, access_token, refresh_token, expires_at, extra)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -140,7 +140,7 @@ async function upsertConnection(
 async function getConnection(tenantId: string, id: string): Promise<ConnectionRow | null> {
   return withTenant(tenantId, async client => {
     const { rows } = await client.query(
-      `SELECT * FROM oauth_connections WHERE id = $1`, [id]);
+      `SELECT * FROM connector_instances WHERE id = $1`, [id]);
     return (rows[0] as ConnectionRow) ?? null;
   });
 }
@@ -155,7 +155,7 @@ async function getLiveToken(tenantId: string, conn: ConnectionRow): Promise<stri
   const { accessToken, refreshToken, expiresAt } = await refreshProviderToken(conn.provider, refresh, conn.extra);
   await withTenant(tenantId, client =>
     client.query(
-      `UPDATE oauth_connections
+      `UPDATE connector_instances
          SET access_token=$1, refresh_token=$2, expires_at=$3
        WHERE id=$4`,
       [encryptToken(accessToken), encryptToken(refreshToken ?? refresh), expiresAt, conn.id]));
@@ -211,19 +211,25 @@ async function refreshProviderToken(
 connectors.get('/', async (req, res) => {
   const rows = await withTenantTx(req, async client => {
     const { rows } = await client.query(
-      `SELECT id, provider, provider_account_email, scopes, expires_at, extra, created_at
-         FROM oauth_connections
-        ORDER BY provider, created_at DESC`);
+      `SELECT id, kind, provider, provider_account_email, scopes, expires_at, extra, created_at
+         FROM connector_instances
+        ORDER BY kind, provider, created_at DESC`);
     return rows;
   });
-  res.json({ connections: rows });
+  // Flat array; surface a display name + the common extra fields the UI reads.
+  res.json(rows.map((r: any) => ({
+    id: r.id, kind: r.kind, provider: r.provider,
+    name: r.provider_account_email, email: r.provider_account_email,
+    subdomain: r.extra?.subdomain, host: r.extra?.host, baseUrl: r.extra?.baseUrl,
+    expires_at: r.expires_at, connected_at: r.created_at,
+  })));
 });
 
 connectors.delete('/:connectionId', async (req, res) => {
   const { connectionId } = req.params;
   const deleted = await withTenantTx(req, async client => {
     const { rowCount } = await client.query(
-      `DELETE FROM oauth_connections WHERE id=$1`, [connectionId]);
+      `DELETE FROM connector_instances WHERE id=$1`, [connectionId]);
     return rowCount ?? 0;
   });
   if (!deleted) return res.status(404).json({ error: 'not found' });
@@ -240,7 +246,7 @@ connectors.post('/:connectionId/refresh', async (req, res) => {
       await refreshProviderToken(conn.provider, refresh, conn.extra);
     await withTenantTx(req, client =>
       client.query(
-        `UPDATE oauth_connections
+        `UPDATE connector_instances
            SET access_token=$1, refresh_token=$2, expires_at=$3
          WHERE id=$4`,
         [encryptToken(accessToken), encryptToken(refreshToken ?? refresh), expiresAt, conn.id]));
@@ -250,6 +256,66 @@ connectors.post('/:connectionId/refresh', async (req, res) => {
     res.status(500).json({ error: e.message ?? 'refresh failed' });
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// A3 — non-OAuth credential instances + test-connection
+// ─────────────────────────────────────────────────────────────────────────
+
+// Create a non-OAuth credential instance (DB/host/key creds). Non-secret params
+// go in `extra`; secrets are AES-GCM encrypted into `secret`.
+connectors.post('/', async (req, res) => {
+  const { provider, name, config, secret } = req.body ?? {};
+  if (!provider || !name) return res.status(400).json({ error: 'provider and name are required' });
+  const id = await withTenantTx(req, async client => {
+    const { rows } = await client.query(
+      `INSERT INTO connector_instances
+         (tenant_id, user_id, kind, provider, provider_account_email, secret, extra)
+       VALUES ($1,$2,'credential',$3,$4,$5,$6) RETURNING id`,
+      [req.tenant.tenantId, req.tenant.userId, provider, name,
+       secret ? encryptToken(JSON.stringify(secret)) : null,
+       config ? JSON.stringify(config) : null]);
+    return rows[0].id as string;
+  });
+  await auditLog(req, 'connector.created', id, { provider, kind: 'credential' });
+  res.json({ id });
+});
+
+// Test-connection: dispatch by kind/provider. Returns {ok,message} either way
+// (a failed connection is a 200 with ok:false — it's an expected user outcome).
+connectors.post('/:connectionId/test', async (req, res) => {
+  const row = await withTenantTx(req, async client => {
+    const { rows } = await client.query(
+      `SELECT * FROM connector_instances WHERE id=$1`, [req.params.connectionId]);
+    return rows[0];
+  });
+  if (!row) return res.status(404).json({ error: 'not found' });
+  try {
+    res.json({ ok: true, message: await testInstance(req.tenant.tenantId, row) });
+  } catch (e: any) {
+    res.json({ ok: false, message: e.message ?? 'connection failed' });
+  }
+});
+
+export async function testInstance(tenantId: string, row: any): Promise<string> {
+  if (row.kind === 'oauth') {
+    await getLiveToken(tenantId, row as ConnectionRow); // forces refresh if expired
+    return 'token OK';
+  }
+  const cfg = (row.extra ?? {}) as Record<string, any>;
+  const secret = row.secret ? JSON.parse(decryptToken(row.secret)) : {};
+  if (row.provider === 'postgres') {
+    const { Client } = await import('pg');
+    const c = new Client({ host: cfg.host, port: cfg.port ?? 5432, database: cfg.database, user: cfg.user, password: secret.password });
+    await c.connect();
+    try { await c.query('SELECT 1'); } finally { await c.end(); }
+    return 'SELECT 1 OK';
+  }
+  if (row.provider === 'http') {
+    const r = await axios.get(cfg.baseUrl, { headers: secret.apiKey ? { Authorization: `Bearer ${secret.apiKey}` } : {}, timeout: 10_000 });
+    return `HTTP ${r.status}`;
+  }
+  throw new Error(`test not supported for provider "${row.provider}"`);
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Google
@@ -571,12 +637,12 @@ async function pickConnection(
   return withTenant(tenantId, async client => {
     if (connectionId) {
       const { rows } = await client.query(
-        `SELECT * FROM oauth_connections WHERE id=$1 AND provider=$2`,
+        `SELECT * FROM connector_instances WHERE id=$1 AND provider=$2`,
         [connectionId, provider]);
       return (rows[0] as ConnectionRow) ?? null;
     }
     const { rows } = await client.query(
-      `SELECT * FROM oauth_connections WHERE provider=$1
+      `SELECT * FROM connector_instances WHERE provider=$1
        ORDER BY created_at DESC LIMIT 1`, [provider]);
     return (rows[0] as ConnectionRow) ?? null;
   });

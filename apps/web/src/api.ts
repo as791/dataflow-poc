@@ -33,6 +33,8 @@ export const api = {
   savePipeline: (def: any) => request('/api/pipelines', { method: 'POST', body: JSON.stringify(def) }).then(j),
   activate:     (rowId: string) => request(`/api/pipelines/${rowId}/activate`, { method: 'POST' }).then(j),
   promote:      (rowId: string) => request(`/api/pipelines/${rowId}/promote`, { method: 'POST' }).then(j),
+  setStage:     (rowId: string, to: 'testing' | 'production') =>
+    request(`/api/pipelines/${rowId}/stage`, { method: 'POST', body: JSON.stringify({ to }) }).then(j),
   run:          (rowId: string) =>
     request(`/api/pipelines/${rowId}/run`, { method: 'POST', body: JSON.stringify({}) }).then(j),
   listPipelines: () => request('/api/pipelines').then(j),
@@ -40,13 +42,25 @@ export const api = {
   // Connector catalog (coded + manifest-driven). Returns { catalog }.
   getConnectorCatalog: () => request('/api/connectors/catalog').then(j),
 
+  // Connector instances (A3): list, create credential instance, test-connection.
+  listConnectors: () => request('/api/connectors').then(j),
+  createConnector: (body: { provider: string; name: string; config?: Record<string, any>; secret?: Record<string, any> }) =>
+    request('/api/connectors', { method: 'POST', body: JSON.stringify(body) }).then(j),
+  testConnector: (id: string) => request(`/api/connectors/${id}/test`, { method: 'POST' }).then(j),
+  deleteConnector: (id: string) => request(`/api/connectors/${id}`, { method: 'DELETE' }).then(j),
+
   // AI builder (Ollama). Returns { mermaid, definition }.
   generatePipeline: (prompt: string) =>
     request('/api/ai/generate', { method: 'POST', body: JSON.stringify({ prompt }) }).then(j),
   refinePipeline: (definition: any, prompt: string) =>
     request('/api/ai/refine', { method: 'POST', body: JSON.stringify({ definition, prompt }) }).then(j),
 
-  listExecutions: () => request('/api/executions').then(j),
+  listExecutions: (params?: Record<string, string>) => {
+    const clean = Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][];
+    const qs = clean.length ? '?' + new URLSearchParams(Object.fromEntries(clean)) : '';
+    return request(`/api/executions${qs}`).then(j);
+  },
+  getExecution: (id: string) => request(`/api/executions/${id}`).then(j),
   executionStatus: (id: string) => request(`/api/executions/${id}/status`).then(j),
   signal: (id: string, action: string) => request(`/api/executions/${id}/${action}`, { method: 'POST' }).then(j),
 

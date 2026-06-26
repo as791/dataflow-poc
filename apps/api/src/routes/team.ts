@@ -30,8 +30,17 @@ team.post('/invitations', requireOwner, async (req, res) => {
       [sha256(token), tenantId, req.tenant.userId, email, inviteRole, String(INVITE_TTL_HOURS)]));
 
   const t = await pool.query(`SELECT name FROM tenants WHERE id=$1`, [tenantId]);
-  sendInviteEmail(email, token, t.rows[0]?.name ?? 'your team', req.tenant.email ?? '')
-    .catch(e => console.error('invite email failed', e.message));
+  try {
+    await sendInviteEmail(email, token, t.rows[0]?.name ?? 'your team', req.tenant.email ?? '');
+  } catch (e: any) {
+    await withTenantTx(req, client =>
+      client.query(
+        `DELETE FROM user_invitations
+          WHERE token_hash=$1 AND tenant_id=$2 AND accepted_at IS NULL`,
+        [sha256(token), tenantId]));
+    console.error('invite email failed', e.message);
+    return res.status(502).json({ error: 'invite email failed to send' });
+  }
 
   auditLog(req, 'team.invited', email, { role: inviteRole });
   res.status(201).json({ ok: true, expiresInHours: INVITE_TTL_HOURS });

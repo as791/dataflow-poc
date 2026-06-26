@@ -86,32 +86,74 @@ export const CATALOG: CatalogEntry[] = [
   {
     activityType: 'transform.dedupe', nodeType: 'transform', label: 'Dedupe',
     color: '#D85A30',
-    fields: [{ key: 'key', label: 'Dedup key field', type: 'text', placeholder: 'id' }],
+    fields: [
+      { key: 'key', label: 'Dedup key(s)', type: 'text', placeholder: 'id, country',
+        help: 'One field, or comma-separated for a compound key' },
+      { key: 'keep', label: 'Keep', type: 'select', options: ['first', 'last'] },
+    ],
+  },
+  {
+    activityType: 'transform.flatten', nodeType: 'transform', label: 'Flatten',
+    color: '#D85A30',
+    fields: [
+      { key: 'delimiter', label: 'Key delimiter', type: 'text', placeholder: '.' },
+      { key: 'maxDepth', label: 'Max depth', type: 'number', placeholder: '10' },
+      { key: 'arrayPolicy', label: 'Array policy', type: 'select', options: ['index', 'stringify', 'keep'] },
+    ],
+  },
+  {
+    activityType: 'transform.parse', nodeType: 'transform', label: 'Parse JSON',
+    color: '#D85A30',
+    fields: [
+      { key: 'fields', label: 'Fields (comma-separated)', type: 'text', placeholder: 'payload,metadata' },
+      { key: 'onError', label: 'On error', type: 'select', options: ['skip', 'fail', 'null'] },
+    ],
   },
   // ── Flow ──
   { activityType: 'flow.fork', nodeType: 'fork', label: 'Fork', color: '#7F77DD', fields: [] },
   {
     activityType: 'flow.merge', nodeType: 'merge', label: 'Merge', color: '#7F77DD',
     fields: [
-      { key: 'mergeStrategy', label: 'Strategy', type: 'select', options: ['concat', 'innerJoin'] },
-      { key: 'joinKey', label: 'Join key (for innerJoin)', type: 'text' },
+      { key: 'mergeStrategy', label: 'Strategy', type: 'select',
+        options: ['concat', 'union', 'innerJoin', 'leftJoin', 'outerJoin', 'appendWithSourceTag'] },
+      { key: 'joinKey', label: 'Join key (joins only)', type: 'text' },
     ],
   },
-  // ── Sinks ──
+  // ── Sinks (destinations — bring-your-own via a connector instance) ──
   {
-    activityType: 'sink.postgres', nodeType: 'sink', label: 'Postgres sink',
+    activityType: 'sink.postgres', nodeType: 'sink', label: 'Postgres (destination)',
     color: '#639922',
     fields: [
-      { key: 'collection', label: 'Collection name', type: 'text' },
-      { key: 'dedupField', label: 'Dedup field', type: 'text', placeholder: 'id' },
+      { key: 'connection', label: 'Destination', type: 'instance-picker', provider: 'postgres', writes: ['connectionId'] },
+      { key: 'table', label: 'Target table', type: 'text', placeholder: 'public.orders' },
+      { key: 'conflictKey', label: 'Upsert key(s)', type: 'text', placeholder: 'id',
+        help: 'Comma-separated for a composite key; blank = insert only' },
     ],
   },
   {
-    activityType: 'sink.webhook', nodeType: 'sink', label: 'Webhook sink',
+    activityType: 'sink.gsheets', nodeType: 'sink', label: 'Google Sheets (destination)',
+    color: '#639922',
+    fields: [
+      { key: 'connection', label: 'Destination', type: 'instance-picker', provider: 'google', writes: ['connectionId'] },
+      { key: 'spreadsheetId', label: 'Spreadsheet ID', type: 'text' },
+      { key: 'sheetName', label: 'Sheet name', type: 'text', placeholder: 'Sheet1' },
+      { key: 'includeHeader', label: 'Include header row', type: 'checkbox' },
+    ],
+  },
+  {
+    activityType: 'sink.webhook', nodeType: 'sink', label: 'Webhook (destination)',
     color: '#639922',
     fields: [
       { key: 'url', label: 'URL', type: 'text' },
       { key: 'secret', label: 'HMAC secret', type: 'text' },
+    ],
+  },
+  {
+    activityType: 'sink.records', nodeType: 'sink', label: 'DataFlow store (managed)',
+    color: '#639922',
+    fields: [
+      { key: 'collection', label: 'Collection name', type: 'text' },
+      { key: 'dedupField', label: 'Dedup field', type: 'text', placeholder: 'id' },
     ],
   },
 ];

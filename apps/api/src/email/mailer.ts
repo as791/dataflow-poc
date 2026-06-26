@@ -5,13 +5,14 @@ import path from 'node:path';
 // If SMTP_USER is set (e.g. Twilio SendGrid API key), use authenticated TLS.
 // Otherwise fall back to unauthenticated Mailhog for local dev.
 const useAuth = Boolean(process.env.SMTP_USER);
+const SMTP_PORT = Number(process.env.SMTP_PORT ?? (useAuth ? 587 : 1025));
 
 const transporter = nodemailer.createTransport(
   useAuth
     ? {
         host: process.env.SMTP_HOST ?? 'smtp.sendgrid.net',
-        port: Number(process.env.SMTP_PORT ?? 587),
-        secure: false,           // STARTTLS on 587
+        port: SMTP_PORT,
+        secure: SMTP_PORT === 465,
         auth: {
           user: process.env.SMTP_USER,
           pass: process.env.SMTP_PASS,
@@ -19,7 +20,7 @@ const transporter = nodemailer.createTransport(
       }
     : {
         host: process.env.SMTP_HOST ?? 'mailhog',
-        port: Number(process.env.SMTP_PORT ?? 1025),
+        port: SMTP_PORT,
         secure: false,
         ignoreTLS: true,         // Mailhog needs no TLS/auth
       },

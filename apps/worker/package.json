@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "ts-node src/worker.ts",
-    "build": "tsc -p ."
+    "build": "tsc -p .",
+    "test": "ts-node src/activities/catalog.test.ts"
   },
   "dependencies": {
     "@dataflow/shared": "*",
