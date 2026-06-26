@@ -40,7 +40,7 @@ export const serverCatalog: CatalogEntry[] = [
   { activityType: 'sink.postgres', nodeType: 'sink', label: 'Postgres (destination)', color: '',
     fields: [{ key: 'connection', label: 'Destination', type: 'instance-picker', provider: 'postgres', writes: ['connectionId'] }, { key: 'table', label: 'Target table', type: 'text' }, { key: 'conflictKey', label: 'Upsert key(s)', type: 'text' }] },
   { activityType: 'sink.gsheets', nodeType: 'sink', label: 'Google Sheets (destination)', color: '',
-    fields: [{ key: 'connection', label: 'Destination', type: 'instance-picker', provider: 'google', writes: ['connectionId'] }, { key: 'spreadsheetId', label: 'Spreadsheet ID', type: 'text' }, { key: 'sheetName', label: 'Sheet name', type: 'text' }] },
+    fields: [{ key: 'connection', label: 'Destination', type: 'instance-picker', provider: 'google', writes: ['connectionId'] }, { key: 'spreadsheetId', label: 'Spreadsheet ID', type: 'text' }, { key: 'sheetName', label: 'Sheet name', type: 'text' }, { key: 'writeMode', label: 'Write mode', type: 'select', options: ['replace', 'append'] }, { key: 'includeHeader', label: 'Include header row', type: 'checkbox' }] },
   { activityType: 'sink.webhook', nodeType: 'sink', label: 'Webhook (destination)', color: '',
     fields: [{ key: 'url', label: 'URL', type: 'text' }, { key: 'secret', label: 'HMAC secret', type: 'text' }] },
   { activityType: 'sink.records', nodeType: 'sink', label: 'DataFlow store (managed)', color: '',

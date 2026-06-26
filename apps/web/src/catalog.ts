@@ -137,6 +137,8 @@ export const CATALOG: CatalogEntry[] = [
       { key: 'connection', label: 'Destination', type: 'instance-picker', provider: 'google', writes: ['connectionId'] },
       { key: 'spreadsheetId', label: 'Spreadsheet ID', type: 'text' },
       { key: 'sheetName', label: 'Sheet name', type: 'text', placeholder: 'Sheet1' },
+      { key: 'writeMode', label: 'Write mode', type: 'select', options: ['replace', 'append'],
+        help: 'replace = clear & rewrite each run (idempotent); append = add rows' },
       { key: 'includeHeader', label: 'Include header row', type: 'checkbox' },
     ],
   },

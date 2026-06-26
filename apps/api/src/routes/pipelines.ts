@@ -109,14 +109,15 @@ export function deriveStage(status: string, environment: string): Stage {
 // Pure transition planner (exported for the self-check). The promotion gate lives
 // here: testing→production is refused unless the version has a green test run.
 export function planTransition(from: Stage, to: Stage, hasGreenTestRun: boolean):
-  { action: 'activate-test' | 'promote-prod' | 'rollback-prod' } | { code: number; error: string } {
+  { action: 'activate-test' | 'promote-prod' } | { code: number; error: string } {
   if (from === 'draft' && to === 'testing') return { action: 'activate-test' };
   if (from === 'testing' && to === 'production') {
     return hasGreenTestRun
       ? { action: 'promote-prod' }
       : { code: 409, error: 'promotion gate: this version has no successful test run yet. Run it in test and let it complete, then promote.' };
   }
-  if (from === 'production' && to === 'testing') return { action: 'rollback-prod' };
+  // production→testing is NOT an auto-rollback — that was destructive and surprising.
+  // Rolling back prod is a deliberate, separate action (add when needed).
   return { code: 409, error: `unsupported stage transition ${from} → ${to}` };
 }
 
@@ -161,15 +162,7 @@ pipelines.post('/:rowId/stage', requireOwner, async (req, res) => {
         [src.pipeline_key, version, src.tenant_id, src.name, JSON.stringify(def), src.version]);
       return { def, rowId: ins.rows[0].id as string, env: 'prod' as Environment, stage: 'production' as Stage, version };
     }
-    // rollback-prod: re-point active prod to the previous archived prod version.
-    const { rows: prev } = await client.query(
-      `SELECT * FROM pipelines WHERE pipeline_key=$1 AND environment='prod' AND id<>$2
-         ORDER BY version DESC LIMIT 1`, [src.pipeline_key, req.params.rowId]);
-    if (!prev.length) return { code: 409, error: 'no previous prod version to roll back to' } as const;
-    await client.query(`UPDATE pipelines SET status='archived'
-      WHERE pipeline_key=$1 AND environment='prod' AND status='active'`, [src.pipeline_key]);
-    await client.query(`UPDATE pipelines SET status='active' WHERE id=$1`, [prev[0].id]);
-    return { def: prev[0].definition as PipelineDefinition, rowId: prev[0].id as string, env: 'prod' as Environment, stage: 'production' as Stage };
+    return { code: 409, error: `unsupported stage transition to ${to}` } as const;
   });
 
   if ('code' in out) return res.status(out.code as number).json({ error: out.error });
