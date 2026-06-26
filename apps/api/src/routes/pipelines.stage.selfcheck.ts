@@ -14,7 +14,8 @@ assert.deepEqual(planTransition('testing', 'production', false), {
 // gate passes with a green run
 assert.deepEqual(planTransition('testing', 'production', true), { action: 'promote-prod' });
 assert.deepEqual(planTransition('draft', 'testing', false), { action: 'activate-test' });
-assert.deepEqual(planTransition('production', 'testing', false), { action: 'rollback-prod' });
+// production→testing is no longer an auto-rollback — it is rejected.
+assert.ok('code' in planTransition('production', 'testing', false));
 assert.ok('code' in planTransition('draft', 'production', true)); // no skip-the-line
 
 console.log('pipelines stage gate self-check OK');

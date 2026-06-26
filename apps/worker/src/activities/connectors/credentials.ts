@@ -15,9 +15,10 @@ export interface CredentialInstance {
 
 export async function loadCredentialInstance(connectionId: string, tenantId: string): Promise<CredentialInstance> {
   const { rows } = await pool.query(
-    `SELECT provider, kind, secret, extra FROM connector_instances WHERE id = $1 AND tenant_id = $2`,
+    `SELECT provider, kind, secret, extra FROM connector_instances
+       WHERE id = $1 AND tenant_id = $2 AND kind = 'credential'`,
     [connectionId, tenantId]);
-  if (!rows.length) throw new Error(`connector instance ${connectionId} not found for tenant ${tenantId}`);
+  if (!rows.length) throw new Error(`credential instance ${connectionId} not found for tenant ${tenantId} (wrong instance kind?)`);
   const r = rows[0];
   return {
     provider: r.provider,

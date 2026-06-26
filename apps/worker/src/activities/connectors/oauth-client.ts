@@ -75,9 +75,9 @@ async function loadConnection(connectionId: string, tenantId: string): Promise<C
   const { rows } = await pool.query(
     `SELECT id, provider, access_token, refresh_token, expires_at, extra
        FROM connector_instances
-      WHERE id = $1 AND tenant_id = $2`,
+      WHERE id = $1 AND tenant_id = $2 AND kind = 'oauth'`,
     [connectionId, tenantId]);
-  if (!rows.length) throw new Error(`oauth_connection ${connectionId} not found for tenant ${tenantId}`);
+  if (!rows.length) throw new Error(`oauth connection ${connectionId} not found for tenant ${tenantId}`);
   return rows[0] as ConnectionRow;
 }
 

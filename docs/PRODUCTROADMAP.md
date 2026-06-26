@@ -121,12 +121,14 @@ connectors, symmetric to sources, selected by a connector instance (A3).
 
 **Design — make sinks symmetric to sources, reusing A3 instances + the connector SDK:**
 
-- **SDK: add a `SinkFn` contract** beside `SourceFn` in `packages/connector-sdk` (`write(records, config,
-  creds) → {written}`), plus `registry.getSinks()`. Manifests can describe simple HTTP sinks; coded
-  plugins handle DB/Sheets — exactly the source split that already exists.
-- **Worker: one generic sink dispatcher** that resolves the referenced **connector instance**, decrypts
-  its creds (reuse `decryptToken`), and calls the chosen `SinkFn`. Mirrors how coded sources resolve an
-  OAuth/credential instance today.
+- **Sinks are connector `Handler`s** (the SDK already unifies sink+transform under one `Handler` type via
+  `registry.getHandlers()` — no separate `SinkFn` contract is needed). Each destination handler resolves
+  the referenced **connector instance** from `ctx.tenantId` + `config.connectionId`, decrypts its creds
+  (`loadCredentialInstance` for credential kinds, `getOAuthConnection` for OAuth), and writes. Mirrors how
+  coded sources resolve an instance today.
+  - *Current state:* the Phase-A destinations are coded handlers in `apps/worker/src/activities/catalog.ts`.
+    Promoting them to manifest-driven plugins (so third parties add a destination with no core edit) is a
+    Phase-B follow-up, not required for GTM.
 - **Phase A destination set (minimal, symmetric to the sources we already ship):**
   - **Postgres destination** (BYO DB) — upsert records into a user table (config: table, conflict key;
     creds from a `postgres` credential instance). This replaces the internal `sink.postgres` alias.

@@ -92,7 +92,7 @@ function InstancePicker({ provider, value, onChange }: {
     <select className="glass-select" value={value.connectionId ?? ''}
       onChange={e => onChange({ connectionId: e.target.value })}>
       <option value="">— select destination —</option>
-      {instances.map(i => <option key={i.id} value={i.id}>{i.name ?? i.email ?? i.id} ({i.provider})</option>)}
+      {instances.map(i => <option key={i.id} value={i.id}>{i.name ?? i.email ?? i.id} ({i.provider}{i.kind ? `, ${i.kind}` : ''})</option>)}
     </select>
   );
 }

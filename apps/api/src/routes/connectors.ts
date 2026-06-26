@@ -266,16 +266,22 @@ connectors.post('/:connectionId/refresh', async (req, res) => {
 connectors.post('/', async (req, res) => {
   const { provider, name, config, secret } = req.body ?? {};
   if (!provider || !name) return res.status(400).json({ error: 'provider and name are required' });
-  const id = await withTenantTx(req, async client => {
-    const { rows } = await client.query(
-      `INSERT INTO connector_instances
-         (tenant_id, user_id, kind, provider, provider_account_email, secret, extra)
-       VALUES ($1,$2,'credential',$3,$4,$5,$6) RETURNING id`,
-      [req.tenant.tenantId, req.tenant.userId, provider, name,
-       secret ? encryptToken(JSON.stringify(secret)) : null,
-       config ? JSON.stringify(config) : null]);
-    return rows[0].id as string;
-  });
+  let id: string;
+  try {
+    id = await withTenantTx(req, async client => {
+      const { rows } = await client.query(
+        `INSERT INTO connector_instances
+           (tenant_id, user_id, kind, provider, provider_account_email, secret, extra)
+         VALUES ($1,$2,'credential',$3,$4,$5,$6) RETURNING id`,
+        [req.tenant.tenantId, req.tenant.userId, provider, name,
+         secret ? encryptToken(JSON.stringify(secret)) : null,
+         config ? JSON.stringify(config) : null]);
+      return rows[0].id as string;
+    });
+  } catch (e: any) {
+    if (e?.code === '23505') return res.status(409).json({ error: `a ${provider} connector named "${name}" already exists` });
+    throw e;
+  }
   await auditLog(req, 'connector.created', id, { provider, kind: 'credential' });
   res.json({ id });
 });
@@ -304,8 +310,10 @@ export async function testInstance(tenantId: string, row: any): Promise<string> 
   const cfg = (row.extra ?? {}) as Record<string, any>;
   const secret = row.secret ? JSON.parse(decryptToken(row.secret)) : {};
   if (row.provider === 'postgres') {
+    // Keep these client options in sync with the worker's sink.postgres
+    // (apps/worker/src/activities/catalog.ts) so Test is a true preflight.
     const { Client } = await import('pg');
-    const c = new Client({ host: cfg.host, port: cfg.port ?? 5432, database: cfg.database, user: cfg.user, password: secret.password });
+    const c = new Client({ host: cfg.host, port: cfg.port ?? 5432, database: cfg.database, user: cfg.user, password: secret.password, connectionTimeoutMillis: 10_000 });
     await c.connect();
     try { await c.query('SELECT 1'); } finally { await c.end(); }
     return 'SELECT 1 OK';
@@ -637,12 +645,12 @@ async function pickConnection(
   return withTenant(tenantId, async client => {
     if (connectionId) {
       const { rows } = await client.query(
-        `SELECT * FROM connector_instances WHERE id=$1 AND provider=$2`,
+        `SELECT * FROM connector_instances WHERE id=$1 AND provider=$2 AND kind='oauth'`,
         [connectionId, provider]);
       return (rows[0] as ConnectionRow) ?? null;
     }
     const { rows } = await client.query(
-      `SELECT * FROM connector_instances WHERE provider=$1
+      `SELECT * FROM connector_instances WHERE provider=$1 AND kind='oauth'
        ORDER BY created_at DESC LIMIT 1`, [provider]);
     return (rows[0] as ConnectionRow) ?? null;
   });

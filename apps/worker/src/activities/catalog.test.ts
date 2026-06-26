@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { flattenRecord, parseRecordFields, dedupeRecords } from './catalog';
+import { flattenRecord, parseRecordFields, dedupeRecords, buildPgUpsert } from './catalog';
 import { mergeArrays } from './index';
 
 // ── A4: flatten — nested depth, custom delimiter, depth ceiling, array policies ──
@@ -42,5 +42,17 @@ assert.strictEqual(dedupeRecords(dupes, ['id', 'c'], 'first').length, 3);
 assert.strictEqual(dedupeRecords(dupes, 'id, c', 'first').length, 3);
 assert.strictEqual(dedupeRecords(dupes, ['id', 'c'], 'first')[0].v, 'a');
 assert.strictEqual(dedupeRecords(dupes, ['id', 'c'], 'last')[0].v, 'b');
+
+// ── A6: sink.postgres upsert SQL builder ──
+assert.strictEqual(
+  buildPgUpsert('orders', ['id', 'name'], [], 1),
+  'INSERT INTO orders ("id","name") VALUES ($1,$2)');
+assert.strictEqual(
+  buildPgUpsert('orders', ['id', 'name'], ['id'], 2),
+  'INSERT INTO orders ("id","name") VALUES ($1,$2),($3,$4) ON CONFLICT ("id") DO UPDATE SET "name"=EXCLUDED."name"');
+// every column is a conflict key → nothing to update → DO NOTHING
+assert.ok(buildPgUpsert('t', ['id'], ['id'], 1).endsWith('DO NOTHING'));
+// compound conflict key
+assert.ok(buildPgUpsert('t', ['id', 'c', 'v'], ['id', 'c'], 1).includes('ON CONFLICT ("id","c") DO UPDATE SET "v"=EXCLUDED."v"'));
 
 console.log('catalog.test.ts: all assertions passed');
