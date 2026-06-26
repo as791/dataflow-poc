@@ -23,11 +23,38 @@ async function temporalIdentityForExecution(req: any, id: string): Promise<{
   });
 }
 
+// Run list with optional filters. No pagination — a workspace has a dozen runs (roadmap A2).
 executions.get('/', async (req, res) => {
+  const q = req.query as Record<string, string | undefined>;
+  const where: string[] = []; const params: any[] = [];
+  const add = (col: string, val?: string) => { if (val) { params.push(val); where.push(`${col} = $${params.length}`); } };
+  add('e.pipeline_id', q.pipeline);
+  add('e.environment', q.env);
+  add('e.phase', q.phase ?? q.status);
+  if (q.from) { params.push(q.from); where.push(`e.started_at >= $${params.length}`); }
+  if (q.to)   { params.push(q.to);   where.push(`e.started_at <= $${params.length}`); }
+  const limit = Math.min(Math.max(parseInt(q.limit ?? '100', 10) || 100, 1), 500);
   const rows = await withTenantTx(req, c => c.query(
     `SELECT e.*, p.name FROM executions e JOIN pipelines p ON p.id = e.pipeline_id
-     ORDER BY started_at DESC LIMIT 100`));
+     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+     ORDER BY started_at DESC LIMIT ${limit}`, params));
   res.json(rows.rows);
+});
+
+// Run detail: execution + node_runs + pipeline definition (nodes/edges).
+executions.get('/:id', async (req, res) => {
+  const data = await withTenantTx(req, async client => {
+    const { rows: e } = await client.query(
+      `SELECT e.*, p.name, p.definition FROM executions e
+       JOIN pipelines p ON p.id = e.pipeline_id WHERE e.id = $1`, [req.params.id]);
+    if (!e[0]) return null;
+    const { rows: nodeRuns } = await client.query(
+      `SELECT node_id, status, duration_ms, record_count, error, finished_at
+         FROM node_runs WHERE execution_id = $1`, [req.params.id]);
+    const { definition, ...execution } = e[0];
+    return { execution, definition: { nodes: definition?.nodes ?? [], edges: definition?.edges ?? [] }, nodeRuns };
+  });
+  data ? res.json(data) : res.status(404).json({ error: 'not found' });
 });
 
 executions.get('/:id/status', async (req, res) => {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, ShieldCheck } from 'lucide-react';
+import { RefreshCw, ShieldCheck, Plug } from 'lucide-react';
+import { api } from '../api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -7,9 +8,13 @@ type Provider = 'google' | 'microsoft' | 'zendesk';
 
 interface Connection {
   id: string;
-  provider: Provider;
+  kind?: 'oauth' | 'credential';
+  provider: string;
+  name?: string;
   email?: string;
   subdomain?: string;   // zendesk only
+  host?: string;
+  baseUrl?: string;
   connected_at?: string;
 }
 
@@ -154,6 +159,69 @@ function ZendeskModal({ onClose, onConnect }: {
   );
 }
 
+// ─── Credential instance modal (A3 — non-OAuth creds) ──────────────────────────
+
+function CredentialModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [provider, setProvider] = useState<'postgres' | 'http'>('postgres');
+  const [name, setName] = useState('');
+  const [f, setF] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setF(s => ({ ...s, [k]: e.target.value }));
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault(); setBusy(true); setErr(null);
+    try {
+      const body = provider === 'postgres'
+        ? { provider, name, config: { host: f.host, port: f.port ? +f.port : 5432, database: f.database, user: f.user }, secret: { password: f.password } }
+        : { provider, name, config: { baseUrl: f.baseUrl }, secret: { apiKey: f.apiKey } };
+      await api.createConnector(body);
+      onSaved(); onClose();
+    } catch (ex: any) { setErr(ex.message ?? 'Failed to save'); setBusy(false); }
+  };
+
+  return (
+    <div className="glass-modal-backdrop" onClick={onClose}>
+      <div className="glass-modal" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-semibold">Add credential</h2>
+          <button className="glass-btn-ghost w-8 h-8 flex items-center justify-center text-lg leading-none" onClick={onClose}>×</button>
+        </div>
+        <form onSubmit={submit} className="space-y-3">
+          <label className="glass-label">Type
+            <select className="glass-select" value={provider} onChange={e => setProvider(e.target.value as any)}>
+              <option value="postgres">Postgres</option>
+              <option value="http">HTTP API</option>
+            </select>
+          </label>
+          <label className="glass-label">Name
+            <input className="glass-input" value={name} onChange={e => setName(e.target.value)} placeholder="warehouse" required />
+          </label>
+          {provider === 'postgres' ? (
+            <>
+              <input className="glass-input" placeholder="host" value={f.host ?? ''} onChange={set('host')} />
+              <input className="glass-input" placeholder="port (5432)" value={f.port ?? ''} onChange={set('port')} />
+              <input className="glass-input" placeholder="database" value={f.database ?? ''} onChange={set('database')} />
+              <input className="glass-input" placeholder="user" value={f.user ?? ''} onChange={set('user')} />
+              <input className="glass-input" type="password" placeholder="password" value={f.password ?? ''} onChange={set('password')} />
+            </>
+          ) : (
+            <>
+              <input className="glass-input" placeholder="base URL" value={f.baseUrl ?? ''} onChange={set('baseUrl')} />
+              <input className="glass-input" type="password" placeholder="API key (optional)" value={f.apiKey ?? ''} onChange={set('apiKey')} />
+            </>
+          )}
+          {err && <p className="text-xs text-danger/90 bg-danger/10 border border-danger/30 rounded-lg px-3 py-2">{err}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" className="glass-btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="submit" className="glass-btn-primary" disabled={busy || !name.trim()}>{busy ? 'Saving…' : 'Save'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ─── Individual connector card ────────────────────────────────────────────────
 
 interface CardProps {
@@ -261,7 +329,19 @@ export function ConnectorsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [zendeskModalOpen, setZendeskModalOpen] = useState(false);
+  const [credModalOpen, setCredModalOpen] = useState(false);
+  const [testResult, setTestResult] = useState<Record<string, string>>({});
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+
+  const credentials = connections.filter(c => c.kind === 'credential');
+  const testConn = async (id: string) => {
+    setTestResult(r => ({ ...r, [id]: 'testing…' }));
+    try {
+      const res = await api.testConnector(id);
+      setTestResult(r => ({ ...r, [id]: (res.ok ? '✓ ' : '✕ ') + res.message }));
+    } catch (e: any) { setTestResult(r => ({ ...r, [id]: '✕ ' + (e.message ?? 'failed') })); }
+  };
+  const removeCred = async (id: string) => { await api.deleteConnector(id); refresh(); };
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -362,6 +442,35 @@ export function ConnectorsPage() {
         </div>
       )}
 
+      {/* Credentials (non-OAuth instances) */}
+      <div className="glass-card p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Plug size={16} className="text-brand-300" />
+            <h3 className="font-semibold text-base">Credentials</h3>
+          </div>
+          <button className="glass-btn-ghost text-sm" onClick={() => setCredModalOpen(true)}>+ Add credential</button>
+        </div>
+        {credentials.length === 0 ? (
+          <p className="text-xs text-white/40">No credentials yet. Add Postgres or HTTP creds to reference from nodes.</p>
+        ) : (
+          <ul className="divide-y divide-white/5">
+            {credentials.map(c => (
+              <li key={c.id} className="flex items-center justify-between py-2 text-sm">
+                <div className="min-w-0">
+                  <p className="truncate text-white/90">{c.name ?? c.id} <span className="text-white/40">· {c.provider}</span></p>
+                  {testResult[c.id] && <p className="text-xs text-white/50">{testResult[c.id]}</p>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button className="glass-btn-ghost px-2.5 py-1 text-xs" onClick={() => testConn(c.id)}>Test</button>
+                  <button className="glass-btn-danger px-2.5 py-1 text-xs" onClick={() => removeCred(c.id)}>✕</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       {/* Info panel */}
       <div className="glass-panel flex gap-3 p-5 text-xs text-white/50">
         <ShieldCheck size={18} className="mt-0.5 shrink-0 text-emerald-300" />
@@ -383,6 +492,11 @@ export function ConnectorsPage() {
           onClose={() => setZendeskModalOpen(false)}
           onConnect={handleConnectZendesk}
         />
+      )}
+
+      {/* Credential modal */}
+      {credModalOpen && (
+        <CredentialModal onClose={() => setCredModalOpen(false)} onSaved={refresh} />
       )}
     </div>
   );

@@ -27,16 +27,24 @@ export const serverCatalog: CatalogEntry[] = [
   { activityType: 'transform.rename', nodeType: 'transform', label: 'Rename', color: '',
     fields: [{ key: 'mapping', label: 'Field mapping (JSON)', type: 'textarea' }] },
   { activityType: 'transform.dedupe', nodeType: 'transform', label: 'Dedupe', color: '',
-    fields: [{ key: 'key', label: 'Dedup key field', type: 'text' }] },
+    fields: [{ key: 'key', label: 'Dedup key(s)', type: 'text' }, { key: 'keep', label: 'Keep', type: 'select', options: ['first', 'last'] }] },
+  { activityType: 'transform.flatten', nodeType: 'transform', label: 'Flatten', color: '',
+    fields: [{ key: 'delimiter', label: 'Key delimiter', type: 'text' }, { key: 'maxDepth', label: 'Max depth', type: 'number' }, { key: 'arrayPolicy', label: 'Array policy', type: 'select', options: ['index', 'stringify', 'keep'] }] },
+  { activityType: 'transform.parse', nodeType: 'transform', label: 'Parse JSON', color: '',
+    fields: [{ key: 'fields', label: 'Fields (comma-separated)', type: 'text' }, { key: 'onError', label: 'On error', type: 'select', options: ['skip', 'fail', 'null'] }] },
   // ── Flow ──
   { activityType: 'flow.fork', nodeType: 'fork', label: 'Fork', color: '', fields: [] },
   { activityType: 'flow.merge', nodeType: 'merge', label: 'Merge', color: '',
-    fields: [{ key: 'mergeStrategy', label: 'Strategy', type: 'select', options: ['concat', 'innerJoin'] }, { key: 'joinKey', label: 'Join key', type: 'text' }] },
-  // ── Sinks ──
-  { activityType: 'sink.postgres', nodeType: 'sink', label: 'Postgres sink', color: '',
-    fields: [{ key: 'collection', label: 'Collection name', type: 'text' }, { key: 'dedupField', label: 'Dedup field', type: 'text' }] },
-  { activityType: 'sink.webhook', nodeType: 'sink', label: 'Webhook sink', color: '',
+    fields: [{ key: 'mergeStrategy', label: 'Strategy', type: 'select', options: ['concat', 'union', 'innerJoin', 'leftJoin', 'outerJoin', 'appendWithSourceTag'] }, { key: 'joinKey', label: 'Join key', type: 'text' }] },
+  // ── Sinks (destinations — bring-your-own via connector instance) ──
+  { activityType: 'sink.postgres', nodeType: 'sink', label: 'Postgres (destination)', color: '',
+    fields: [{ key: 'connection', label: 'Destination', type: 'instance-picker', provider: 'postgres', writes: ['connectionId'] }, { key: 'table', label: 'Target table', type: 'text' }, { key: 'conflictKey', label: 'Upsert key(s)', type: 'text' }] },
+  { activityType: 'sink.gsheets', nodeType: 'sink', label: 'Google Sheets (destination)', color: '',
+    fields: [{ key: 'connection', label: 'Destination', type: 'instance-picker', provider: 'google', writes: ['connectionId'] }, { key: 'spreadsheetId', label: 'Spreadsheet ID', type: 'text' }, { key: 'sheetName', label: 'Sheet name', type: 'text' }] },
+  { activityType: 'sink.webhook', nodeType: 'sink', label: 'Webhook (destination)', color: '',
     fields: [{ key: 'url', label: 'URL', type: 'text' }, { key: 'secret', label: 'HMAC secret', type: 'text' }] },
+  { activityType: 'sink.records', nodeType: 'sink', label: 'DataFlow store (managed)', color: '',
+    fields: [{ key: 'collection', label: 'Collection name', type: 'text' }, { key: 'dedupField', label: 'Dedup field', type: 'text' }] },
 ];
 
 // Coded connectors (rich field/oauth metadata) + manifest-driven connectors
