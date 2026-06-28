@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, ShieldCheck, Plug } from 'lucide-react';
+import { BadgeHelp, Blocks, RefreshCw, Sheet, ShieldCheck, Plug } from 'lucide-react';
 import { api } from '../api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -72,15 +72,15 @@ function timeAgo(iso?: string): string {
 // ─── Provider icon avatars ────────────────────────────────────────────────────
 
 function ProviderIcon({ provider }: { provider: Provider }) {
-  const cfg: Record<Provider, { letter: string; bg: string }> = {
-    google:    { letter: 'G', bg: 'from-red-500/70 to-yellow-400/70' },
-    microsoft: { letter: 'M', bg: 'from-blue-500/70 to-cyan-400/70' },
-    zendesk:   { letter: 'Z', bg: 'from-emerald-500/70 to-teal-400/70' },
+  const cfg: Record<Provider, { icon: typeof Sheet; bg: string }> = {
+    google:    { icon: Sheet, bg: 'from-emerald-500/80 to-green-600/80' },
+    microsoft: { icon: Blocks, bg: 'from-blue-500/80 to-cyan-500/80' },
+    zendesk:   { icon: BadgeHelp, bg: 'from-slate-700 to-emerald-700' },
   };
-  const { letter, bg } = cfg[provider];
+  const { icon: Icon, bg } = cfg[provider];
   return (
-    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${bg} flex items-center justify-center text-white font-bold text-lg shadow-lg flex-shrink-0`}>
-      {letter}
+    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${bg} flex items-center justify-center text-white shadow-lg flex-shrink-0`}>
+      <Icon size={18} strokeWidth={1.8} />
     </div>
   );
 }
@@ -135,7 +135,7 @@ function ZendeskModal({ onClose, onConnect }: {
                 autoFocus
                 required
               />
-              <span className="text-sm text-white/40 whitespace-nowrap">.zendesk.com</span>
+              <span className="text-sm text-gray-400 dark:text-white/40 whitespace-nowrap">.zendesk.com</span>
             </div>
           </div>
 
@@ -253,7 +253,7 @@ function ConnectorCard({ provider, label, connections, onDisconnect, onConnect }
         <ProviderIcon provider={provider} />
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold text-base">{label}</h3>
-          <p className="text-xs text-white/50 mt-0.5">
+          <p className="text-xs text-gray-400 mt-0.5">
             {provider === 'zendesk' ? 'Per-subdomain OAuth' : 'OAuth 2.0'}
           </p>
         </div>
@@ -263,8 +263,8 @@ function ConnectorCard({ provider, label, connections, onDisconnect, onConnect }
             Active
           </span>
         ) : (
-          <span className="glass-badge text-white/50">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/30 mr-1" />
+          <span className="glass-badge">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-white/30 mr-1" />
             Not connected
           </span>
         )}
@@ -272,18 +272,18 @@ function ConnectorCard({ provider, label, connections, onDisconnect, onConnect }
 
       {/* Connected accounts */}
       {hasConnections && (
-        <ul className="divide-y divide-white/5">
+        <ul className="divide-y divide-gray-100 dark:divide-white/5">
           {connections.map(conn => (
             <li key={conn.id} className="flex items-center justify-between py-2 text-sm">
               <div className="min-w-0">
-                <p className="truncate text-white/90">
+                <p className="truncate text-gray-900 dark:text-white/90">
                   {conn.email ?? conn.subdomain ?? conn.id}
                   {conn.subdomain && (
-                    <span className="text-white/40 ml-1">.zendesk.com</span>
+                    <span className="text-gray-400 dark:text-white/40 ml-1">.zendesk.com</span>
                   )}
                 </p>
                 {conn.connected_at && (
-                  <p className="text-xs text-white/40">Connected {timeAgo(conn.connected_at)}</p>
+                  <p className="text-xs text-gray-400 dark:text-white/40">Connected {timeAgo(conn.connected_at)}</p>
                 )}
               </div>
               <button
@@ -292,7 +292,7 @@ function ConnectorCard({ provider, label, connections, onDisconnect, onConnect }
                 onClick={() => handleDisconnect(conn.id)}
                 title="Disconnect"
               >
-                {disconnecting === conn.id ? '…' : '✕ Disconnect'}
+                {disconnecting === conn.id ? 'Disconnecting…' : 'Disconnect'}
               </button>
             </li>
           ))}
@@ -338,8 +338,8 @@ export function ConnectorsPage() {
     setTestResult(r => ({ ...r, [id]: 'testing…' }));
     try {
       const res = await api.testConnector(id);
-      setTestResult(r => ({ ...r, [id]: (res.ok ? '✓ ' : '✕ ') + res.message }));
-    } catch (e: any) { setTestResult(r => ({ ...r, [id]: '✕ ' + (e.message ?? 'failed') })); }
+      setTestResult(r => ({ ...r, [id]: `${res.ok ? 'Passed' : 'Failed'}: ${res.message}` }));
+    } catch (e: any) { setTestResult(r => ({ ...r, [id]: `Failed: ${e.message ?? 'failed'}` })); }
   };
   const removeCred = async (id: string) => { await api.deleteConnector(id); refresh(); };
 
@@ -420,7 +420,7 @@ export function ConnectorsPage() {
 
       {/* Connector cards */}
       {loading && connections.length === 0 ? (
-        <div className="glass-panel p-10 text-center text-white/40 text-sm">
+        <div className="glass-panel p-10 text-center text-gray-400 dark:text-white/40 text-sm">
           Loading connectors…
         </div>
       ) : (
@@ -452,14 +452,14 @@ export function ConnectorsPage() {
           <button className="glass-btn-ghost text-sm" onClick={() => setCredModalOpen(true)}>+ Add credential</button>
         </div>
         {credentials.length === 0 ? (
-          <p className="text-xs text-white/40">No credentials yet. Add Postgres or HTTP creds to reference from nodes.</p>
+          <p className="text-xs text-gray-400 dark:text-white/40">No credentials yet. Add Postgres or HTTP creds to reference from nodes.</p>
         ) : (
-          <ul className="divide-y divide-white/5">
+          <ul className="divide-y divide-gray-100 dark:divide-white/5">
             {credentials.map(c => (
               <li key={c.id} className="flex items-center justify-between py-2 text-sm">
                 <div className="min-w-0">
-                  <p className="truncate text-white/90">{c.name ?? c.id} <span className="text-white/40">· {c.provider}</span></p>
-                  {testResult[c.id] && <p className="text-xs text-white/50">{testResult[c.id]}</p>}
+                  <p className="truncate text-gray-900 dark:text-white/90">{c.name ?? c.id} <span className="text-gray-400 dark:text-white/40">· {c.provider}</span></p>
+                  {testResult[c.id] && <p className="text-xs text-gray-500 dark:text-white/50">{testResult[c.id]}</p>}
                 </div>
                 <div className="flex items-center gap-2">
                   <button className="glass-btn-ghost px-2.5 py-1 text-xs" onClick={() => testConn(c.id)}>Test</button>
@@ -472,11 +472,11 @@ export function ConnectorsPage() {
       </div>
 
       {/* Info panel */}
-      <div className="glass-panel flex gap-3 p-5 text-xs text-white/50">
-        <ShieldCheck size={18} className="mt-0.5 shrink-0 text-emerald-300" />
+      <div className="glass-panel flex gap-3 p-5 text-xs text-gray-500 dark:text-white/50">
+        <ShieldCheck size={18} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-300" />
         <div className="space-y-1">
         <p>
-          <span className="text-white/70 font-medium">Security note:</span>{' '}
+          <span className="font-medium text-gray-700 dark:text-white/70">Security note:</span>{' '}
           OAuth tokens are AES-256 encrypted and stored per-tenant. Revoking a connection
           immediately invalidates the stored token.
         </p>

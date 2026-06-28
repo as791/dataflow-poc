@@ -141,7 +141,7 @@ export function AnalyticsPage() {
   };
 
   if (loadingDatasets) {
-    return <div className="flex items-center justify-center h-full text-white/40 text-sm">Loading analytics…</div>;
+    return <div className="flex items-center justify-center h-full text-gray-400 dark:text-white/40 text-sm">Loading analytics…</div>;
   }
 
   if (datasets.length === 0) {
@@ -150,7 +150,7 @@ export function AnalyticsPage() {
         <div className="glass-panel p-8 text-center space-y-4">
           <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-2xl border border-brand-300/20 bg-brand-500/10 text-brand-300"><BarChart3 size={24} /></div>
           <h1 className="text-xl font-semibold">No datasets yet</h1>
-          <p className="text-sm text-white/60 leading-relaxed">
+          <p className="text-sm text-gray-500 dark:text-white/60 leading-relaxed">
             To use analytics, your pipelines need to push data into ClickHouse collections.
             Once a pipeline has executed and routed data, it will appear here as a dataset.
           </p>
@@ -162,31 +162,31 @@ export function AnalyticsPage() {
   return (
     <div className="flex h-[calc(100vh-64px)] overflow-hidden">
       {/* Left sidebar */}
-      <aside className="w-60 flex-shrink-0 border-r border-white/[0.07] bg-white/[0.018] flex flex-col">
-        <div className="p-4 border-b border-white/10">
-          <h2 className="text-sm font-semibold text-white/80">Datasets</h2>
+      <aside className="w-60 flex-shrink-0 border-r border-gray-200 dark:border-white/[0.07] bg-gray-50/80 dark:bg-white/[0.018] flex flex-col">
+        <div className="p-4 border-b border-gray-200 dark:border-white/10">
+          <h2 className="text-sm font-semibold text-gray-800 dark:text-white/80">Datasets</h2>
         </div>
         <ul className="flex-1 overflow-y-auto py-2">
           {datasets.map(d => (
             <li key={d.collection}>
-              <button className="w-full text-left px-4 py-2 text-sm hover:bg-white/5 transition" title={`${d.row_count.toLocaleString()} rows`}>
-                <p className="truncate text-white/80">{d.collection}</p>
-                <p className="text-xs text-white/40">{d.row_count.toLocaleString()} rows</p>
+              <button className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/5 transition" title={`${d.row_count.toLocaleString()} rows`}>
+                <p className="truncate text-gray-800 dark:text-white/80">{d.collection}</p>
+                <p className="text-xs text-gray-400 dark:text-white/40">{d.row_count.toLocaleString()} rows</p>
               </button>
             </li>
           ))}
         </ul>
-        <div className="border-t border-white/10 p-4">
-          <h2 className="text-xs font-semibold text-white/50 mb-2 uppercase tracking-wide">Dashboards</h2>
+        <div className="border-t border-gray-200 dark:border-white/10 p-4">
+          <h2 className="text-xs font-semibold text-gray-500 dark:text-white/50 mb-2 uppercase tracking-wide">Dashboards</h2>
           {dashboards.length === 0 ? (
-            <p className="text-xs text-white/30">No saved dashboards.</p>
+            <p className="text-xs text-gray-400 dark:text-white/30">No saved dashboards.</p>
           ) : (
             <ul className="space-y-1">
               {dashboards.map(db => (
                 <li key={db.id}>
                   <button
                     className={`w-full text-left text-xs px-2 py-1.5 rounded-lg transition ${
-                      activeDashboard?.id === db.id ? 'bg-brand-500/30 text-brand-400' : 'hover:bg-white/5 text-white/60'
+                      activeDashboard?.id === db.id ? 'bg-brand-500/30 text-brand-400' : 'hover:bg-gray-100 dark:hover:bg-white/5 text-gray-500 dark:text-white/60'
                     }`}
                     onClick={() => loadDashboard(db)}>
                     {db.name}
@@ -200,7 +200,7 @@ export function AnalyticsPage() {
 
       {/* Main canvas */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 flex-shrink-0">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-white/10 flex-shrink-0">
           <div className="flex items-center gap-3">
             <h1 className="text-base font-semibold">
               {activeDashboard ? activeDashboard.name : 'Untitled Dashboard'}
@@ -222,8 +222,8 @@ export function AnalyticsPage() {
         <div ref={containerRef} className="flex-1 overflow-auto p-4">
           {widgets.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center space-y-3">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.04] text-white/30"><BarChart3 size={24} /></div>
-              <p className="text-white/40 text-sm">No widgets yet.</p>
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-gray-200 dark:border-white/[0.08] bg-gray-100 dark:bg-white/[0.04] text-gray-400 dark:text-white/30"><BarChart3 size={24} /></div>
+              <p className="text-gray-400 dark:text-white/40 text-sm">No widgets yet.</p>
               <button className="glass-btn-primary text-sm" onClick={() => setShowAddModal(true)}>
                 <Plus size={15} /> Add first widget
               </button>
@@ -243,12 +243,12 @@ export function AnalyticsPage() {
                   <div className="drag-handle flex items-center justify-between px-3 pt-3 pb-2 cursor-move flex-shrink-0 select-none">
                     <div className="min-w-0">
                       <p className="text-sm font-medium truncate">{widget.title}</p>
-                      <p className="text-xs text-white/40 truncate">
+                      <p className="text-xs text-gray-400 dark:text-white/40 truncate">
                         {widget.dataset}{loadingData[widget.id] ? ' · loading…' : ''}
                       </p>
                     </div>
                     <button
-                      className="glass-btn-ghost w-6 h-6 flex items-center justify-center text-xs text-white/50 hover:text-danger flex-shrink-0 ml-2 cursor-pointer"
+                      className="glass-btn-ghost w-6 h-6 flex items-center justify-center text-xs text-gray-400 dark:text-white/50 hover:text-danger flex-shrink-0 ml-2 cursor-pointer"
                       onMouseDown={e => e.stopPropagation()}
                       onClick={() => removeWidget(widget.id)}
                       title="Remove">

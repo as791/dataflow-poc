@@ -166,11 +166,11 @@ export function BillingPage() {
 
         <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
           <div className="glass-card p-4">
-            <dt className="flex items-center gap-2 text-xs text-white/40"><Gauge size={14} /> Free tier</dt>
+            <dt className="flex items-center gap-2 text-xs text-gray-400 dark:text-white/40"><Gauge size={14} /> Free tier</dt>
             <dd className="text-lg">{usage?.free_tier ?? '—'} / month</dd>
           </div>
           <div className="glass-card p-4">
-            <dt className="flex items-center gap-2 text-xs text-white/40"><CreditCard size={14} /> Purchased</dt>
+            <dt className="flex items-center gap-2 text-xs text-gray-400 dark:text-white/40"><CreditCard size={14} /> Purchased</dt>
             <dd className="text-lg">
               {usage?.extra_quota ?? 0}
               {usage && usage.extra_quota > 0 && (
@@ -181,7 +181,7 @@ export function BillingPage() {
             </dd>
           </div>
           <div className="glass-card p-4">
-            <dt className="flex items-center gap-2 text-xs text-white/40"><CalendarClock size={14} /> Resets in</dt>
+            <dt className="flex items-center gap-2 text-xs text-gray-400 dark:text-white/40"><CalendarClock size={14} /> Resets in</dt>
             <dd className="text-lg">{usage?.daysUntilReset ?? '—'} days</dd>
           </div>
         </dl>

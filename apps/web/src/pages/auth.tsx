@@ -6,7 +6,8 @@ import { api } from '../api';
 
 function AuthShell({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <div className="relative min-h-screen overflow-hidden px-4">
+    <div className="relative min-h-screen overflow-hidden px-4"
+      style={{ background: 'linear-gradient(145deg, #080a10 0%, #0b0e17 48%, #080a10 100%)' }}>
       <div className="absolute left-[12%] top-[-12%] h-[420px] w-[420px] rounded-full bg-brand-500/15 blur-[110px]" />
       <div className="absolute bottom-[-15%] right-[8%] h-[360px] w-[360px] rounded-full bg-cyan/10 blur-[120px]" />
       <div className="relative z-10 flex min-h-screen items-center justify-center">
