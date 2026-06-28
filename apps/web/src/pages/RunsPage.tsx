@@ -11,8 +11,10 @@ interface Execution {
 
 const PHASES = ['', 'running', 'completed', 'failed', 'cancelled'];
 const PHASE_STYLE: Record<string, string> = {
-  completed: 'text-emerald-300', failed: 'text-danger', running: 'text-amber-300',
-  cancelled: 'text-white/40',
+  completed: 'text-emerald-600 dark:text-emerald-300',
+  failed:    'text-red-500 dark:text-danger',
+  running:   'text-amber-600 dark:text-amber-300',
+  cancelled: 'text-gray-400 dark:text-white/40',
 };
 
 export default function RunsPage() {
@@ -51,7 +53,9 @@ export default function RunsPage() {
           {pipelines.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
         <select className="glass-input" value={filters.env} onChange={set('env')}>
-          <option value="">All envs</option><option value="test">Integration</option><option value="prod">production</option>
+          <option value="">All envs</option>
+          <option value="test">Integration</option>
+          <option value="prod">Production</option>
         </select>
         <select className="glass-input" value={filters.status} onChange={set('status')}>
           {PHASES.map(p => <option key={p} value={p}>{p || 'All statuses'}</option>)}
@@ -60,15 +64,22 @@ export default function RunsPage() {
         <input type="date" className="glass-input" value={filters.to} onChange={set('to')} title="To" />
       </div>
 
-      <div className="glass-card divide-y divide-white/5">
-        {rows.length === 0 && !loading && <p className="p-6 text-sm text-white/40">No runs match.</p>}
+      <div className="glass-card divide-y divide-gray-100 dark:divide-white/5">
+        {rows.length === 0 && !loading && (
+          <p className="p-6 text-sm text-gray-400 dark:text-white/40">No runs match.</p>
+        )}
         {rows.map(r => (
-          <Link key={r.id} to={`/runs/${r.id}`} className="flex items-center justify-between gap-4 p-4 hover:bg-white/[0.03]">
+          <Link key={r.id} to={`/runs/${r.id}`}
+            className="flex items-center justify-between gap-4 p-4 hover:bg-gray-50 dark:hover:bg-white/[0.03] transition-colors">
             <div className="min-w-0">
-              <p className="truncate font-medium text-white/90">{r.name}</p>
-              <p className="text-xs text-white/40">{displayEnvironment(r.environment)} · {r.started_at ? new Date(r.started_at).toLocaleString() : ''}</p>
+              <p className="truncate font-medium text-gray-900 dark:text-white/90">{r.name}</p>
+              <p className="text-xs text-gray-400 dark:text-white/40">
+                {displayEnvironment(r.environment)} · {r.started_at ? new Date(r.started_at).toLocaleString() : ''}
+              </p>
             </div>
-            <span className={`text-sm font-medium ${PHASE_STYLE[r.phase ?? ''] ?? 'text-white/60'}`}>{r.phase ?? 'unknown'}</span>
+            <span className={`text-sm font-medium ${PHASE_STYLE[r.phase ?? ''] ?? 'text-gray-500 dark:text-white/60'}`}>
+              {r.phase ?? 'unknown'}
+            </span>
           </Link>
         ))}
       </div>
