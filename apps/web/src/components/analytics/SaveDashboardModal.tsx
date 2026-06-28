@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Save, X } from 'lucide-react';
 import type { Dashboard } from './types';
 
 interface Props {
@@ -31,7 +32,7 @@ export function SaveDashboardModal({ existing, onClose, onSave }: Props) {
       <div className="glass-modal" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-lg font-semibold">Save Dashboard</h2>
-          <button className="glass-btn-ghost w-8 h-8 flex items-center justify-center text-lg" onClick={onClose}>×</button>
+          <button className="glass-btn-ghost w-8 h-8 flex items-center justify-center" aria-label="Close" onClick={onClose}><X size={15} /></button>
         </div>
 
         <div className="space-y-4">
@@ -65,7 +66,7 @@ export function SaveDashboardModal({ existing, onClose, onSave }: Props) {
         <div className="flex justify-end gap-2 mt-6">
           <button className="glass-btn-ghost" onClick={onClose}>Cancel</button>
           <button className="glass-btn-primary" disabled={busy || !name.trim()} onClick={handleSave}>
-            {busy ? 'Saving…' : '💾 Save'}
+            {!busy && <Save size={14} />} {busy ? 'Saving…' : 'Save'}
           </button>
         </div>
       </div>

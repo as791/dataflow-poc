@@ -2,27 +2,16 @@ import { useCallback, useEffect, useState } from 'react';
 import { Rocket, RefreshCw } from 'lucide-react';
 import { api } from '../api';
 
-// A1 — lifecycle stage is derived from status+environment (no stored enum).
 export type Stage = 'draft' | 'testing' | 'production' | 'archived';
 const STAGE_LABEL: Record<Stage, string> = {
-  draft: 'draft',
-  testing: 'Integration',
-  production: 'production',
-  archived: 'archived',
+  draft: 'Draft', testing: 'Integration', production: 'Production', archived: 'Archived',
 };
-const ENV_LABEL: Record<string, string> = {
-  test: 'Integration',
-  prod: 'production',
-};
+const ENV_LABEL: Record<string, string> = { test: 'Integration', prod: 'Production' };
 
-export function displayStage(stage: Stage) {
-  return STAGE_LABEL[stage];
-}
-
+export function displayStage(stage: Stage) { return STAGE_LABEL[stage]; }
 export function displayEnvironment(environment?: string) {
   return environment ? (ENV_LABEL[environment] ?? environment) : 'Integration';
 }
-
 export function deriveStage(status?: string, environment?: string): Stage {
   if (status === 'active' && environment === 'prod') return 'production';
   if (status === 'active' && environment === 'test') return 'testing';
@@ -31,10 +20,10 @@ export function deriveStage(status?: string, environment?: string): Stage {
 }
 
 const STAGE_STYLE: Record<Stage, string> = {
-  draft: 'bg-white/10 text-white/60',
-  testing: 'bg-amber-500/15 text-amber-300',
-  production: 'bg-emerald-500/15 text-emerald-300',
-  archived: 'bg-white/5 text-white/35',
+  draft:      'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-white/60',
+  testing:    'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
+  production: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
+  archived:   'bg-gray-50 text-gray-400 dark:bg-white/5 dark:text-white/35',
 };
 
 export function StageBadge({ stage }: { stage: Stage }) {
@@ -68,10 +57,8 @@ export default function LifecyclePage() {
   const transition = async (row: Pipeline, to: 'testing' | 'production') => {
     setBusy(row.id); setError(null);
     try { await api.setStage(row.id, to); await refresh(); }
-    catch (e: any) {
-      // Surface the promotion-gate 409 message verbatim.
-      setError(e.message ?? 'Transition failed');
-    } finally { setBusy(null); }
+    catch (e: any) { setError(e.message ?? 'Transition failed'); }
+    finally { setBusy(null); }
   };
 
   return (
@@ -89,22 +76,22 @@ export default function LifecyclePage() {
       </div>
 
       {error && (
-        <div className="text-xs text-danger/90 bg-danger/10 border border-danger/30 rounded-lg px-3 py-2">
+        <div className="text-xs text-red-600 dark:text-danger/90 bg-red-50 dark:bg-danger/10 border border-red-200 dark:border-danger/30 rounded-lg px-3 py-2">
           {error}
         </div>
       )}
 
-      <div className="glass-card divide-y divide-white/5">
+      <div className="glass-card divide-y divide-gray-100 dark:divide-white/5">
         {rows.length === 0 && !loading && (
-          <p className="p-6 text-sm text-white/40">No pipelines yet.</p>
+          <p className="p-6 text-sm text-gray-400 dark:text-white/40">No pipelines yet.</p>
         )}
         {rows.map(row => {
           const stage = deriveStage(row.status, row.environment);
           return (
             <div key={row.id} className="flex items-center justify-between gap-4 p-4">
               <div className="min-w-0">
-                <p className="truncate font-medium text-white/90">{row.name}</p>
-                <p className="text-xs text-white/40">v{row.version} · {displayEnvironment(row.environment)}</p>
+                <p className="truncate font-medium text-gray-900 dark:text-white/90">{row.name}</p>
+                <p className="text-xs text-gray-400 dark:text-white/40">v{row.version} · {displayEnvironment(row.environment)}</p>
               </div>
               <div className="flex items-center gap-3">
                 <StageBadge stage={stage} />
