@@ -1,0 +1,13 @@
+{
+  "id": "11111111-1111-4111-8111-111111111111",
+  "name": "Orders · Bronze ingestion",
+  "tenantId": "default",
+  "trigger": { "type": "cron", "schedule": "*/5 * * * *" },
+  "nodes": [
+    { "id": "source", "type": "source", "activityType": "postgres.fetch", "label": "Operational orders",
+      "config": { "connectionId": "source-db", "table": "public.orders", "syncMode": "cdc", "layer": "bronze" } },
+    { "id": "bronze", "type": "sink", "activityType": "sink.postgres", "label": "Raw orders",
+      "config": { "connectionId": "warehouse", "table": "bronze.orders", "writeMode": "apply-cdc", "conflictKey": "id", "layer": "bronze" } }
+  ],
+  "edges": [{ "id": "source-to-bronze", "source": "source", "target": "bronze" }]
+}

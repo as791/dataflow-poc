@@ -69,3 +69,46 @@ team.get('/members', async (req, res) => {
     [req.tenant.tenantId]);
   res.json(rows);
 });
+
+// ── Service account API tokens ─────────────────────────────────────────────────
+// Tokens are 32-byte base64url strings shown once; stored as SHA-256.
+
+team.post('/tokens', requireOwner, async (req, res) => {
+  const { name, role, expiresInDays } = req.body ?? {};
+  if (!name?.trim()) return res.status(400).json({ error: 'name required' });
+  const tokenRole = role === 'owner' ? 'owner' : 'member';
+  const token = randomToken();
+  const expiresAt = expiresInDays
+    ? new Date(Date.now() + Number(expiresInDays) * 86400_000).toISOString()
+    : null;
+  const { rows } = await withTenantTx(req, c => c.query(
+    `INSERT INTO api_tokens (tenant_id, name, token_hash, role, created_by, expires_at)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, name, role, created_at, expires_at`,
+    [req.tenant.tenantId, name.trim(), sha256(token), tokenRole, req.tenant.userId, expiresAt],
+  ));
+  auditLog(req, 'team.token_created', rows[0].id, { name: rows[0].name, role: tokenRole });
+  // Token shown exactly once — caller must store it
+  res.status(201).json({ token, ...rows[0] });
+});
+
+team.get('/tokens', requireOwner, async (req, res) => {
+  const { rows } = await withTenantTx(req, c => c.query(
+    `SELECT id, name, role, created_at, expires_at, revoked_at,
+            u.email AS created_by_email
+     FROM api_tokens t JOIN users u ON u.id = t.created_by
+     WHERE t.tenant_id = $1 ORDER BY t.created_at DESC`,
+    [req.tenant.tenantId],
+  ));
+  res.json(rows);
+});
+
+team.delete('/tokens/:id', requireOwner, async (req, res) => {
+  const { rowCount } = await withTenantTx(req, c => c.query(
+    `UPDATE api_tokens SET revoked_at = now()
+     WHERE id = $1 AND tenant_id = $2 AND revoked_at IS NULL`,
+    [req.params.id, req.tenant.tenantId],
+  ));
+  if (!rowCount) return res.status(404).json({ error: 'token not found or already revoked' });
+  auditLog(req, 'team.token_revoked', req.params.id);
+  res.json({ ok: true });
+});

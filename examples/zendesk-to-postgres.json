@@ -12,7 +12,7 @@
     { "id": "map", "type": "transform", "activityType": "transform.map",
       "config": { "expression": "({ id: r.id, subject: r.subject, status: r.status, priority: r.priority, updated_at: r.updated_at })" } },
     { "id": "snk", "type": "sink", "activityType": "sink.postgres",
-      "config": { "collection": "zendesk_tickets", "dedupField": "id" } }
+      "config": { "connectionId": "replace-with-postgres-credential-id", "table": "bronze.zendesk_tickets", "conflictKey": "id", "layer": "bronze" } }
   ],
   "edges": [
     { "id": "e1", "source": "src", "target": "fil" },

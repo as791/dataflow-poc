@@ -32,12 +32,26 @@ export const api = {
   // Pipelines / executions
   savePipeline: (def: any) => request('/api/pipelines', { method: 'POST', body: JSON.stringify(def) }).then(j),
   activate:     (rowId: string) => request(`/api/pipelines/${rowId}/activate`, { method: 'POST' }).then(j),
-  promote:      (rowId: string) => request(`/api/pipelines/${rowId}/promote`, { method: 'POST' }).then(j),
-  setStage:     (rowId: string, to: 'testing' | 'production') =>
-    request(`/api/pipelines/${rowId}/stage`, { method: 'POST', body: JSON.stringify({ to }) }).then(j),
+  promote:      (rowId: string, allowBreakingContract = false) => request(`/api/pipelines/${rowId}/promote`, {
+    method: 'POST', body: JSON.stringify({ allowBreakingContract }),
+  }).then(j),
+  setStage:     (rowId: string, to: 'testing' | 'production', allowBreakingContract = false) =>
+    request(`/api/pipelines/${rowId}/stage`, { method: 'POST', body: JSON.stringify({ to, allowBreakingContract }) }).then(j),
   run:          (rowId: string) =>
     request(`/api/pipelines/${rowId}/run`, { method: 'POST', body: JSON.stringify({}) }).then(j),
   listPipelines: () => request('/api/pipelines').then(j),
+  planBackfill: (rowId: string, body: { from: string; to: string; partitionDays: number; maxConcurrency: number }) =>
+    request(`/api/pipelines/${rowId}/backfills/plan`, { method: 'POST', body: JSON.stringify(body) }).then(j),
+  startBackfill: (rowId: string, body: { from: string; to: string; partitionDays: number; maxConcurrency: number }) =>
+    request(`/api/pipelines/${rowId}/backfills`, { method: 'POST', body: JSON.stringify(body) }).then(j),
+  listBackfills: (rowId: string) => request(`/api/pipelines/${rowId}/backfills`).then(j),
+  workspaceLineage: (environment?: string) =>
+    request(`/api/pipelines/lineage/workspace${environment ? `?environment=${encodeURIComponent(environment)}` : ''}`).then(j),
+  lineageChanges: (environment?: string, limit = 30) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (environment) params.set('environment', environment);
+    return request(`/api/pipelines/lineage/changes?${params}`).then(j);
+  },
 
   // Connector catalog (coded + manifest-driven). Returns { catalog }.
   getConnectorCatalog: () => request('/api/connectors/catalog').then(j),
@@ -48,6 +62,10 @@ export const api = {
     request('/api/connectors', { method: 'POST', body: JSON.stringify(body) }).then(j),
   testConnector: (id: string) => request(`/api/connectors/${id}/test`, { method: 'POST' }).then(j),
   deleteConnector: (id: string) => request(`/api/connectors/${id}`, { method: 'DELETE' }).then(j),
+  getConnectorCdc: (id: string) => request(`/api/connectors/${id}/cdc`).then(j),
+  saveConnectorCdc: (id: string, resources: string[]) =>
+    request(`/api/connectors/${id}/cdc`, { method: 'PUT', body: JSON.stringify({ resources }) }).then(j),
+  deleteConnectorCdc: (id: string) => request(`/api/connectors/${id}/cdc`, { method: 'DELETE' }).then(j),
 
   // AI builder (Ollama). Returns { mermaid, definition }.
   generatePipeline: (prompt: string) =>
@@ -60,9 +78,24 @@ export const api = {
     const qs = clean.length ? '?' + new URLSearchParams(Object.fromEntries(clean)) : '';
     return request(`/api/executions${qs}`).then(j);
   },
+  listExecutionsPage: (params?: Record<string, string>) => {
+    const clean = Object.entries({ ...params, paged: '1' }).filter(([, v]) => v) as [string, string][];
+    return request(`/api/executions?${new URLSearchParams(Object.fromEntries(clean))}`).then(j);
+  },
+  monitoringOverview: (days = 7) => request(`/api/executions/monitoring/overview?days=${days}`).then(j),
+  listExecutionLogs: (params?: { query?: string; level?: string; limit?: number; days?: number }) => {
+    const clean = Object.entries(params ?? {}).filter(([, value]) => value != null && value !== '');
+    const qs = clean.length ? `?${new URLSearchParams(Object.fromEntries(clean.map(([key, value]) => [key, String(value)])))}` : '';
+    return request(`/api/executions/logs${qs}`).then(j);
+  },
+  listAlerts: (status = 'active') => request(`/api/alerts?status=${encodeURIComponent(status)}`).then(j),
+  acknowledgeAlert: (id: string) => request(`/api/alerts/${id}/acknowledge`, { method: 'POST' }).then(j),
+  resolveAlert: (id: string) => request(`/api/alerts/${id}/resolve`, { method: 'POST' }).then(j),
+  retryAlertNotification: (id: string) => request(`/api/alerts/${id}/retry-notification`, { method: 'POST' }).then(j),
   getExecution: (id: string) => request(`/api/executions/${id}`).then(j),
   executionStatus: (id: string) => request(`/api/executions/${id}/status`).then(j),
   signal: (id: string, action: string) => request(`/api/executions/${id}/${action}`, { method: 'POST' }).then(j),
+  retryExecution: (id: string) => request(`/api/executions/${id}/retry`, { method: 'POST' }).then(j),
 
   // Auth (Google SSO — sign-in happens via the /api/auth/google browser redirect)
   logout: () => request('/api/auth/logout', { method: 'POST' }).then(j),

@@ -14,6 +14,9 @@ import { TeamPage } from './pages/TeamPage';
 import { ConnectorsPage } from './pages/ConnectorsPage';
 import { BillingPage } from './pages/BillingPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
+import LineagePage from './pages/LineagePage';
+import MonitoringPage from './pages/MonitoringPage';
+import PipelinesPage from './pages/PipelinesPage';
 
 export default function App() {
   return (
@@ -31,9 +34,12 @@ export default function App() {
             </Route>
 
             <Route element={<ProtectedRoute><CatalogProvider><AppShell /></CatalogProvider></ProtectedRoute>}>
+              <Route path="pipelines" element={<PipelinesPage />} />
               <Route path="lifecycle" element={<LifecyclePage />} />
               <Route path="runs" element={<RunsPage />} />
               <Route path="runs/:id" element={<RunDetailPage />} />
+              <Route path="lineage" element={<LineagePage />} />
+              <Route path="monitoring" element={<MonitoringPage />} />
               <Route path="connectors" element={<ConnectorsPage />} />
               <Route path="billing" element={<BillingPage />} />
               <Route path="analytics" element={<AnalyticsPage />} />

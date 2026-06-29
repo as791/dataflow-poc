@@ -32,10 +32,11 @@ export function definitionToFlow(def: any, byType: Record<string, CatalogEntry>)
 
 export function flowToDefinition(
   nodes: Node[], edges: any[],
-  meta: { name: string; trigger: any },
+  meta: { name: string; trigger: any; pipelineKey?: string; metadata?: any; slo?: any },
 ) {
   return {
-    id: '', version: 0, name: meta.name, tenantId: 'default', trigger: meta.trigger,
+    id: meta.pipelineKey ?? '', version: 0, name: meta.name, tenantId: 'default', trigger: meta.trigger,
+    metadata: meta.metadata, slo: meta.slo,
     nodes: nodes.map(n => {
       const cfg = { ...n.data.config };
       return {

@@ -1,0 +1,13 @@
+{
+  "id": "33333333-3333-4333-8333-333333333333",
+  "name": "Orders · Gold serving",
+  "tenantId": "default",
+  "trigger": { "type": "asset", "assetUrn": "postgres://warehouse/silver.orders" },
+  "nodes": [
+    { "id": "silver", "type": "source", "activityType": "postgres.fetch", "label": "Clean orders",
+      "config": { "connectionId": "warehouse", "table": "silver.orders", "syncMode": "cursor", "cursorColumn": "updated_at", "columns": "*", "layer": "silver" } },
+    { "id": "gold", "type": "sink", "activityType": "sink.clickhouse", "label": "Order analytics",
+      "config": { "connectionId": "analytics", "table": "gold.orders", "layer": "gold" } }
+  ],
+  "edges": [{ "id": "silver-to-gold", "source": "silver", "target": "gold" }]
+}

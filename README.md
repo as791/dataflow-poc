@@ -19,8 +19,10 @@ transforms, and sinks.
 - **Open core.** The whole product is free in the community edition; an
   `EDITION=enterprise` seam unlocks governance features (audit export, …).
 
-Sources: Zendesk, Google Sheets, Google Drive, Microsoft Excel, custom REST, plus
-any manifest connector. Triggers (cron / webhook / event) are declared **inside
+Sources: Zendesk, Google Sheets, Google Drive, Microsoft Excel, PostgreSQL,
+MySQL, MongoDB, Kafka/Redpanda, S3, custom REST, plus any manifest connector. Sinks include
+PostgreSQL, MySQL, MongoDB, Kafka/Redpanda, ClickHouse, S3, Sheets, and webhooks. Triggers
+(cron / webhook / event) are declared **inside
 the pipeline definition**. Historical backfill + incremental ingestion with
 durable cursor state. Full observability (OTel → Prometheus/Grafana/Jaeger).
 
@@ -33,9 +35,63 @@ HTTP route for webhook, Redis subscriber for events). Every firing starts the Go
 by construction. Go workflow workers poll `dynamic-dag-<env>` while TypeScript
 activity workers poll `dynamic-activities-<env>`. The workflow topologically
 sorts the DAG into parallel levels and dispatches each node by stable activity
-name. Source nodes page using cursors persisted in Postgres (`connector_state`);
-`continueAsNew` bounds history on long backfills. Payloads travel as encrypted
+name. Source nodes merge up to 50 cursor pages per execution and persist
+progress in Postgres (`connector_state`). Payloads travel as encrypted
 `DataRef` pointers instead of raw datasets.
+
+## Database cursor and CDC modes
+
+PostgreSQL, MySQL, and MongoDB sources support `Cursor` polling or managed CDC.
+CDC runs as bounded micro-batches from Debezium topics; offsets commit only
+after the full DAG succeeds, so retries are at-least-once. Database sinks can
+use `apply-cdc` to upsert creates/updates and delete by primary key.
+
+```bash
+docker compose --profile cdc up -d
+```
+
+Add a database credential, enable CDC for a comma-separated resource allowlist
+(`public.orders`, `app.orders`, or `database.collection`), then select `CDC` on
+the source node. PostgreSQL requires logical replication/`pgoutput`; MySQL
+requires ROW binlogs and a replication-capable user; MongoDB requires a replica
+set. The managed CDC Redpanda and Kafka Connect services remain internal-only.
+
+## Kafka / Redpanda pipelines
+
+Add a Kafka credential with comma-separated brokers, optional TLS, and optional
+SASL/PLAIN or SCRAM credentials. `kafka.fetch` reads bounded pages from an
+`earliest` or `latest` initial position; partition offsets join the same
+post-DAG checkpoint transaction as database cursors. `sink.kafka` publishes
+acknowledged JSON batches and can derive message keys from a record field.
+Set the same **Lineage cluster name** on producer and consumer nodes so separate
+pipelines meet at one `kafka://cluster/topic` asset in workspace lineage.
+Kafka producer retries are idempotent within a producer session; pipeline
+re-runs can still re-emit messages, so downstream consumers should deduplicate
+by the configured message key when exactly-once business effects are required.
+Run the broker conformance smoke with
+`KAFKA_TEST_BROKERS=localhost:9092 npm -w apps/worker run test:kafka`; it verifies
+produce, bounded paging, and offset resume against a real Kafka-compatible broker.
+
+Monitoring persists deduplicated SLO incidents in `pipeline_alerts`; operators
+can acknowledge or resolve them from `/monitoring`, and a later healthy run
+auto-resolves cleared breaches. Fresh installations apply migrations through
+`db/016_backfills.sql` automatically. Existing Docker volumes must apply
+migrations 011–016 once before incidents, run retry, asset history, quality,
+external lineage, and partitioned backfills are available.
+
+Multi-pipeline chaining uses tenant/environment-scoped Redis Stream events backed
+by `pipeline_event_outbox`. Choose **Asset materialized** for medallion consumers:
+the asset history row and event outbox entry commit atomically, and stable URNs
+survive producer replacement. Choose **Upstream pipeline** for pipeline-specific
+completed, failed, or cancelled events. Both appear in workspace lineage.
+
+Set `OPENLINEAGE_URL` to emit durable START and terminal RunEvents to Marquez or
+another OpenLineage backend. External tools can POST standard RunEvents to
+`/api/openlineage?environment=prod`; their jobs and datasets merge into `/lineage`
+whenever dataset names use the same stable asset URNs. An owner creates or rotates
+the tenant token with `POST /api/pipelines/lineage/openlineage-key`; only its hash
+is stored. Send the returned value as `Authorization: Bearer <token>`. Revoke it
+with `DELETE /api/pipelines/lineage/openlineage-key`.
 
 ## Run it — one command
 
@@ -72,7 +128,9 @@ active edition and feature flags.
 **Encryption status:** Temporal workflow history uses a cross-SDK AES-256-GCM
 payload codec, OAuth tokens are encrypted at rest, and intermediate
 `node_payloads` plus oversized webhook payloads are encrypted with the platform
-payload key. Per-tenant customer-managed keys are not currently provided.
+payload key. Set `PAYLOAD_S3_BUCKET` to move payloads larger than 4 KiB to any
+S3-compatible store; the object body is encrypted before upload and its bucket/key
+travels as a `DataRef`. Per-tenant customer-managed keys are not currently provided.
 
 The API is **not** exposed to the host by default — the web container proxies
 `/api` to it over the internal network (nginx). To expose it for the smoke test
@@ -124,9 +182,16 @@ Each source node declares `ingestion.mode`:
 - **backfill** — pages from `backfillStart` until the connector reports
   `end of stream`, then **automatically anchors the incremental cursor** at
   that moment (see `gdrive.ts`) — no gap, no overlap.
-- Cursor checkpoints commit to `connector_state` **after** each successful page,
-  so a crash mid-backfill resumes from the last good page. Sinks are idempotent
-  (`ON CONFLICT` on dedup keys), so a replayed page cannot duplicate data.
+- Cursor checkpoints commit to `connector_state` only after the full DAG
+  succeeds. Failed transforms or sinks therefore cannot skip source rows.
+
+Owners can preview and start date-partitioned PostgreSQL, MySQL, or MongoDB
+backfills from **Lifecycle → Backfill**. Sources must use `cursor` mode with a
+date cursor. Plans use non-overlapping `[from,to)` ranges, cap concurrency at
+five executions, and isolate partition cursors from normal incremental state.
+Each partition handles at most 50 × 10,000 source rows; split denser ranges
+before retrying. Use idempotent sink keys because reprocessing intentionally
+re-emits historical records.
 
 ## Dev → prod: the actor model with Build IDs
 
@@ -156,6 +221,9 @@ previous build ID. A bad deploy can never corrupt a running workflow's replay.
   buttons send Temporal signals.
 - **Audit tables**: `executions`, `node_runs` retain per-node duration, record
   counts, and errors after workflows complete.
+- **Activity search**: `/monitoring` searches durable node outcomes across
+  pipelines by level, run, node, pipeline, or error; secrets are redacted both
+  when new errors are stored and when historical errors are returned.
 
 ## Repo layout
 
@@ -176,7 +244,8 @@ examples/            ready-to-import pipeline definitions
 - Credentials are env vars → move to the envelope-encrypted vault (KMS + per-user DEK)
   from the main design doc.
 - Per-tenant customer-managed payload keys are not implemented.
-- DataRefs store payloads in Postgres → S3 with client-side encryption.
+- Configure S3-compatible DataRefs plus bucket lifecycle/retention in production;
+  Postgres remains the zero-config development fallback.
 - Event trigger uses Redis pub/sub → Kafka with consumer groups + DLQ.
 - Docker Compose is a development topology; production Cassandra,
   Elasticsearch, and Temporal require multi-node deployment and backups.

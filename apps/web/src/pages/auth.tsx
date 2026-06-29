@@ -51,10 +51,18 @@ function GoogleButton({ label }: { label: string }) {
 
 const OAUTH_ERRORS: Record<string, string> = {
   oauth_state: 'Sign-in session expired. Please try again.',
-  oauth_token: 'Could not complete Google sign-in. Please try again.',
-  oauth_profile: 'Your Google account did not return a verified email.',
-  oauth_failed: 'Google sign-in failed. Please try again.',
+  oauth_token: 'Could not complete sign-in. Please try again.',
+  oauth_profile: 'Your account did not return a verified email.',
+  oauth_failed: 'Sign-in failed. Please try again.',
+  oidc_token: 'Could not complete SSO sign-in. Please try again.',
+  oidc_userinfo: 'Could not retrieve your SSO profile. Please try again.',
+  oidc_profile: 'Your SSO account did not return a verified email.',
+  oidc_failed: 'SSO sign-in failed. Please try again.',
 };
+
+// Show SSO button only when the API is configured with an OIDC provider.
+// We detect this by checking if VITE_OIDC_ENABLED=true is set at build time.
+const OIDC_ENABLED = import.meta.env.VITE_OIDC_ENABLED === 'true';
 
 export function LoginPage() {
   const { user } = useAuth();
@@ -67,9 +75,17 @@ export function LoginPage() {
   return (
     <AuthShell title="Sign in" subtitle="Welcome to DataFlow.">
       <GoogleButton label="Continue with Google" />
+      {OIDC_ENABLED && (
+        <a className="glass-btn-ghost mt-2 w-full" href="/api/auth/oidc">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          Continue with SSO
+        </a>
+      )}
       <ErrorLine msg={errorCode ? (OAUTH_ERRORS[errorCode] ?? 'Sign-in failed.') : null} />
       <p className="text-xs mt-5 opacity-60">
-        New here? Signing in with Google creates your workspace automatically.
+        New here? Signing in creates your workspace automatically.
       </p>
     </AuthShell>
   );

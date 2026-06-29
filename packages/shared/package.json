@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepare": "tsc -p tsconfig.json",
-    "test": "ts-node src/mermaid.test.ts && ts-node src/safe-expression.test.ts"
+    "test": "ts-node src/mermaid.test.ts && ts-node src/safe-expression.test.ts && ts-node src/lineage.test.ts && ts-node src/monitoring.test.ts && ts-node src/openlineage.test.ts && ts-node src/redact.test.ts"
   },
   "devDependencies": {
     "@types/node": "^20.14.2",

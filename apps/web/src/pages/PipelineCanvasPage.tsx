@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity, ArrowDownToLine, Braces, Cable, ChevronDown, ChevronUp,
-  Clock, Code2, CreditCard, Database, GitFork, History, Layers3,
+  Clock, Code2, CreditCard, Database, GitFork, History, LayoutList, Layers3,
   Maximize2, Minimize2, Moon, Play, Plus, Rocket, Save, Search,
   Settings, Sparkles, Sun, Terminal, User, Users, X, Zap,
 } from 'lucide-react';
@@ -47,6 +47,7 @@ let nid = 0;
 export default function PipelineCanvasPage() {
   const { catalog, byType } = useCatalog();
   const location = useLocation();
+  const navigate = useNavigate();
   const { dark, toggle: toggleTheme } = useTheme();
   const { user } = useAuth();
   const hydrated = useRef(false);
@@ -60,7 +61,9 @@ export default function PipelineCanvasPage() {
   const [selectedEdge, setSelectedEdge] = useState<any | null>(null);
 
   const [name, setName] = useState('My pipeline');
+  const [pipelineKey, setPipelineKey] = useState('');
   const [trigger, setTrigger] = useState<any>({ type: 'manual' });
+  const [policy, setPolicy] = useState({ owner: '', domain: '', tags: '', freshnessMinutes: '', maxFailureRatePercent: '', maxDurationSeconds: '', notificationConnectionId: '', minimumSeverity: 'critical' });
   const [savedRowId, setSavedRowId] = useState<string | null>(null);
   const [pipelineStage, setPipelineStage] = useState<Stage>('draft');
   const [executionId, setExecutionId] = useState<string | null>(null);
@@ -89,6 +92,8 @@ export default function PipelineCanvasPage() {
   const [connectorInstances, setConnectorInstances] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [usage, setUsage] = useState<any | null>(null);
+  const [upstreamPipelines, setUpstreamPipelines] = useState<Array<{ pipeline_key: string; name: string }>>([]);
+  const [workspaceAssets, setWorkspaceAssets] = useState<Array<{ urn: string; name: string; layer?: string }>>([]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteMsg, setInviteMsg] = useState('');
@@ -100,9 +105,35 @@ export default function PipelineCanvasPage() {
     const { nodes: ns, edges: es } = definitionToFlow(def, byType);
     setNodes(ns); setEdges(es);
     if (def.name) setName(def.name);
+    if (def.id) setPipelineKey(def.id);
     if (def.trigger) setTrigger(def.trigger);
+    setPolicy({
+      owner: def.metadata?.owner ?? '', domain: def.metadata?.domain ?? '', tags: (def.metadata?.tags ?? []).join(', '),
+      freshnessMinutes: def.slo?.freshnessMinutes?.toString() ?? '',
+      maxFailureRatePercent: def.slo?.maxFailureRatePercent?.toString() ?? '',
+      maxDurationSeconds: def.slo?.maxDurationMs ? String(def.slo.maxDurationMs / 1000) : '',
+      notificationConnectionId: def.notifications?.connectionId ?? '',
+      minimumSeverity: def.notifications?.minimumSeverity ?? 'critical',
+    });
     setMsg('Loaded from AI builder — review and Save');
   }, [location.state]);
+
+  useEffect(() => {
+    api.listPipelines().then((rows: any[]) => {
+      const byKey = new Map<string, { pipeline_key: string; name: string }>();
+      rows.forEach(row => { if (!byKey.has(row.pipeline_key)) byKey.set(row.pipeline_key, row); });
+      setUpstreamPipelines([...byKey.values()]);
+    }).catch(() => setUpstreamPipelines([]));
+  }, []);
+
+  useEffect(() => {
+    api.workspaceLineage('test').then((graph: any) => {
+      const produced = new Set((graph.edges ?? []).filter((edge: any) =>
+        String(edge.source).startsWith('pipeline:') && String(edge.target).startsWith('asset:')).map((edge: any) => edge.target));
+      setWorkspaceAssets((graph.nodes ?? []).filter((node: any) => node.kind === 'asset' && produced.has(node.id))
+        .map((node: any) => ({ urn: node.asset.urn, name: node.asset.name, layer: node.asset.layer })));
+    }).catch(() => setWorkspaceAssets([]));
+  }, []);
 
   useEffect(() => {
     if (!workspacePanel) return;
@@ -112,8 +143,9 @@ export default function PipelineCanvasPage() {
       Promise.all([
         api.listMembers().catch(() => []),
         api.getUsage().catch(() => null),
-      ]).then(([nextMembers, nextUsage]) => {
-        setMembers(nextMembers); setUsage(nextUsage);
+        api.listConnectors().catch(() => []),
+      ]).then(([nextMembers, nextUsage, nextConnectors]) => {
+        setMembers(nextMembers); setUsage(nextUsage); setConnectorInstances(nextConnectors);
       });
     }
   }, [workspacePanel]);
@@ -170,7 +202,22 @@ export default function PipelineCanvasPage() {
     setSelected(null);
   };
 
-  const buildDefinition = () => flowToDefinition(nodes, edges, { name, trigger });
+  const buildDefinition = () => flowToDefinition(nodes, edges, {
+    name, trigger, pipelineKey,
+    metadata: {
+      owner: policy.owner.trim() || undefined, domain: policy.domain.trim() || undefined,
+      tags: policy.tags.split(',').map(tag => tag.trim()).filter(Boolean),
+    },
+    slo: {
+      freshnessMinutes: policy.freshnessMinutes ? Number(policy.freshnessMinutes) : undefined,
+      maxFailureRatePercent: policy.maxFailureRatePercent ? Number(policy.maxFailureRatePercent) : undefined,
+      maxDurationMs: policy.maxDurationSeconds ? Number(policy.maxDurationSeconds) * 1000 : undefined,
+    },
+    notifications: policy.notificationConnectionId ? {
+      connectionId: policy.notificationConnectionId,
+      minimumSeverity: policy.minimumSeverity as 'warning' | 'critical',
+    } : undefined,
+  });
 
   const validate = () => {
     const def = buildDefinition();
@@ -187,6 +234,7 @@ export default function PipelineCanvasPage() {
     try {
       const r = await api.savePipeline(buildDefinition());
       setSavedRowId(r.rowId);
+      setPipelineKey(r.pipelineKey);
       setPipelineStage(deriveStage('inactive', 'test'));
       setMsg(`Saved v${r.version}`);
     } catch (e: any) { setMsg(`Save failed: ${e.message}`); }
@@ -205,7 +253,15 @@ export default function PipelineCanvasPage() {
       const r = await api.promote(savedRowId);
       setPipelineStage('production');
       setMsg(`Promoted to production · v${r.version}`);
-    } catch (e: any) { setMsg(`Promote failed: ${e.message}`); }
+    } catch (e: any) {
+      if (String(e.message).includes('breaking data contract') &&
+          window.confirm(`Breaking contract detected. Promote anyway?\n\n${e.message}`)) {
+        try {
+          const r = await api.promote(savedRowId, true);
+          setPipelineStage('production'); setMsg(`Promoted with contract override · v${r.version}`);
+        } catch (override: any) { setMsg(`Promote failed: ${override.message}`); }
+      } else setMsg(`Promote failed: ${e.message}`);
+    }
   };
 
   const run = async () => {
@@ -368,6 +424,10 @@ export default function PipelineCanvasPage() {
         <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-[10px] bg-gradient-to-br from-brand-400 to-brand-600 shadow-md shadow-brand-500/20">
           <Zap size={16} className="text-white" strokeWidth={2.5} />
         </div>
+        <button title="All pipelines" onClick={() => navigate('/pipelines')}
+          className="flex h-9 w-9 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
+          <LayoutList size={17} strokeWidth={1.75} />
+        </button>
         <div className="my-1 h-px w-8 bg-gray-200 dark:bg-white/[0.08]" />
         {TOOLBAR_CATS.map(cat => {
           const Icon = cat.icon;
@@ -445,10 +505,15 @@ export default function PipelineCanvasPage() {
               <button key={entry.activityType} onClick={() => addNode(entry)}
                 className="group mb-1 flex w-full items-center gap-2.5 rounded-[10px] border border-transparent px-2.5 py-2 text-left transition
                   hover:border-gray-200 hover:bg-gray-50 dark:hover:border-white/[0.08] dark:hover:bg-white/[0.05]">
-                <span className="h-2.5 w-2.5 flex-none rounded-full" style={{ background: entry.color }} />
-                <span className="min-w-0 flex-1 truncate text-xs text-gray-600 dark:text-white/65
+                <span className="flex h-7 w-7 flex-none items-center justify-center rounded-[8px] border transition-colors
+                  border-gray-100 bg-gray-50 dark:border-white/[0.07] dark:bg-white/[0.04]
+                  group-hover:border-gray-200 dark:group-hover:border-white/[0.12]"
+                  style={{ color: entry.color }}>
+                  <ActivityIcon activityType={entry.activityType} nodeType={entry.nodeType} size={13} />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-gray-600 dark:text-white/65
                   group-hover:text-gray-900 dark:group-hover:text-white">{entry.label}</span>
-                <Plus size={13} className="flex-none text-gray-300 dark:text-white/20 group-hover:text-brand-500" />
+                <Plus size={12} className="flex-none text-gray-300 dark:text-white/20 group-hover:text-brand-500" />
               </button>
             ))}
             {catEntries.length === 0 && (
@@ -466,7 +531,7 @@ export default function PipelineCanvasPage() {
                 {workspacePanel === 'connectors' ? 'Connectors' : 'Workspace settings'}
               </p>
               <p className="text-[10px] text-gray-400 dark:text-white/35">
-                {workspacePanel === 'connectors' ? 'Add and configure pipeline integrations' : 'Profile, billing, and members'}
+                {workspacePanel === 'connectors' ? 'Add and configure pipeline integrations' : 'Pipeline policy and workspace access'}
               </p>
             </div>
             <button className="icon-button h-8 w-8" onClick={() => setWorkspacePanel(null)}><X size={14} /></button>
@@ -498,6 +563,27 @@ export default function PipelineCanvasPage() {
             </div>
           ) : (
             <div className="flex-1 space-y-3 overflow-auto p-3">
+              <section className="rounded-xl border border-gray-200 bg-white p-3 dark:border-white/[0.08] dark:bg-white/[0.035]">
+                <div className="flex items-center gap-2 text-xs font-semibold text-gray-800 dark:text-white/80"><Activity size={14} /> Ownership & SLO</div>
+                <div className="mt-3 space-y-2">
+                  <input className="glass-input py-1.5 text-xs" placeholder="Owner (team or email)" value={policy.owner} onChange={e => setPolicy(p => ({ ...p, owner: e.target.value }))} />
+                  <input className="glass-input py-1.5 text-xs" placeholder="Domain (orders, finance…)" value={policy.domain} onChange={e => setPolicy(p => ({ ...p, domain: e.target.value }))} />
+                  <input className="glass-input py-1.5 text-xs" placeholder="Tags, comma separated" value={policy.tags} onChange={e => setPolicy(p => ({ ...p, tags: e.target.value }))} />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input className="glass-input py-1.5 text-xs" type="number" min="1" placeholder="Freshness min" value={policy.freshnessMinutes} onChange={e => setPolicy(p => ({ ...p, freshnessMinutes: e.target.value }))} />
+                    <input className="glass-input py-1.5 text-xs" type="number" min="0" max="100" placeholder="Max failures %" value={policy.maxFailureRatePercent} onChange={e => setPolicy(p => ({ ...p, maxFailureRatePercent: e.target.value }))} />
+                  </div>
+                  <input className="glass-input py-1.5 text-xs" type="number" min="0.001" step="0.001" placeholder="Max duration seconds" value={policy.maxDurationSeconds} onChange={e => setPolicy(p => ({ ...p, maxDurationSeconds: e.target.value }))} />
+                  <select className="glass-select py-1.5 text-xs" value={policy.notificationConnectionId} onChange={e => setPolicy(p => ({ ...p, notificationConnectionId: e.target.value }))} aria-label="Alert webhook connection">
+                    <option value="">No alert webhook</option>
+                    {connectorInstances.filter(c => c.provider === 'http').map(c => <option key={c.id} value={c.id}>{c.name ?? c.baseUrl ?? c.id}</option>)}
+                  </select>
+                  {policy.notificationConnectionId && <select className="glass-select py-1.5 text-xs" value={policy.minimumSeverity} onChange={e => setPolicy(p => ({ ...p, minimumSeverity: e.target.value }))} aria-label="Minimum alert severity">
+                    <option value="critical">Critical only</option><option value="warning">Warning and critical</option>
+                  </select>}
+                </div>
+                <p className="mt-2 text-[9px] text-gray-400 dark:text-white/30">Versioned with pipeline; Monitoring evaluates breaches automatically.</p>
+              </section>
               <section className="rounded-xl border border-gray-200 bg-white p-3 dark:border-white/[0.08] dark:bg-white/[0.035]">
                 <div className="flex items-center gap-2 text-xs font-semibold text-gray-800 dark:text-white/80"><User size={14} /> Profile</div>
                 <p className="mt-3 truncate text-xs text-gray-700 dark:text-white/70">{user?.email}</p>
@@ -553,7 +639,7 @@ export default function PipelineCanvasPage() {
                     <Rocket size={13} /> Activate → Integration
                   </button>
                 )}
-                {pipelineStage === 'testing' && (
+                {pipelineStage === 'testing' && user?.role === 'owner' && (
                   <button className="glass-btn-primary w-full justify-start text-xs"
                     onClick={() => { promote(); setShowLifecycle(false); }}>
                     <Layers3 size={13} /> Promote to Production
@@ -573,15 +659,36 @@ export default function PipelineCanvasPage() {
               onChange={e => setTrigger({ type: e.target.value,
                 ...(e.target.value === 'cron' ? { schedule: '*/5 * * * *' } : {}),
                 ...(e.target.value === 'webhook' ? { path: 'my-hook', secret: 'change-me' } : {}),
-                ...(e.target.value === 'event' ? { topic: 'orders' } : {}) })}>
+                ...(e.target.value === 'event' ? { topic: upstreamPipelines.find(p => p.pipeline_key !== pipelineKey)
+                  ? `pipeline.completed.${upstreamPipelines.find(p => p.pipeline_key !== pipelineKey)!.pipeline_key}` : 'pipeline.completed.<pipeline-key>' } : {}),
+                ...(e.target.value === 'asset' ? { assetUrn: workspaceAssets[0]?.urn ?? '' } : {}) })}>
               <option value="manual">Manual</option>
               <option value="cron">Cron</option>
               <option value="webhook">Webhook</option>
-              <option value="event">Event</option>
+              <option value="event">Upstream pipeline</option>
+              <option value="asset">Asset materialized</option>
             </select>
             {trigger.type === 'cron' && (
               <input className="bg-transparent text-xs outline-none w-28 text-gray-600 dark:text-white/60 font-mono"
                 value={trigger.schedule} onChange={e => setTrigger({ ...trigger, schedule: e.target.value })} />
+            )}
+            {trigger.type === 'event' && (
+              <select className="max-w-48 bg-transparent text-xs text-gray-600 outline-none dark:text-white/60"
+                value={trigger.topic} onChange={e => setTrigger({ ...trigger, topic: e.target.value })} aria-label="Upstream pipeline event">
+                {!upstreamPipelines.some(p => p.pipeline_key !== pipelineKey) && <option value={trigger.topic}>{trigger.topic}</option>}
+                {upstreamPipelines.filter(p => p.pipeline_key !== pipelineKey).flatMap(p => [
+                  <option key={`${p.pipeline_key}:completed`} value={`pipeline.completed.${p.pipeline_key}`}>{p.name} completed</option>,
+                  <option key={`${p.pipeline_key}:failed`} value={`pipeline.failed.${p.pipeline_key}`}>{p.name} failed</option>,
+                  <option key={`${p.pipeline_key}:cancelled`} value={`pipeline.cancelled.${p.pipeline_key}`}>{p.name} cancelled</option>,
+                ])}
+              </select>
+            )}
+            {trigger.type === 'asset' && (
+              <select className="max-w-56 bg-transparent text-xs text-gray-600 outline-none dark:text-white/60"
+                value={trigger.assetUrn} onChange={e => setTrigger({ ...trigger, assetUrn: e.target.value })} aria-label="Materialized asset">
+                {!workspaceAssets.length && <option value="">No Integration output assets</option>}
+                {workspaceAssets.map(asset => <option key={asset.urn} value={asset.urn}>{asset.name}{asset.layer ? ` · ${asset.layer}` : ''}</option>)}
+              </select>
             )}
           </div>
         </div>
