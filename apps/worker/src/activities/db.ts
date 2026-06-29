@@ -1,5 +1,7 @@
 import { Pool } from 'pg';
+import { redactSensitiveText } from '@dataflow/shared';
 import type { DataRef } from '@dataflow/shared';
+import { getPayloadObject, payloadObjectKey, payloadStoreConfig, putPayloadObject } from '@dataflow/object-store';
 import { decryptPayload, encryptPayload } from './crypto';
 
 export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -20,8 +22,9 @@ export async function writePayload(
   dek?: Buffer,
 ): Promise<DataRef> {
   const json = JSON.stringify(data ?? null);
+  const sizeBytes = Buffer.byteLength(json);
   const encryptionKey = dek ?? platformPayloadKey();
-  if (Buffer.byteLength(json) <= INLINE_MAX) {
+  if (sizeBytes <= INLINE_MAX) {
     if (encryptionKey) {
       const encrypted = encryptPayload(Buffer.from(json), encryptionKey);
       return {
@@ -30,13 +33,24 @@ export async function writePayload(
         iv: encrypted.iv,
         encrypted: true,
         tenantId,
-        sizeBytes: json.length,
+        sizeBytes,
         recordCount: Array.isArray(data) ? data.length : undefined,
       };
     }
     return { type: 'inline', key: Buffer.from(json).toString('base64'),
-             tenantId, sizeBytes: json.length,
+             tenantId, sizeBytes,
              recordCount: Array.isArray(data) ? data.length : undefined };
+  }
+  const objectStore = payloadStoreConfig();
+  if (objectStore) {
+    if (!encryptionKey) throw new Error('PAYLOAD_S3_BUCKET requires TEMPORAL_PAYLOAD_ENCRYPTION_KEY or an execution DEK');
+    const encrypted = encryptPayload(Buffer.from(json), encryptionKey);
+    const key = payloadObjectKey(tenantId, executionId, nodeId);
+    await putPayloadObject(objectStore, key, encrypted.ciphertext);
+    return {
+      type: 's3', key, bucket: objectStore.bucket, iv: encrypted.iv, encrypted: true,
+      tenantId, sizeBytes, recordCount: Array.isArray(data) ? data.length : undefined,
+    };
   }
   if (encryptionKey) {
     const encrypted = encryptPayload(Buffer.from(json), encryptionKey);
@@ -50,7 +64,7 @@ export async function writePayload(
       type: 'pg',
       key: rows[0].id,
       tenantId,
-      sizeBytes: json.length,
+      sizeBytes,
       recordCount: Array.isArray(data) ? data.length : undefined,
       encrypted: true,
     };
@@ -60,7 +74,7 @@ export async function writePayload(
      VALUES ($1,$2,$3,$4) RETURNING id`,
     [tenantId, executionId, nodeId, json]
   );
-  return { type: 'pg', key: rows[0].id, tenantId, sizeBytes: json.length,
+  return { type: 'pg', key: rows[0].id, tenantId, sizeBytes,
            recordCount: Array.isArray(data) ? data.length : undefined };
 }
 
@@ -74,6 +88,15 @@ export async function readPayload(ref: DataRef, dek?: Buffer): Promise<unknown> 
       return JSON.parse(decryptPayload(ref.key, ref.iv, encryptionKey).toString());
     }
     return JSON.parse(Buffer.from(ref.key, 'base64').toString());
+  }
+  if (ref.type === 's3') {
+    if (!ref.encrypted || !encryptionKey || !ref.iv) {
+      throw new Error(`encrypted DataRef ${ref.key} is missing its encryption key or IV`);
+    }
+    const objectStore = payloadStoreConfig(process.env, ref.bucket);
+    if (!objectStore) throw new Error(`DataRef ${ref.key} is missing its object-store bucket`);
+    const ciphertext = await getPayloadObject(objectStore, ref.key);
+    return JSON.parse(decryptPayload(ciphertext, ref.iv, encryptionKey).toString());
   }
   const { rows } = await pool.query(
     `SELECT payload, encrypted, encryption_iv FROM node_payloads WHERE id = $1`,
@@ -116,5 +139,28 @@ export async function recordNodeRun(
      VALUES ($1,$2,$3,$4,$5,$6,$7)
      ON CONFLICT (execution_id,node_id) DO UPDATE
        SET status=$4, duration_ms=$5, record_count=$6, error=$7, finished_at=now()`,
-    [executionId, nodeId, tenantId, status, durationMs, recordCount ?? null, error ?? null]);
+    [executionId, nodeId, tenantId, status, durationMs, recordCount ?? null,
+      error == null ? null : redactSensitiveText(error)]);
+}
+
+export async function recordDataQualityResult(params: {
+  executionId: string;
+  nodeId: string;
+  status: 'passed' | 'warning' | 'failed';
+  passedCount: number;
+  failedCount: number;
+  errorSamples: Array<{ rowIndex: number; errors: string[] }>;
+  quarantineRef?: DataRef;
+}): Promise<void> {
+  await pool.query(
+    `INSERT INTO data_quality_results
+       (tenant_id,pipeline_id,execution_id,node_id,status,passed_count,failed_count,error_samples,quarantine_ref)
+     SELECT e.tenant_id,e.pipeline_id,e.id,$2,$3,$4,$5,$6,$7
+       FROM executions e WHERE e.id=$1
+     ON CONFLICT (execution_id,node_id) DO UPDATE SET
+       status=EXCLUDED.status,passed_count=EXCLUDED.passed_count,failed_count=EXCLUDED.failed_count,
+       error_samples=EXCLUDED.error_samples,quarantine_ref=EXCLUDED.quarantine_ref,evaluated_at=now()`,
+    [params.executionId, params.nodeId, params.status, params.passedCount, params.failedCount,
+     JSON.stringify(params.errorSamples), params.quarantineRef ? JSON.stringify(params.quarantineRef) : null],
+  );
 }

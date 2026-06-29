@@ -1,5 +1,10 @@
 export * from './types';
 export * from './catalog-types';
+export { CATALOG, catalogByType } from './catalog';
+export * from './lineage';
+export * from './monitoring';
+export * from './openlineage';
+export * from './redact';
 export * from './safe-expression';
 export { definitionToMermaid, mermaidToDefinition } from './mermaid';
 export type { MermaidParseResult } from './mermaid';

@@ -155,6 +155,23 @@ func DynamicDAGWorkflow(ctx workflow.Context, input model.WorkflowInput) (model.
 			}
 		}
 	}
+	if phase == "completed" {
+		cursors := make([]map[string]interface{}, 0)
+		for _, result := range state.Results {
+			checkpoint, ok := result.Meta["checkpoint"].(map[string]interface{})
+			connectionID, hasID := result.Meta["connectionId"].(string)
+			if ok && hasID {
+				cursors = append(cursors, map[string]interface{}{"connectionId": connectionID, "checkpoint": checkpoint})
+			}
+		}
+		if len(cursors) > 0 {
+			if err := workflow.ExecuteActivity(ctx, "commitSourceCursors", map[string]interface{}{
+				"tenantId": input.TenantID, "cursors": cursors,
+			}).Get(ctx, nil); err != nil {
+				return model.ExecutionStatus{}, err
+			}
+		}
+	}
 	if err := workflow.ExecuteActivity(ctx, "markExecution", map[string]interface{}{
 		"executionId": input.ExecutionID,
 		"phase":       phase,
@@ -265,19 +282,23 @@ func runNode(
 
 func runSource(ctx workflow.Context, input model.WorkflowInput, node model.Node) (model.NodeResult, error) {
 	total := 0
-	var lastRef *model.DataRef
+	refs := make([]*model.DataRef, 0)
+	var checkpoint map[string]interface{}
+	connectionID := sourceConnectionID(input.Definition.ID, node)
 	for pageNumber := 1; ; pageNumber++ {
 		var page struct {
-			OutputRef   *model.DataRef `json:"outputRef"`
-			HasMore     bool           `json:"hasMore"`
-			RecordCount int            `json:"recordCount"`
+			OutputRef   *model.DataRef         `json:"outputRef"`
+			HasMore     bool                   `json:"hasMore"`
+			RecordCount int                    `json:"recordCount"`
+			Checkpoint  map[string]interface{} `json:"checkpoint,omitempty"`
 		}
 		err := workflow.ExecuteActivity(ctx, "fetchSourcePage", map[string]interface{}{
 			"activityType": node.ActivityType,
 			"config":       node.Config,
 			"ingestion":    node.Ingestion,
 			"tenantId":     input.TenantID,
-			"connectionId": input.Definition.ID + ":" + node.ID,
+			"connectionId": connectionID,
+			"cursor":       checkpoint,
 			"executionId":  input.ExecutionID,
 			"nodeId":       node.ID,
 			"encryptedDek": input.EncryptedDEK,
@@ -285,20 +306,54 @@ func runSource(ctx workflow.Context, input model.WorkflowInput, node model.Node)
 		if err != nil {
 			return failed(node.ID, err), nil
 		}
-		lastRef = page.OutputRef
+		if page.OutputRef != nil {
+			refs = append(refs, page.OutputRef)
+		}
+		if page.Checkpoint != nil {
+			checkpoint = page.Checkpoint
+		}
 		total += page.RecordCount
+		// ponytail: bound history/payload size; a later execution resumes from the saved cursor.
 		if !page.HasMore {
 			break
 		}
 		if pageNumber >= 50 {
-			input.ExecutionPrepared = true
-			return model.NodeResult{}, workflow.NewContinueAsNewError(ctx, DynamicDAGWorkflow, input)
+			return failed(node.ID, fmt.Errorf("source partition exceeded 50 pages; reduce backfill partition size or increase pageSize")), nil
 		}
 	}
+	var outputRef *model.DataRef
+	if len(refs) == 1 {
+		outputRef = refs[0]
+	} else if len(refs) > 1 {
+		var merged model.NodeResult
+		if err := workflow.ExecuteActivity(ctx, "mergeRefs", map[string]interface{}{
+			"inputRefs": refs, "strategy": "concat", "tenantId": input.TenantID,
+			"executionId": input.ExecutionID, "nodeId": node.ID,
+			"encryptedDek": input.EncryptedDEK,
+		}).Get(ctx, &merged); err != nil {
+			return failed(node.ID, err), nil
+		}
+		outputRef = merged.OutputRef
+	}
+	meta := map[string]interface{}{"durationMs": 0, "recordCount": total}
+	if checkpoint != nil {
+		meta["checkpoint"] = checkpoint
+		meta["connectionId"] = connectionID
+	}
 	return model.NodeResult{
-		NodeID: node.ID, Status: "success", OutputRef: lastRef,
-		Meta: map[string]interface{}{"durationMs": 0, "recordCount": total},
+		NodeID: node.ID, Status: "success", OutputRef: outputRef, Meta: meta,
 	}, nil
+}
+
+func sourceConnectionID(pipelineID string, node model.Node) string {
+	id := pipelineID + ":" + node.ID
+	if node.Config["syncMode"] == "cdc" {
+		id += ":cdc"
+	}
+	if node.Ingestion != nil && node.Ingestion.StateKey != "" {
+		id += ":" + node.Ingestion.StateKey
+	}
+	return id
 }
 
 func buildPlan(nodes []model.Node, edges []model.Edge) (executionPlan, error) {

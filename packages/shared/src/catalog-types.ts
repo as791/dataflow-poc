@@ -10,12 +10,13 @@ export interface FieldSpec {
   options?: string[];
   placeholder?: string;
   help?: string;
+  visibleWhen?: { key: string; equals: string };
   // Picker-only metadata. The PipelineCanvasPage config renderer dispatches
   // on `picker` to mount the right component.
   picker?: 'gsheets' | 'gdrive' | 'excel' | 'zendesk';
   // 'instance-picker' lists connector instances of this provider (A3/A6) and
   // writes the chosen instance id into config.connectionId.
-  provider?: 'google' | 'microsoft' | 'zendesk' | 'postgres' | 'http';
+  provider?: 'google' | 'microsoft' | 'zendesk' | 'postgres' | 'mysql' | 'mongodb' | 'clickhouse' | 's3' | 'kafka' | 'http';
   // Keys that this picker writes into config (e.g. picker 'gsheets' writes
   // connectionId + spreadsheetId + range + sheetName). Documented for clarity;
   // the picker components do the writes themselves.

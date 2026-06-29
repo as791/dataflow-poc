@@ -14,25 +14,13 @@ interface Connection {
   email?: string;
   subdomain?: string;   // zendesk only
   host?: string;
+  brokers?: string;
   baseUrl?: string;
+  cdc?: { enabled?: boolean; resources?: string[]; state?: string; error?: string };
   connected_at?: string;
 }
 
 // ─── API calls ────────────────────────────────────────────────────────────────
-
-async function listConnectors(): Promise<Connection[]> {
-  const res = await fetch('/api/connectors', { credentials: 'include' });
-  if (!res.ok) throw new Error(`${res.status}`);
-  return res.json();
-}
-
-async function deleteConnector(id: string): Promise<void> {
-  const res = await fetch(`/api/connectors/${id}`, {
-    method: 'DELETE',
-    credentials: 'include',
-  });
-  if (!res.ok) throw new Error(`${res.status}`);
-}
 
 async function startOAuth(provider: 'google' | 'microsoft'): Promise<void> {
   const res = await fetch(`/api/connectors/${provider}/auth`, {
@@ -162,7 +150,7 @@ function ZendeskModal({ onClose, onConnect }: {
 // ─── Credential instance modal (A3 — non-OAuth creds) ──────────────────────────
 
 function CredentialModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const [provider, setProvider] = useState<'postgres' | 'http'>('postgres');
+  const [provider, setProvider] = useState<'postgres' | 'mysql' | 'mongodb' | 'clickhouse' | 's3' | 'kafka' | 'http'>('postgres');
   const [name, setName] = useState('');
   const [f, setF] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -172,9 +160,20 @@ function CredentialModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy(true); setErr(null);
     try {
-      const body = provider === 'postgres'
-        ? { provider, name, config: { host: f.host, port: f.port ? +f.port : 5432, database: f.database, user: f.user }, secret: { password: f.password } }
-        : { provider, name, config: { baseUrl: f.baseUrl }, secret: { apiKey: f.apiKey } };
+      let body: Record<string, unknown>;
+      if (provider === 'postgres' || provider === 'mysql') {
+        body = { provider, name, config: { host: f.host, port: f.port ? +f.port : provider === 'postgres' ? 5432 : 3306, database: f.database, user: f.user, sslMode: f.sslMode ?? 'disable' }, secret: { password: f.password } };
+      } else if (provider === 'mongodb') {
+        body = { provider, name, config: { host: f.host, port: f.port ? +f.port : 27017, database: f.database, user: f.user, authSource: f.authSource || 'admin', tls: f.tls === 'true' }, secret: { password: f.password } };
+      } else if (provider === 'clickhouse') {
+        body = { provider, name, config: { url: f.url, database: f.database || 'default', username: f.username || 'default' }, secret: { password: f.password } };
+      } else if (provider === 's3') {
+        body = { provider, name, config: { region: f.region || 'us-east-1', endpoint: f.endpoint, forcePathStyle: f.forcePathStyle === 'true' }, secret: { accessKeyId: f.accessKeyId, secretAccessKey: f.secretAccessKey } };
+      } else if (provider === 'kafka') {
+        body = { provider, name, config: { brokers: f.brokers, clientId: f.clientId || 'dataflow', tls: f.tls === 'true', saslMechanism: f.saslMechanism || 'none' }, secret: { username: f.username, password: f.password } };
+      } else {
+        body = { provider, name, config: { baseUrl: f.baseUrl }, secret: { apiKey: f.apiKey } };
+      }
       await api.createConnector(body);
       onSaved(); onClose();
     } catch (ex: any) { setErr(ex.message ?? 'Failed to save'); setBusy(false); }
@@ -191,19 +190,68 @@ function CredentialModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
           <label className="glass-label">Type
             <select className="glass-select" value={provider} onChange={e => setProvider(e.target.value as any)}>
               <option value="postgres">Postgres</option>
+              <option value="mysql">MySQL</option>
+              <option value="mongodb">MongoDB</option>
+              <option value="clickhouse">ClickHouse</option>
+              <option value="s3">Amazon S3</option>
+              <option value="kafka">Kafka / Redpanda</option>
               <option value="http">HTTP API</option>
             </select>
           </label>
           <label className="glass-label">Name
             <input className="glass-input" value={name} onChange={e => setName(e.target.value)} placeholder="warehouse" required />
           </label>
-          {provider === 'postgres' ? (
+          {provider === 'postgres' || provider === 'mysql' ? (
             <>
               <input className="glass-input" placeholder="host" value={f.host ?? ''} onChange={set('host')} />
-              <input className="glass-input" placeholder="port (5432)" value={f.port ?? ''} onChange={set('port')} />
+              <input className="glass-input" placeholder={`port (${provider === 'postgres' ? 5432 : 3306})`} value={f.port ?? ''} onChange={set('port')} />
               <input className="glass-input" placeholder="database" value={f.database ?? ''} onChange={set('database')} />
               <input className="glass-input" placeholder="user" value={f.user ?? ''} onChange={set('user')} />
               <input className="glass-input" type="password" placeholder="password" value={f.password ?? ''} onChange={set('password')} />
+              <select className="glass-select" value={f.sslMode ?? 'disable'} onChange={e => setF(s => ({ ...s, sslMode: e.target.value }))}>
+                <option value="disable">SSL disabled</option>
+                <option value="require">SSL required</option>
+                <option value="verify-full">SSL verify certificate</option>
+              </select>
+            </>
+          ) : provider === 'mongodb' ? (
+            <>
+              <input className="glass-input" placeholder="host" value={f.host ?? ''} onChange={set('host')} required />
+              <input className="glass-input" placeholder="port (27017)" value={f.port ?? ''} onChange={set('port')} />
+              <input className="glass-input" placeholder="database" value={f.database ?? ''} onChange={set('database')} required />
+              <input className="glass-input" placeholder="user (optional)" value={f.user ?? ''} onChange={set('user')} />
+              <input className="glass-input" type="password" placeholder="password" value={f.password ?? ''} onChange={set('password')} />
+              <input className="glass-input" placeholder="auth source (admin)" value={f.authSource ?? ''} onChange={set('authSource')} />
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.tls === 'true'} onChange={e => setF(s => ({ ...s, tls: String(e.target.checked) }))} /> TLS / SRV</label>
+            </>
+          ) : provider === 'clickhouse' ? (
+            <>
+              <input className="glass-input" type="url" placeholder="https://clickhouse.example.com:8443" value={f.url ?? ''} onChange={set('url')} required />
+              <input className="glass-input" placeholder="database (default)" value={f.database ?? ''} onChange={set('database')} />
+              <input className="glass-input" placeholder="username (default)" value={f.username ?? ''} onChange={set('username')} />
+              <input className="glass-input" type="password" placeholder="password" value={f.password ?? ''} onChange={set('password')} />
+            </>
+          ) : provider === 's3' ? (
+            <>
+              <input className="glass-input" placeholder="region (us-east-1)" value={f.region ?? ''} onChange={set('region')} />
+              <input className="glass-input" placeholder="endpoint (optional)" value={f.endpoint ?? ''} onChange={set('endpoint')} />
+              <input className="glass-input" placeholder="access key ID" value={f.accessKeyId ?? ''} onChange={set('accessKeyId')} required />
+              <input className="glass-input" type="password" placeholder="secret access key" value={f.secretAccessKey ?? ''} onChange={set('secretAccessKey')} required />
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.forcePathStyle === 'true'} onChange={e => setF(s => ({ ...s, forcePathStyle: String(e.target.checked) }))} /> Path-style URLs (MinIO/S3-compatible)</label>
+            </>
+          ) : provider === 'kafka' ? (
+            <>
+              <input className="glass-input" placeholder="brokers (kafka-1:9092,kafka-2:9092)" value={f.brokers ?? ''} onChange={set('brokers')} required />
+              <input className="glass-input" placeholder="client ID (dataflow)" value={f.clientId ?? ''} onChange={set('clientId')} />
+              <select className="glass-select" value={f.saslMechanism ?? 'none'} onChange={e => setF(s => ({ ...s, saslMechanism: e.target.value }))}>
+                <option value="none">No SASL</option><option value="plain">SASL/PLAIN</option>
+                <option value="scram-sha-256">SCRAM-SHA-256</option><option value="scram-sha-512">SCRAM-SHA-512</option>
+              </select>
+              {f.saslMechanism && f.saslMechanism !== 'none' && <>
+                <input className="glass-input" placeholder="SASL username" value={f.username ?? ''} onChange={set('username')} required />
+                <input className="glass-input" type="password" placeholder="SASL password" value={f.password ?? ''} onChange={set('password')} required />
+              </>}
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.tls === 'true'} onChange={e => setF(s => ({ ...s, tls: String(e.target.checked) }))} /> TLS</label>
             </>
           ) : (
             <>
@@ -331,6 +379,9 @@ export function ConnectorsPage() {
   const [zendeskModalOpen, setZendeskModalOpen] = useState(false);
   const [credModalOpen, setCredModalOpen] = useState(false);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
+  const [cdcResources, setCdcResources] = useState<Record<string, string>>({});
+  const [cdcStatus, setCdcStatus] = useState<Record<string, any>>({});
+  const [cdcBusy, setCdcBusy] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
 
   const credentials = connections.filter(c => c.kind === 'credential');
@@ -342,13 +393,34 @@ export function ConnectorsPage() {
     } catch (e: any) { setTestResult(r => ({ ...r, [id]: `Failed: ${e.message ?? 'failed'}` })); }
   };
   const removeCred = async (id: string) => { await api.deleteConnector(id); refresh(); };
+  const refreshCdc = async (id: string) => {
+    setCdcBusy(id);
+    try { const status = await api.getConnectorCdc(id); setCdcStatus(s => ({ ...s, [id]: status })); }
+    catch (e: any) { setCdcStatus(s => ({ ...s, [id]: { error: e.message ?? 'status failed' } })); }
+    finally { setCdcBusy(null); }
+  };
+  const saveCdc = async (id: string) => {
+    const resources = (cdcResources[id] ?? '').split(',').map(s => s.trim()).filter(Boolean);
+    setCdcBusy(id);
+    try { const status = await api.saveConnectorCdc(id, resources); setCdcStatus(s => ({ ...s, [id]: status })); }
+    catch (e: any) { setCdcStatus(s => ({ ...s, [id]: { error: e.message ?? 'CDC setup failed' } })); }
+    finally { setCdcBusy(null); }
+  };
+  const disableCdc = async (id: string) => {
+    setCdcBusy(id);
+    try { await api.deleteConnectorCdc(id); setCdcStatus(s => ({ ...s, [id]: { enabled: false } })); }
+    catch (e: any) { setCdcStatus(s => ({ ...s, [id]: { error: e.message ?? 'CDC disable failed' } })); }
+    finally { setCdcBusy(null); }
+  };
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const list = await listConnectors();
+      const list = await api.listConnectors();
       setConnections(list);
+      setCdcResources(current => Object.fromEntries(list.map(c => [c.id, current[c.id] ?? c.cdc?.resources?.join(', ') ?? ''])));
+      setCdcStatus(current => Object.fromEntries(list.map(c => [c.id, current[c.id] ?? c.cdc ?? { enabled: false }])));
     } catch (e: any) {
       setError(e.message ?? 'Failed to load connectors');
     } finally {
@@ -359,7 +431,7 @@ export function ConnectorsPage() {
   useEffect(() => { refresh(); }, [refresh]);
 
   const handleDisconnect = async (id: string) => {
-    await deleteConnector(id);
+    await api.deleteConnector(id);
     setConnections(prev => prev.filter(c => c.id !== id));
   };
 
@@ -452,21 +524,50 @@ export function ConnectorsPage() {
           <button className="glass-btn-ghost text-sm" onClick={() => setCredModalOpen(true)}>+ Add credential</button>
         </div>
         {credentials.length === 0 ? (
-          <p className="text-xs text-gray-400 dark:text-white/40">No credentials yet. Add Postgres or HTTP creds to reference from nodes.</p>
+          <p className="text-xs text-gray-400 dark:text-white/40">No credentials yet. Add a database, object store, or HTTP connection for pipeline nodes.</p>
         ) : (
           <ul className="divide-y divide-gray-100 dark:divide-white/5">
-            {credentials.map(c => (
-              <li key={c.id} className="flex items-center justify-between py-2 text-sm">
-                <div className="min-w-0">
-                  <p className="truncate text-gray-900 dark:text-white/90">{c.name ?? c.id} <span className="text-gray-400 dark:text-white/40">· {c.provider}</span></p>
-                  {testResult[c.id] && <p className="text-xs text-gray-500 dark:text-white/50">{testResult[c.id]}</p>}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button className="glass-btn-ghost px-2.5 py-1 text-xs" onClick={() => testConn(c.id)}>Test</button>
-                  <button className="glass-btn-danger px-2.5 py-1 text-xs" onClick={() => removeCred(c.id)}>✕</button>
-                </div>
-              </li>
-            ))}
+            {credentials.map(c => {
+              const supportsCdc = ['postgres', 'mysql', 'mongodb'].includes(c.provider);
+              const status = cdcStatus[c.id] ?? c.cdc ?? {};
+              const prerequisite = c.provider === 'postgres' ? 'Requires logical replication and pgoutput.'
+                : c.provider === 'mysql' ? 'Requires ROW binlog with a replication user.'
+                : 'Requires a replica set with change streams enabled.';
+              return (
+                <li key={c.id} className="py-3 text-sm">
+                  <div className="flex items-center justify-between">
+                    <div className="min-w-0">
+                      <p className="truncate text-gray-900 dark:text-white/90">{c.name ?? c.id} <span className="text-gray-400 dark:text-white/40">· {c.provider}</span></p>
+                      {testResult[c.id] && <p className="text-xs text-gray-500 dark:text-white/50">{testResult[c.id]}</p>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button className="glass-btn-ghost px-2.5 py-1 text-xs" onClick={() => testConn(c.id)}>Test</button>
+                      <button className="glass-btn-danger px-2.5 py-1 text-xs" onClick={() => removeCred(c.id)} aria-label={`Delete ${c.name ?? c.provider} credential`}>✕</button>
+                    </div>
+                  </div>
+                  {supportsCdc && (
+                    <div className="mt-2 rounded-lg border border-gray-200 p-2 dark:border-white/10">
+                      <label className="glass-label">CDC tables / collections
+                        <input className="glass-input" value={cdcResources[c.id] ?? ''}
+                          onChange={e => setCdcResources(s => ({ ...s, [c.id]: e.target.value }))}
+                          placeholder={c.provider === 'mongodb' ? 'database.collection' : 'schema.table'} />
+                      </label>
+                      <p className="mb-2 text-[11px] text-gray-500 dark:text-white/45">Comma-separated. {prerequisite}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button className="glass-btn-primary px-2.5 py-1 text-xs" disabled={cdcBusy === c.id || !cdcResources[c.id]?.trim()} onClick={() => saveCdc(c.id)}>
+                          {status.enabled ? 'Update CDC' : 'Enable CDC'}
+                        </button>
+                        <button className="glass-btn-ghost px-2.5 py-1 text-xs" disabled={cdcBusy === c.id} onClick={() => refreshCdc(c.id)}>Refresh status</button>
+                        {status.enabled && <button className="glass-btn-danger px-2.5 py-1 text-xs" disabled={cdcBusy === c.id} onClick={() => disableCdc(c.id)}>Disable</button>}
+                        <span className="text-xs text-gray-500 dark:text-white/50" role="status">
+                          {cdcBusy === c.id ? 'Working…' : status.error ? `Error: ${status.error}` : status.enabled ? status.state ?? 'Enabled' : 'Disabled'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
