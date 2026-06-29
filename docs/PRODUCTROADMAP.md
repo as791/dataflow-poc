@@ -1,5 +1,9 @@
 # Product Roadmap — First GTM (handful of users), then enhance on request
 
+> **Historical plan:** implementation has moved beyond this GTM snapshot (CDC,
+> durable events/incidents, pagination, retries, and workspace lineage now ship).
+> Use [`ENTERPRISE_ROADMAP.md`](./ENTERPRISE_ROADMAP.md) for current priorities.
+
 > **Status:** Pre-production. No public users, no data to migrate, no compat burden.
 > **Goal of this roadmap:** ship a credible v1 to a small invited group on the **existing TS backend**,
 > learn from real use, then build depth only when a user asks for it.

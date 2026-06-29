@@ -170,7 +170,7 @@ auth.get('/google/callback', async (req, res) => {
       sub, email, req.ip ?? null, req.get('user-agent') ?? null);
     const refresh = await issueRefreshToken(userId);
     setRefreshCookie(res, refresh);
-    res.redirect(APP_URL);
+    res.redirect(`${APP_URL}/pipelines`);
   } catch (e: any) {
     console.error('google oauth callback failed', e?.message ?? e);
     res.redirect(`${APP_URL}/login?error=oauth_failed`);
@@ -225,6 +225,135 @@ auth.get('/me', requireAuth, async (req, res) => {
     [req.tenant.userId]);
   if (!rows.length) return res.status(404).json({ error: 'user not found' });
   res.json({ user: rows[0] });
+});
+
+// ─── Generic OIDC SSO (Okta, Azure AD, Auth0, Keycloak, etc.) ───────────────
+// Config: OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_REDIRECT_URI
+// Discovery doc is fetched once per request (small overhead; cache if needed).
+
+async function oidcDiscovery(): Promise<Record<string, string>> {
+  const issuer = process.env.OIDC_ISSUER?.replace(/\/$/, '');
+  if (!issuer) throw Object.assign(new Error('OIDC_ISSUER not configured'), { status: 503 });
+  const r = await fetch(`${issuer}/.well-known/openid-configuration`);
+  if (!r.ok) throw new Error(`OIDC discovery failed: ${r.status}`);
+  return r.json() as any;
+}
+
+auth.get('/oidc',
+  rateLimit({ scope: 'oauth-start', keyFn: ipKey, limit: 20, windowSeconds: 60 }),
+  async (req, res) => {
+    try {
+      const doc = await oidcDiscovery();
+      const state = randomToken();
+      res.cookie('oauth_state', state, {
+        httpOnly: true, sameSite: 'lax', secure: isProd,
+        maxAge: STATE_TTL_MINUTES * 60 * 1000, path: '/api/auth',
+      });
+      const params = new URLSearchParams({
+        response_type: 'code',
+        client_id: process.env.OIDC_CLIENT_ID!,
+        redirect_uri: process.env.OIDC_REDIRECT_URI!,
+        scope: 'openid email profile',
+        state,
+      });
+      res.redirect(`${doc.authorization_endpoint}?${params}`);
+    } catch (e: any) {
+      res.status(e.status ?? 502).json({ error: e.message });
+    }
+  });
+
+auth.get('/oidc/callback', async (req, res) => {
+  const code = req.query.code ? String(req.query.code) : '';
+  const state = req.query.state ? String(req.query.state) : '';
+  const cookieState = req.cookies?.oauth_state;
+  res.clearCookie('oauth_state', { path: '/api/auth' });
+
+  if (!code || !state || !cookieState || state !== cookieState) {
+    return res.redirect(`${APP_URL}/login?error=oauth_state`);
+  }
+
+  try {
+    const doc = await oidcDiscovery();
+
+    // Exchange code for tokens
+    const tokenRes = await fetch(doc.token_endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: process.env.OIDC_REDIRECT_URI!,
+        client_id: process.env.OIDC_CLIENT_ID!,
+        client_secret: process.env.OIDC_CLIENT_SECRET!,
+      }),
+    });
+    if (!tokenRes.ok) return res.redirect(`${APP_URL}/login?error=oidc_token`);
+    const { access_token } = (await tokenRes.json()) as any;
+
+    // Fetch identity from userinfo (avoids JWKS complexity; validated server-side by IdP)
+    const infoRes = await fetch(doc.userinfo_endpoint, {
+      headers: { Authorization: `Bearer ${access_token}` },
+    });
+    if (!infoRes.ok) return res.redirect(`${APP_URL}/login?error=oidc_userinfo`);
+    const info = (await infoRes.json()) as any;
+
+    const sub: string = info.sub;
+    const email: string = (info.email ?? '').toLowerCase();
+    const emailVerified: boolean = info.email_verified !== false;
+    if (!sub || !email || !emailVerified) {
+      return res.redirect(`${APP_URL}/login?error=oidc_profile`);
+    }
+
+    // Reuse Google user resolution logic: find/create user by oidc_sub or email
+    const ip = req.ip ?? null;
+    const ua = req.get('user-agent') ?? null;
+    const bySub = await pool.query(`SELECT id FROM users WHERE oidc_sub=$1`, [sub]);
+    let userId: string;
+    if (bySub.rows.length) {
+      userId = bySub.rows[0].id;
+    } else {
+      const byEmail = await pool.query(`SELECT id FROM users WHERE email=$1`, [email]);
+      if (byEmail.rows.length) {
+        userId = byEmail.rows[0].id;
+        await pool.query(`UPDATE users SET oidc_sub=$1, email_verified=true WHERE id=$2`, [sub, userId]);
+      } else {
+        // Auto-provision: check invitation first
+        const inv = await pool.query(
+          `SELECT tenant_id,role FROM user_invitations
+             WHERE email=$1 AND accepted_at IS NULL AND expires_at > now()
+             ORDER BY expires_at DESC LIMIT 1`, [email]);
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          let tenantId: string; let role: string;
+          if (inv.rows.length) {
+            tenantId = inv.rows[0].tenant_id; role = inv.rows[0].role;
+            await client.query(`UPDATE user_invitations SET accepted_at=now() WHERE email=$1 AND accepted_at IS NULL`, [email]);
+          } else {
+            role = 'owner';
+            const t = await client.query(`INSERT INTO tenants (name) VALUES ($1) RETURNING id`, [email.split('@')[0]]);
+            tenantId = t.rows[0].id;
+          }
+          const u = await client.query(
+            `INSERT INTO users (tenant_id,email,oidc_sub,role,email_verified) VALUES ($1,$2,$3,$4,true) RETURNING id`,
+            [tenantId, email, sub, role]);
+          await client.query('COMMIT');
+          userId = u.rows[0].id;
+          auditAs(tenantId, userId, 'auth.register', ip, ua, { provider: 'oidc', invited: inv.rows.length > 0 });
+        } catch (e2) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw e2;
+        } finally { client.release(); }
+      }
+    }
+
+    const refresh = await issueRefreshToken(userId);
+    setRefreshCookie(res, refresh);
+    res.redirect(`${APP_URL}/pipelines`);
+  } catch (e: any) {
+    console.error('oidc callback failed', e?.message ?? e);
+    res.redirect(`${APP_URL}/login?error=oidc_failed`);
+  }
 });
 
 // ─── GET /accept-invite — validate token (used by the /accept-invite UI) ─────

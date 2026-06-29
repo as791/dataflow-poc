@@ -21,13 +21,26 @@ export default function RunsPage() {
   const [rows, setRows] = useState<Execution[]>([]);
   const [pipelines, setPipelines] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [filters, setFilters] = useState({ pipeline: '', env: '', status: '', from: '', to: '' });
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    try { setRows(await api.listExecutions(filters)); }
+    try {
+      const page = await api.listExecutionsPage({ ...filters, limit: '50' });
+      setRows(page.items); setNextCursor(page.nextCursor);
+    }
     finally { setLoading(false); }
   }, [filters]);
+
+  const loadMore = async () => {
+    if (!nextCursor) return;
+    setLoading(true);
+    try {
+      const page = await api.listExecutionsPage({ ...filters, limit: '50', cursor: nextCursor });
+      setRows(current => [...current, ...page.items]); setNextCursor(page.nextCursor);
+    } finally { setLoading(false); }
+  };
 
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => { api.listPipelines().then(setPipelines).catch(() => {}); }, []);
@@ -83,6 +96,11 @@ export default function RunsPage() {
           </Link>
         ))}
       </div>
+      {nextCursor && (
+        <button className="glass-btn-ghost mx-auto block text-sm" onClick={loadMore} disabled={loading}>
+          {loading ? 'Loading…' : 'Load more'}
+        </button>
+      )}
     </div>
   );
 }

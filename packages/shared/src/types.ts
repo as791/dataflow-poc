@@ -16,12 +16,50 @@ export interface PipelineDefinition {
   nodes: PipelineNode[];
   edges: PipelineEdge[];
   concurrency?: { maxParallelNodes?: number };
+  metadata?: PipelineMetadata;
+  slo?: PipelineSlo;
+  notifications?: PipelineNotificationPolicy;
+}
+
+export interface PipelineMetadata {
+  owner?: string;
+  domain?: string;
+  tags?: string[];
+}
+
+export interface PipelineSlo {
+  freshnessMinutes?: number;
+  maxFailureRatePercent?: number;
+  maxDurationMs?: number;
+}
+
+export interface PipelineNotificationPolicy {
+  connectionId?: string;
+  minimumSeverity?: 'warning' | 'critical';
+}
+
+export type DataAssetType = 'table' | 'file' | 'topic' | 'stream' | 'vector-index' | 'model' | 'api' | 'collection';
+export type DataAssetLayer = 'bronze' | 'silver' | 'gold';
+
+// Stable asset identity is what joins otherwise-independent pipelines into one
+// workspace lineage graph. URNs must not contain credentials or secret query params.
+export interface DataAssetRef {
+  urn: string;
+  platform: string;
+  namespace: string;
+  name: string;
+  type: DataAssetType;
+  layer?: DataAssetLayer;
+  schema?: { fields: Array<{ name: string; type: string; nullable?: boolean }> };
+  owner?: string;
+  tags?: string[];
 }
 
 export type TriggerConfig =
   | { type: 'cron'; schedule: string }                       // Temporal Schedule
   | { type: 'webhook'; path: string; secret: string }        // HMAC verified
   | { type: 'event'; topic: string }                         // Redis pub/sub (POC)
+  | { type: 'asset'; assetUrn: string }                      // durable materialization event
   | { type: 'manual' };
 
 export interface PipelineNode {
@@ -35,12 +73,35 @@ export interface PipelineNode {
   retry?: { maximumAttempts?: number };
   mergeStrategy?: 'concat' | 'innerJoin';
   joinKey?: string;
+  inputAssets?: DataAssetRef[];
+  outputAssets?: DataAssetRef[];
 }
 
 export interface IngestionConfig {
   mode: 'incremental' | 'backfill' | 'realtime';
   backfillStart?: string;     // ISO date — page from here until caught up
+  backfillEnd?: string;       // ISO date — exclusive upper bound
+  stateKey?: string;          // isolates durable cursor state for a backfill partition
   pageSize?: number;
+}
+
+export type CdcOperation = 'create' | 'update' | 'delete' | 'snapshot';
+
+export interface CdcEvent {
+  op: CdcOperation;
+  key: Record<string, unknown>;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  occurredAt: string;
+  source: {
+    provider: 'postgres' | 'mysql' | 'mongodb';
+    database: string;
+    schema?: string;
+    table: string;
+    topic: string;
+    partition: number;
+    offset: string;
+  };
 }
 
 export interface PipelineEdge {
@@ -53,8 +114,9 @@ export interface PipelineEdge {
 // ─── DataRef: pointers flow through Temporal history, never payloads ───────
 
 export interface DataRef {
-  type: 'pg' | 'inline';
-  key: string;                // pg row id, or base64 inline (<4KB)
+  type: 'pg' | 'inline' | 's3';
+  key: string;                // pg row id, base64 inline (<4KB), or object key
+  bucket?: string;            // persisted so old refs survive default-bucket changes
   tenantId: string;
   sizeBytes: number;
   recordCount?: number;

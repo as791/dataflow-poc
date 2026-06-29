@@ -41,6 +41,8 @@ type Node struct {
 type IngestionConfig struct {
 	Mode          string `json:"mode"`
 	BackfillStart string `json:"backfillStart,omitempty"`
+	BackfillEnd   string `json:"backfillEnd,omitempty"`
+	StateKey      string `json:"stateKey,omitempty"`
 	PageSize      int    `json:"pageSize,omitempty"`
 }
 
@@ -58,6 +60,7 @@ type Edge struct {
 type DataRef struct {
 	Type        string `json:"type"`
 	Key         string `json:"key"`
+	Bucket      string `json:"bucket,omitempty"`
 	TenantID    string `json:"tenantId"`
 	SizeBytes   int    `json:"sizeBytes"`
 	RecordCount int    `json:"recordCount,omitempty"`

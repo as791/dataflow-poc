@@ -3,6 +3,9 @@ import { initOtel } from './otel';
 import * as activities from './activities';
 import { encryptedDataConverter } from './temporal-data-converter';
 import pino from 'pino';
+import { startEventOutboxDispatcher } from './event-outbox';
+import { startAlertNotificationDispatcher } from './alert-notifications';
+import { startOpenLineageDispatcher } from './openlineage';
 
 const log = pino({ name: 'worker' });
 
@@ -41,7 +44,10 @@ async function main() {
   });
 
   log.info({ buildId, taskQueue: worker.options.taskQueue }, 'worker started');
-  await worker.run();
+  const stopOutbox = startEventOutboxDispatcher();
+  const stopNotifications = startAlertNotificationDispatcher();
+  const stopOpenLineage = startOpenLineageDispatcher();
+  try { await worker.run(); } finally { stopOpenLineage(); stopNotifications(); await stopOutbox(); }
 }
 
 main().catch(err => { log.error(err); process.exit(1); });

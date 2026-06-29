@@ -3,8 +3,9 @@
   "configurations": [
     {
       "name": "web",
-      "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "cd /Users/aryaman.sinha/Downloads/dataflow-poc/apps/web && ../../node_modules/.bin/vite"],
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:web"],
+      "cwd": "/Users/aryaman.sinha/Downloads/dataflow-poc",
       "port": 3000
     }
   ]

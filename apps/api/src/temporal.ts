@@ -2,6 +2,7 @@ import { Connection, Client } from '@temporalio/client';
 import { randomUUID } from 'crypto';
 import { encryptedDataConverter } from './temporal-data-converter';
 import type { PipelineDefinition, DynamicWorkflowInput, DataRef, Environment } from '@dataflow/shared';
+import { dataflowOpenLineageRunEvent } from '@dataflow/shared';
 import { pool, withTenant } from './db';
 import { consumeExecutionQuota, releaseExecutionQuota } from './services/usage';
 
@@ -30,7 +31,7 @@ export async function temporal(namespace = process.env.TEMPORAL_NAMESPACE ?? 'de
 export async function fireExecution(
   def: PipelineDefinition, pipelineRowId: string,
   triggerType: string, env: Environment = 'test', payloadRef?: DataRef,
-  encryptedDek?: string,
+  encryptedDek?: string, retryOf?: string, backfillPartitionId?: string,
 ): Promise<string> {
   // Central enforcement so EVERY trigger path (manual, webhook, event) is
   // capped — not just manual runs gated by requireQuota. Throws before any
@@ -52,14 +53,31 @@ export async function fireExecution(
     });
     handle = started;
     // Must run inside withTenant so the RLS policy on `executions` resolves correctly.
-    await withTenant(def.tenantId, client => client.query(
-      `INSERT INTO executions
-         (id, pipeline_id, tenant_id, trigger_type, build_id, environment, workflow_id, run_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    await withTenant(def.tenantId, async client => {
+      await client.query(`INSERT INTO executions
+         (id, pipeline_id, tenant_id, trigger_type, build_id, environment, workflow_id, run_id, retry_of, backfill_partition_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [
         executionId, pipelineRowId, def.tenantId, triggerType,
-        process.env.BUILD_ID ?? null, env, executionId, started.firstExecutionRunId,
-      ]));
+        process.env.BUILD_ID ?? null, env, executionId, started.firstExecutionRunId, retryOf ?? null, backfillPartitionId ?? null,
+      ]);
+      if (backfillPartitionId) await client.query(
+        `UPDATE backfill_partitions SET status='running',execution_id=$2 WHERE id=$1`,
+        [backfillPartitionId, executionId],
+      );
+      if (process.env.OPENLINEAGE_URL) {
+        const event = dataflowOpenLineageRunEvent({
+          definition: def, pipelineKey: def.id, executionId, tenantId: def.tenantId,
+          environment: env, phase: 'started', eventTime: new Date().toISOString(),
+          namespace: process.env.OPENLINEAGE_NAMESPACE,
+        });
+        await client.query(
+          `INSERT INTO openlineage_outbox (tenant_id,execution_id,event_type,payload)
+           VALUES ($1,$2,'START',$3) ON CONFLICT (execution_id,event_type) DO NOTHING`,
+          [def.tenantId, executionId, JSON.stringify(event)],
+        );
+      }
+    });
     return executionId;
   } catch (error) {
     await handle?.terminate('execution metadata insert failed').catch(() => {});
@@ -72,11 +90,12 @@ export async function fireExecution(
 // Schedules are env-scoped so a pipeline's test and prod crons run independently
 // in their own namespaces.
 export async function syncSchedule(def: PipelineDefinition, pipelineRowId: string, env: Environment = 'test') {
+  // Only cron triggers need a Temporal Schedule; avoid connecting for manual/webhook/event.
+  if (def.trigger.type !== 'cron') return;
   const c = await temporal(namespaceFor(env));
   const scheduleId = `sched-${def.id}-${env}`;
   // remove stale schedule, then recreate if the definition declares cron
   try { await (await c.schedule.getHandle(scheduleId)).delete(); } catch { /* none */ }
-  if (def.trigger.type !== 'cron') return;
   await c.schedule.create({
     scheduleId,
     spec: { cronExpressions: [def.trigger.schedule] },

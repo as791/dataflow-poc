@@ -1,0 +1,21 @@
+{
+  "id": "22222222-2222-4222-8222-222222222222",
+  "name": "Orders · Silver quality",
+  "tenantId": "default",
+  "trigger": { "type": "asset", "assetUrn": "postgres://warehouse/bronze.orders" },
+  "nodes": [
+    { "id": "bronze", "type": "source", "activityType": "postgres.fetch", "label": "Raw orders",
+      "config": { "connectionId": "warehouse", "table": "bronze.orders", "syncMode": "cursor", "cursorColumn": "updated_at", "columns": "*", "layer": "bronze" } },
+    { "id": "valid", "type": "transform", "activityType": "transform.filter", "label": "Valid orders",
+      "config": { "predicate": "r.id != null && r.total >= 0" } },
+    { "id": "contract", "type": "transform", "activityType": "transform.contract", "label": "Order contract",
+      "config": { "schemaJson": { "id": "number", "total": "number", "updated_at": "date" }, "onViolation": "fail", "allowExtra": true } },
+    { "id": "silver", "type": "sink", "activityType": "sink.postgres", "label": "Clean orders",
+      "config": { "connectionId": "warehouse", "table": "silver.orders", "writeMode": "upsert", "conflictKey": "id", "layer": "silver" } }
+  ],
+  "edges": [
+    { "id": "bronze-to-valid", "source": "bronze", "target": "valid" },
+    { "id": "valid-to-contract", "source": "valid", "target": "contract" },
+    { "id": "contract-to-silver", "source": "contract", "target": "silver" }
+  ]
+}
