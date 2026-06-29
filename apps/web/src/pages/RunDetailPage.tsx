@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import ReactFlow, { Background, BackgroundVariant, Handle, Position, type NodeProps } from 'reactflow';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { api } from '../api';
 import { useCatalog } from '../context/CatalogContext';
 import { buildRunGraph, type NodeRun } from './runGraph';
@@ -42,9 +42,11 @@ const nodeTypes = { runNode: RunFlowNode };
 
 export default function RunDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { dark } = useTheme();
-  const [data, setData] = useState<{ execution: any; definition: any; nodeRuns: NodeRun[] } | null>(null);
+  const [data, setData] = useState<{ execution: any; definition: any; nodeRuns: NodeRun[]; qualityResults?: any[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
@@ -66,6 +68,12 @@ export default function RunDetailPage() {
     [data],
   );
 
+  const retry = async () => {
+    setRetrying(true); setError(null);
+    try { const next = await api.retryExecution(id!); navigate(`/runs/${next.executionId}`); }
+    catch (e: any) { setError(e.message ?? 'Retry failed'); setRetrying(false); }
+  };
+
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
       <div className="flex items-center gap-3 border-b border-gray-100 dark:border-white/[0.07] px-6 py-4">
@@ -76,12 +84,24 @@ export default function RunDetailPage() {
             {displayEnvironment(data?.execution?.environment)} · {data?.execution?.phase ?? '…'}
           </p>
         </div>
+        {data?.execution?.phase === 'failed' && (
+          <button className="glass-btn-ghost ml-auto flex items-center gap-1 text-sm" onClick={retry} disabled={retrying}>
+            <RotateCcw size={15} /> {retrying ? 'Retrying…' : 'Retry run'}
+          </button>
+        )}
       </div>
       {error && (
         <div className="mx-6 mt-4 text-xs text-red-600 dark:text-danger/90 bg-red-50 dark:bg-danger/10 border border-red-200 dark:border-danger/30 rounded-lg px-3 py-2">
           {error}
         </div>
       )}
+      {!!data?.qualityResults?.length && <div className="flex flex-wrap gap-2 border-b border-gray-100 px-6 py-3 dark:border-white/[0.07]">
+        {data.qualityResults.map(result => <div key={result.node_id} className={`rounded-lg border px-3 py-2 text-xs ${result.status === 'passed' ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-500/10' : result.status === 'failed' ? 'border-red-300 bg-red-50 dark:bg-red-500/10' : 'border-amber-300 bg-amber-50 dark:bg-amber-500/10'}`}>
+          <p className="font-semibold">{result.node_id} · quality {result.status}</p>
+          <p className="mt-0.5 text-[10px] text-gray-500 dark:text-white/50">{Number(result.passed_count).toLocaleString()} passed · {Number(result.failed_count).toLocaleString()} rejected{result.quarantine_available ? ' · quarantined' : ''}</p>
+          {result.error_samples?.[0] && <p className="mt-1 max-w-md truncate text-[10px] text-red-500">Row {Number(result.error_samples[0].rowIndex) + 1}: {result.error_samples[0].errors.join('; ')}</p>}
+        </div>)}
+      </div>}
       <div className="flex-1">
         <ReactFlow nodes={graph.nodes} edges={graph.edges} nodeTypes={nodeTypes}
           fitView nodesDraggable={false} nodesConnectable={false} elementsSelectable={false}>

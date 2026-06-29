@@ -207,6 +207,22 @@ export function evaluateMapExpression(expression: string, record: unknown): unkn
   return output;
 }
 
+export interface MapFieldLineage { outputField: string; inputFields: string[] }
+
+export function deriveMapFieldLineage(expression: string): MapFieldLineage[] {
+  const objectMatch = expression.trim().match(/^\(?\s*\{([\s\S]*)\}\s*\)?$/);
+  if (!objectMatch) return [];
+  return splitProjectionFields(objectMatch[1]).map(field => {
+    const separator = field.indexOf(':');
+    if (separator <= 0) throw new Error(`invalid map projection field "${field}"`);
+    const outputField = field.slice(0, separator).trim().replace(/^['"]|['"]$/g, '');
+    const inputFields = [...new Set(tokenize(field.slice(separator + 1).trim())
+      .filter((token): token is Extract<Token, { kind: 'path' }> => token.kind === 'path' && token.value.startsWith('r.'))
+      .map(token => token.value.slice(2)))];
+    return { outputField, inputFields };
+  });
+}
+
 export function validateSafeExpression(expression: string, mode: 'predicate' | 'map'): void {
   if (mode === 'predicate') {
     tokenize(expression);

@@ -35,7 +35,7 @@ function InstancePicker({ provider, value, onChange }: {
   return (
     <select className="glass-select" value={value.connectionId ?? ''}
       onChange={e => onChange({ connectionId: e.target.value })}>
-      <option value="">— select destination —</option>
+      <option value="">— select connection —</option>
       {instances.map(i => <option key={i.id} value={i.id}>{i.name ?? i.email ?? i.id} ({i.provider}{i.kind ? `, ${i.kind}` : ''})</option>)}
     </select>
   );
@@ -49,6 +49,11 @@ export function ConfigPanel({ node, onChange, onDelete }: {
   if (!entry) return null;
   const cfg = node.data.config ?? {};
   const ing = node.data.ingestion ?? { mode: 'incremental' };
+  const visible = (field: FieldSpec) => {
+    if (!field.visibleWhen) return true;
+    const controller = entry.fields.find(f => f.key === field.visibleWhen?.key);
+    return (cfg[field.visibleWhen.key] ?? controller?.options?.[0]) === field.visibleWhen.equals;
+  };
   return (
     <div>
       <div className="mb-5 flex items-center gap-3">
@@ -64,7 +69,7 @@ export function ConfigPanel({ node, onChange, onDelete }: {
         <input className="glass-input" value={node.data.label ?? ''}
           onChange={e => onChange(node.id, { label: e.target.value })} />
       </label>
-      {entry.fields.map(f => (
+      {entry.fields.filter(visible).map(f => (
         <div key={f.key} className="glass-label">
           <span>{f.label}</span>
           {f.type === 'oauth-picker' ? (
@@ -90,7 +95,7 @@ export function ConfigPanel({ node, onChange, onDelete }: {
           {f.help && <span className="text-[10px] opacity-60">{f.help}</span>}
         </div>
       ))}
-      {entry.supportsIngestion && (
+      {entry.supportsIngestion && cfg.syncMode !== 'cdc' && (
         <fieldset className="my-4 rounded-[14px] border border-gray-200 dark:border-white/[0.08] bg-gray-50 dark:bg-black/10 p-3">
           <legend className="text-[11px] text-gray-500 dark:opacity-70 px-1">Ingestion mode</legend>
           <select className="glass-select" value={ing.mode}

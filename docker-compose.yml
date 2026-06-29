@@ -14,6 +14,8 @@ x-app-env: &app-env
   # that span tenants (cron sync, schedule writes).
   APP_DATABASE_URL: postgres://dataflow_app:dataflow_app@postgres:5432/dataflow
   REDIS_URL: redis://redis:6379
+  KAFKA_BROKERS: redpanda:9092
+  KAFKA_CONNECT_URL: http://kafka-connect:8083
   TEMPORAL_ADDRESS: temporal:7233
   TEMPORAL_NAMESPACE: default
   TASK_QUEUE: dynamic-dag
@@ -44,6 +46,15 @@ x-app-env: &app-env
   RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
   OAUTH_TOKEN_ENCRYPTION_KEY: ${OAUTH_TOKEN_ENCRYPTION_KEY:-}
   TEMPORAL_PAYLOAD_ENCRYPTION_KEY: ${TEMPORAL_PAYLOAD_ENCRYPTION_KEY:-}
+  PAYLOAD_S3_BUCKET: ${PAYLOAD_S3_BUCKET:-}
+  PAYLOAD_S3_REGION: ${PAYLOAD_S3_REGION:-us-east-1}
+  PAYLOAD_S3_ENDPOINT: ${PAYLOAD_S3_ENDPOINT:-}
+  PAYLOAD_S3_FORCE_PATH_STYLE: ${PAYLOAD_S3_FORCE_PATH_STYLE:-false}
+  PAYLOAD_S3_ACCESS_KEY_ID: ${PAYLOAD_S3_ACCESS_KEY_ID:-}
+  PAYLOAD_S3_SECRET_ACCESS_KEY: ${PAYLOAD_S3_SECRET_ACCESS_KEY:-}
+  OPENLINEAGE_URL: ${OPENLINEAGE_URL:-}
+  OPENLINEAGE_API_KEY: ${OPENLINEAGE_API_KEY:-}
+  OPENLINEAGE_NAMESPACE: ${OPENLINEAGE_NAMESPACE:-dataflow}
   WORKER_PUBLIC_KEY_PEM: ${WORKER_PUBLIC_KEY_PEM:-}
   # Open-core edition: 'community' (default) or 'enterprise'.
   EDITION: ${EDITION:-community}
@@ -97,6 +108,12 @@ services:
       - ./db/008_environments.sql:/docker-entrypoint-initdb.d/008_environments.sql:ro
       - ./db/009_temporal_execution_identity.sql:/docker-entrypoint-initdb.d/009_temporal_execution_identity.sql:ro
       - ./db/010_connector_instances.sql:/docker-entrypoint-initdb.d/010_connector_instances.sql:ro
+      - ./db/011_pipeline_alerts.sql:/docker-entrypoint-initdb.d/011_pipeline_alerts.sql:ro
+      - ./db/012_execution_retries.sql:/docker-entrypoint-initdb.d/012_execution_retries.sql:ro
+      - ./db/013_asset_materializations.sql:/docker-entrypoint-initdb.d/013_asset_materializations.sql:ro
+      - ./db/014_data_quality.sql:/docker-entrypoint-initdb.d/014_data_quality.sql:ro
+      - ./db/015_openlineage.sql:/docker-entrypoint-initdb.d/015_openlineage.sql:ro
+      - ./db/016_backfills.sql:/docker-entrypoint-initdb.d/016_backfills.sql:ro
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dataflow"]
@@ -148,6 +165,57 @@ services:
       timeout: 3s
       retries: 10
     mem_limit: 128m
+    networks: [dataflow]
+
+  # Opt-in CDC runtime. Neither broker nor Connect REST is published to the
+  # host; the API is the authenticated control plane.
+  redpanda:
+    profiles: [cdc]
+    image: docker.redpanda.com/redpandadata/redpanda:v26.1.10
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container
+      - --smp=1
+      - --default-log-level=info
+      - --kafka-addr=internal://0.0.0.0:9092
+      - --advertise-kafka-addr=internal://redpanda:9092
+    volumes:
+      - redpandadata:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health --brokers=localhost:9092 --exit-when-healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 768m
+    networks: [dataflow]
+
+  kafka-connect:
+    profiles: [cdc]
+    image: quay.io/debezium/connect:3.5
+    environment:
+      BOOTSTRAP_SERVERS: redpanda:9092
+      GROUP_ID: dataflow-cdc-connect
+      CONFIG_STORAGE_TOPIC: dataflow_cdc_connect_configs
+      OFFSET_STORAGE_TOPIC: dataflow_cdc_connect_offsets
+      STATUS_STORAGE_TOPIC: dataflow_cdc_connect_statuses
+      CONFIG_STORAGE_REPLICATION_FACTOR: "1"
+      OFFSET_STORAGE_REPLICATION_FACTOR: "1"
+      STATUS_STORAGE_REPLICATION_FACTOR: "1"
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      REST_ADVERTISED_HOST_NAME: kafka-connect
+    depends_on:
+      redpanda: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8083/connectors >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
+    mem_limit: 1g
     networks: [dataflow]
 
   clickhouse:
@@ -393,3 +461,4 @@ volumes:
   esdata:
   chdata:
   ollamadata:
+  redpandadata:

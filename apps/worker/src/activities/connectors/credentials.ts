@@ -27,3 +27,34 @@ export async function loadCredentialInstance(connectionId: string, tenantId: str
     extra: r.extra ?? {},
   };
 }
+
+export async function connectPostgres(connectionId: string, tenantId: string) {
+  const inst = await loadCredentialInstance(connectionId, tenantId);
+  if (inst.provider !== 'postgres') throw new Error(`connector ${connectionId} is not PostgreSQL`);
+  const { Client } = await import('pg');
+  const sslMode = String(inst.extra.sslMode ?? 'disable');
+  const client = new Client({
+    host: inst.extra.host,
+    port: inst.extra.port ?? 5432,
+    database: inst.extra.database,
+    user: inst.extra.user,
+    password: inst.secret.password,
+    ssl: sslMode === 'disable' ? undefined : { rejectUnauthorized: sslMode === 'verify-full' },
+    connectionTimeoutMillis: 10_000,
+  });
+  await client.connect();
+  return client;
+}
+
+export async function connectClickHouse(connectionId: string, tenantId: string) {
+  const inst = await loadCredentialInstance(connectionId, tenantId);
+  if (inst.provider !== 'clickhouse') throw new Error(`connector ${connectionId} is not ClickHouse`);
+  const { createClient } = await import('@clickhouse/client');
+  return createClient({
+    url: inst.extra.url,
+    username: inst.extra.username ?? 'default',
+    password: inst.secret.password ?? '',
+    database: inst.extra.database ?? 'default',
+    request_timeout: 30_000,
+  });
+}

@@ -1,0 +1,24 @@
+{
+  "id": "44444444-4444-4444-8444-444444444444",
+  "name": "Orders · Kafka to bronze",
+  "tenantId": "default",
+  "trigger": { "type": "cron", "schedule": "*/2 * * * *" },
+  "nodes": [
+    {
+      "id": "orders-topic", "type": "source", "activityType": "kafka.fetch", "label": "Orders topic",
+      "config": { "connectionId": "events-kafka", "cluster": "events-prod", "topic": "orders.v1", "startPosition": "earliest", "valueFormat": "json", "includeMetadata": true, "pageSize": 1000, "layer": "bronze" }
+    },
+    {
+      "id": "contract", "type": "transform", "activityType": "transform.contract", "label": "Orders contract",
+      "config": { "schemaJson": { "id": "string", "updated_at": "date", "_kafka": "object?" }, "onViolation": "quarantine", "allowExtra": true }
+    },
+    {
+      "id": "bronze", "type": "sink", "activityType": "sink.postgres", "label": "Bronze orders",
+      "config": { "connectionId": "warehouse", "table": "bronze.kafka_orders", "writeMode": "upsert", "conflictKey": "id", "layer": "bronze" }
+    }
+  ],
+  "edges": [
+    { "id": "topic-to-contract", "source": "orders-topic", "target": "contract" },
+    { "id": "contract-to-bronze", "source": "contract", "target": "bronze" }
+  ]
+}

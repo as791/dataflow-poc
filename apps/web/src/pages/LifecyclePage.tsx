@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Rocket, RefreshCw } from 'lucide-react';
+import { History, Rocket, RefreshCw } from 'lucide-react';
 import { api } from '../api';
 
 export type Stage = 'draft' | 'testing' | 'production' | 'archived';
@@ -40,11 +40,119 @@ interface Pipeline {
   status: string; environment?: string;
 }
 
+interface BackfillPlan {
+  from: string; to: string; partitionDays: number; maxConcurrency: number;
+  partitionCount: number; estimatedExecutions: number;
+  partitions: { from: string; to: string }[];
+}
+
+interface BackfillJob {
+  id: string; status: string; from: string; to: string; partitionDays: number; maxConcurrency: number;
+  partitionCount: number; pending: number; running: number;
+  completed: number; failed: number; createdAt: string;
+}
+
+function BackfillPanel({ pipeline, close }: { pipeline: Pipeline; close: () => void }) {
+  const [form, setForm] = useState({ from: '', to: '', partitionDays: 1, maxConcurrency: 2 });
+  const [plan, setPlan] = useState<BackfillPlan | null>(null);
+  const [jobs, setJobs] = useState<BackfillJob[]>([]);
+  const [busy, setBusy] = useState<'plan' | 'start' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadJobs = useCallback(async () => {
+    try {
+      const result = await api.listBackfills(pipeline.id);
+      setJobs(Array.isArray(result) ? result : result.jobs ?? []);
+    } catch (e: any) { setError(e.message ?? 'Failed to load backfills'); }
+  }, [pipeline.id]);
+  useEffect(() => {
+    loadJobs();
+    const timer = setInterval(loadJobs, 5000);
+    return () => clearInterval(timer);
+  }, [loadJobs]);
+
+  const body = () => ({
+    ...form,
+    from: new Date(`${form.from}T00:00:00.000Z`).toISOString(),
+    to: new Date(`${form.to}T00:00:00.000Z`).toISOString(),
+  });
+  const submitPlan = async (e: React.FormEvent) => {
+    e.preventDefault(); setBusy('plan'); setError(null); setPlan(null);
+    try { setPlan(await api.planBackfill(pipeline.id, body())); }
+    catch (err: any) { setError(err.message ?? 'Backfill plan failed'); }
+    finally { setBusy(null); }
+  };
+  const start = async () => {
+    setBusy('start'); setError(null);
+    try { await api.startBackfill(pipeline.id, body()); setPlan(null); await loadJobs(); }
+    catch (err: any) { setError(err.message ?? 'Backfill start failed'); }
+    finally { setBusy(null); }
+  };
+
+  return (
+    <div className="border-t border-gray-100 bg-gray-50/60 p-4 dark:border-white/5 dark:bg-white/[0.02]">
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <p className="font-medium text-gray-900 dark:text-white/90">Historical backfill · {pipeline.name}</p>
+          <p className="text-xs text-gray-400 dark:text-white/40">Preview date partitions before consuming executions.</p>
+        </div>
+        <button type="button" className="glass-btn-ghost text-sm" onClick={close}>Close</button>
+      </div>
+      <form className="flex flex-wrap items-end gap-2" onSubmit={submitPlan}>
+        <label className="text-xs text-gray-500 dark:text-white/50">From
+          <input required type="date" className="glass-input mt-1 block" value={form.from}
+            onChange={e => { setForm(f => ({ ...f, from: e.target.value })); setPlan(null); }} />
+        </label>
+        <label className="text-xs text-gray-500 dark:text-white/50">To (exclusive)
+          <input required type="date" className="glass-input mt-1 block" min={form.from} value={form.to}
+            onChange={e => { setForm(f => ({ ...f, to: e.target.value })); setPlan(null); }} />
+        </label>
+        <label className="text-xs text-gray-500 dark:text-white/50">Days / partition
+          <input required type="number" min="1" max="31" className="glass-input mt-1 block w-28" value={form.partitionDays}
+            onChange={e => { setForm(f => ({ ...f, partitionDays: Number(e.target.value) })); setPlan(null); }} />
+        </label>
+        <label className="text-xs text-gray-500 dark:text-white/50">Concurrency
+          <input required type="number" min="1" max="5" className="glass-input mt-1 block w-24" value={form.maxConcurrency}
+            onChange={e => { setForm(f => ({ ...f, maxConcurrency: Number(e.target.value) })); setPlan(null); }} />
+        </label>
+        <button className="glass-btn-ghost text-sm" disabled={busy !== null}>{busy === 'plan' ? 'Planning…' : 'Preview'}</button>
+      </form>
+      {error && <p className="mt-3 text-xs text-red-600 dark:text-danger/90">{error}</p>}
+      {plan && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 p-3 text-sm dark:border-white/10">
+          <span>{plan.partitionCount} partitions · {plan.estimatedExecutions} estimated executions · up to {plan.maxConcurrency} concurrent</span>
+          <button type="button" className="glass-btn-primary text-sm" onClick={start} disabled={busy !== null}>
+            {busy === 'start' ? 'Starting…' : 'Start backfill'}
+          </button>
+        </div>
+      )}
+      {jobs.length > 0 && (
+        <div className="mt-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-white/40">Recent jobs</p>
+            <button type="button" className="text-xs text-gray-500 hover:text-gray-900 dark:text-white/50 dark:hover:text-white"
+              onClick={loadJobs}>Refresh status</button>
+          </div>
+          {jobs.map(job => (
+            <div key={job.id} className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-white/50">
+              <span>{job.from.slice(0, 10)} → {job.to.slice(0, 10)} · {job.partitionCount} partitions</span>
+              <span className="font-medium text-gray-700 dark:text-white/70">
+                {job.status} · {job.completed} done · {job.running} running · {job.failed} failed
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function LifecyclePage() {
   const [rows, setRows] = useState<Pipeline[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [backfillPipeline, setBackfillPipeline] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true); setError(null);
@@ -57,7 +165,13 @@ export default function LifecyclePage() {
   const transition = async (row: Pipeline, to: 'testing' | 'production') => {
     setBusy(row.id); setError(null);
     try { await api.setStage(row.id, to); await refresh(); }
-    catch (e: any) { setError(e.message ?? 'Transition failed'); }
+    catch (e: any) {
+      if (to === 'production' && String(e.message).includes('breaking data contract') &&
+          window.confirm(`Breaking contract detected. Promote anyway?\n\n${e.message}`)) {
+        try { await api.setStage(row.id, to, true); await refresh(); }
+        catch (override: any) { setError(override.message ?? 'Override failed'); }
+      } else setError(e.message ?? 'Transition failed');
+    }
     finally { setBusy(null); }
   };
 
@@ -67,7 +181,7 @@ export default function LifecyclePage() {
         <div>
           <h1 className="page-heading flex items-center gap-2"><Rocket size={20} /> Lifecycle</h1>
           <p className="page-subtitle mt-1">
-            Promote pipelines draft → Integration → production. Production requires a green Integration run.
+            Promote pipelines draft → Integration → production. Production requires a green run and compatible published contracts.
           </p>
         </div>
         <button className="glass-btn-ghost text-sm flex items-center gap-1.5" onClick={refresh} disabled={loading}>
@@ -88,13 +202,18 @@ export default function LifecyclePage() {
         {rows.map(row => {
           const stage = deriveStage(row.status, row.environment);
           return (
-            <div key={row.id} className="flex items-center justify-between gap-4 p-4">
+            <div key={row.id}>
+            <div className="flex items-center justify-between gap-4 p-4">
               <div className="min-w-0">
                 <p className="truncate font-medium text-gray-900 dark:text-white/90">{row.name}</p>
                 <p className="text-xs text-gray-400 dark:text-white/40">v{row.version} · {displayEnvironment(row.environment)}</p>
               </div>
               <div className="flex items-center gap-3">
                 <StageBadge stage={stage} />
+                <button className="glass-btn-ghost flex items-center gap-1.5 text-sm"
+                  onClick={() => setBackfillPipeline(current => current === row.id ? null : row.id)}>
+                  <History size={14} /> Backfill
+                </button>
                 {stage === 'draft' && (
                   <button className="glass-btn-ghost text-sm" disabled={busy === row.id}
                     onClick={() => transition(row, 'testing')}>
@@ -108,6 +227,8 @@ export default function LifecyclePage() {
                   </button>
                 )}
               </div>
+            </div>
+            {backfillPipeline === row.id && <BackfillPanel pipeline={row} close={() => setBackfillPipeline(null)} />}
             </div>
           );
         })}

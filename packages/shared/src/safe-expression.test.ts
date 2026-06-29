@@ -1,6 +1,7 @@
 import assert from 'node:assert';
 import {
   evaluateMapExpression,
+  deriveMapFieldLineage,
   evaluatePredicate,
   validateSafeExpression,
 } from './safe-expression';
@@ -24,6 +25,12 @@ assert.deepStrictEqual(
   ),
   { id: 7, subject: 'hello', active: true },
 );
+
+assert.deepStrictEqual(deriveMapFieldLineage('({ order_id: r.id, total: r.amount, active: true })'), [
+  { outputField: 'order_id', inputFields: ['id'] },
+  { outputField: 'total', inputFields: ['amount'] },
+  { outputField: 'active', inputFields: [] },
+]);
 
 assert.throws(
   () => validateSafeExpression('r.constructor.constructor("return process")()', 'predicate'),
