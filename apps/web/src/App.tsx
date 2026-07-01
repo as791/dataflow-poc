@@ -31,10 +31,10 @@ export default function App() {
             {/* Canvas page: full-viewport, no AppShell chrome */}
             <Route element={<ProtectedRoute><FeatureProvider><CatalogProvider><Outlet /></CatalogProvider></FeatureProvider></ProtectedRoute>}>
               <Route index element={<PipelineCanvasPage />} />
+              <Route path="ai-builder" element={<AIBuilderPage />} />
             </Route>
 
             <Route element={<ProtectedRoute><FeatureProvider><CatalogProvider><AppShell /></CatalogProvider></FeatureProvider></ProtectedRoute>}>
-              <Route path="ai-builder" element={<AIBuilderPage />} />
               <Route path="pipelines" element={<PipelinesPage />} />
               <Route path="lifecycle" element={<LifecyclePage />} />
               <Route path="runs" element={<RunsPage />} />
