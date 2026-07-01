@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "ts-node src/index.ts",
     "build": "tsc -p .",
-    "test": "ts-node src/routes/connectors.test.ts && ts-node src/routes/executions.test.ts && ts-node src/routes/pipelines.test.ts && ts-node src/routes/triggers.test.ts && ts-node src/lib/validatePipeline.test.ts && ts-node src/backfills.test.ts"
+    "test": "ts-node src/routes/connectors.test.ts && ts-node src/routes/executions.test.ts && ts-node src/routes/pipelines.test.ts && ts-node src/routes/pipelines.stage.selfcheck.ts && ts-node src/routes/triggers.test.ts && ts-node src/lib/edition.test.ts && ts-node src/lib/validatePipeline.test.ts && ts-node src/backfills.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",
@@ -14,6 +14,8 @@
     "@dataflow/object-store": "*",
     "@dataflow/shared": "*",
     "@temporalio/client": "^1.10.0",
+    "@types/snowflake-sdk": "^1.6.24",
+    "@types/ssh2-sftp-client": "^9.0.6",
     "axios": "^1.7.2",
     "bcrypt": "^5.1.1",
     "cookie-parser": "^1.4.6",
@@ -31,6 +33,8 @@
     "pino-http": "^10.1.0",
     "prom-client": "^15.1.2",
     "razorpay": "^2.9.4",
+    "snowflake-sdk": "^3.0.0",
+    "ssh2-sftp-client": "^12.1.1",
     "uuid": "^9.0.1"
   },
   "devDependencies": {

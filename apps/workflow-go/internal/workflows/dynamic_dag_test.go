@@ -74,6 +74,29 @@ func TestBuildPlanCreatesParallelLevels(t *testing.T) {
 	}
 }
 
+func TestDedupeKeysCommitOnlyAfterWorkflowSuccess(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterActivityWithOptions(func(context.Context, map[string]interface{}) (model.NodeResult, error) {
+		return model.NodeResult{}, nil
+	}, activity.RegisterOptions{Name: "dispatchNode"})
+	env.RegisterActivityWithOptions(func(context.Context, map[string]interface{}) error { return nil }, activity.RegisterOptions{Name: "commitDedupeKeys"})
+	env.RegisterActivityWithOptions(func(context.Context, map[string]interface{}) error { return nil }, activity.RegisterOptions{Name: "markExecution"})
+	env.OnActivity("dispatchNode", mock.Anything, mock.Anything).Return(model.NodeResult{
+		NodeID: "dedupe", Status: "success", Meta: map[string]interface{}{
+			"dedupeCheckpoint": map[string]interface{}{"pipelineId": "pipeline-row", "nodeId": "dedupe", "hashes": []interface{}{"hash"}},
+		},
+	}, nil).Once()
+	env.OnActivity("commitDedupeKeys", mock.Anything, mock.Anything).Return(nil).Once()
+	env.OnActivity("markExecution", mock.Anything, mock.Anything).Return(nil).Once()
+	env.ExecuteWorkflow(DynamicDAGWorkflow, model.WorkflowInput{
+		Definition: model.PipelineDefinition{ID: "pipeline", Nodes: []model.Node{{ID: "dedupe", Type: "transform", ActivityType: "transform.dedupe", Config: map[string]interface{}{}}}},
+		TenantID: "tenant", ExecutionID: "exec", Trigger: model.TriggerInput{Type: "manual"},
+	})
+	if err := env.GetWorkflowError(); err != nil { t.Fatal(err) }
+	env.AssertExpectations(t)
+}
+
 func TestBuildPlanRejectsCycles(t *testing.T) {
 	nodes := []model.Node{{ID: "a"}, {ID: "b"}}
 	_, err := buildPlan(nodes, []model.Edge{

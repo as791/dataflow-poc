@@ -1,4 +1,5 @@
 import type { CatalogEntry } from './catalog-types';
+import type { PaidFeatures } from './features';
 
 // Canonical connector catalog — single source of truth for web UI, API AI builder, and worker.
 // Colors are UI metadata; the server ignores them but they're harmless to include.
@@ -106,6 +107,7 @@ export const CATALOG: CatalogEntry[] = [
   },
   {
     activityType: 'kafka.fetch', nodeType: 'source', label: 'Kafka / Redpanda', color: '#7C3AED',
+    requiredFeature: 'realtime',
     fields: [
       { key: 'connection', label: 'Kafka connection', type: 'instance-picker', provider: 'kafka', writes: ['connectionId'] },
       { key: 'topic', label: 'Topic', type: 'text', placeholder: 'orders.v1' },
@@ -115,6 +117,34 @@ export const CATALOG: CatalogEntry[] = [
       { key: 'includeMetadata', label: 'Include Kafka metadata', type: 'checkbox' },
       { key: 'pageSize', label: 'Messages per page', type: 'number', placeholder: '1000' },
       { key: 'layer', label: 'Data layer', type: 'select', options: ['bronze', 'silver', 'gold'] },
+    ],
+  },
+  {
+    activityType: 'sftp.fetch', nodeType: 'source', label: 'SFTP', color: '#536DFE', supportsIngestion: true,
+    requiredFeature: 'advancedConnectors',
+    fields: [
+      { key: 'connection', label: 'SFTP connection', type: 'instance-picker', provider: 'sftp', writes: ['connectionId'] },
+      { key: 'path', label: 'Remote file', type: 'text', placeholder: '/exports/orders.jsonl' },
+      { key: 'format', label: 'Format', type: 'select', options: ['jsonl', 'json'] },
+    ],
+  },
+  {
+    activityType: 'snowflake.fetch', nodeType: 'source', label: 'Snowflake', color: '#29B5E8', supportsIngestion: true,
+    requiredFeature: 'advancedConnectors',
+    fields: [
+      { key: 'connection', label: 'Snowflake connection', type: 'instance-picker', provider: 'snowflake', writes: ['connectionId'] },
+      { key: 'table', label: 'Table', type: 'text', placeholder: 'RAW.ORDERS' },
+      { key: 'syncMode', label: 'Sync mode', type: 'select', options: ['cursor', 'changes'] },
+      { key: 'cursorColumn', label: 'Cursor column', type: 'text', placeholder: 'UPDATED_AT', visibleWhen: { key: 'syncMode', equals: 'cursor' } },
+    ],
+  },
+  {
+    activityType: 'iceberg.fetch', nodeType: 'source', label: 'Apache Iceberg', color: '#4B88A2', supportsIngestion: true,
+    requiredFeature: 'advancedConnectors',
+    fields: [
+      { key: 'connection', label: 'Iceberg REST catalog', type: 'instance-picker', provider: 'iceberg', writes: ['connectionId'] },
+      { key: 'namespace', label: 'Namespace', type: 'text', placeholder: 'analytics' },
+      { key: 'table', label: 'Table', type: 'text', placeholder: 'orders' },
     ],
   },
   // ── Transforms ──
@@ -129,6 +159,17 @@ export const CATALOG: CatalogEntry[] = [
       placeholder: "r.status === 'open'" }],
   },
   {
+    activityType: 'transform.formula', nodeType: 'transform', label: 'Formula', color: '#D85A30',
+    fields: [
+      { key: 'outputField', label: 'Output field', type: 'text', placeholder: 'total' },
+      { key: 'expression', label: 'Formula', type: 'textarea', placeholder: 'round(r.price * r.quantity, 2)', help: 'Functions: abs, round, lower, upper, string, number, length, coalesce, concat' },
+    ],
+  },
+  {
+    activityType: 'transform.select', nodeType: 'transform', label: 'JMESPath select', color: '#D85A30',
+    fields: [{ key: 'expression', label: 'JMESPath expression', type: 'textarea', placeholder: '{id: id, total: total}' }],
+  },
+  {
     activityType: 'transform.rename', nodeType: 'transform', label: 'Rename', color: '#D85A30',
     fields: [{ key: 'mapping', label: 'Field mapping (JSON)', type: 'textarea',
       placeholder: '{"old_name":"new_name","ticket_id":"id"}' }],
@@ -139,6 +180,7 @@ export const CATALOG: CatalogEntry[] = [
       { key: 'key', label: 'Dedup key(s)', type: 'text', placeholder: 'id, country',
         help: 'One field, or comma-separated for a compound key' },
       { key: 'keep', label: 'Keep', type: 'select', options: ['first', 'last'] },
+      { key: 'scope', label: 'Scope', type: 'select', options: ['run', 'pipeline'], help: 'Pipeline scope remembers keys across runs' },
     ],
   },
   {
@@ -226,12 +268,30 @@ export const CATALOG: CatalogEntry[] = [
   },
   {
     activityType: 'sink.kafka', nodeType: 'sink', label: 'Kafka / Redpanda', color: '#7C3AED',
+    requiredFeature: 'realtime',
     fields: [
       { key: 'connection', label: 'Kafka connection', type: 'instance-picker', provider: 'kafka', writes: ['connectionId'] },
       { key: 'topic', label: 'Topic', type: 'text', placeholder: 'orders.cleaned.v1' },
       { key: 'cluster', label: 'Lineage cluster name', type: 'text', placeholder: 'events-prod' },
       { key: 'keyField', label: 'Message key field', type: 'text', placeholder: 'id', help: 'Recommended for compacted topics' },
       { key: 'layer', label: 'Data layer', type: 'select', options: ['bronze', 'silver', 'gold'] },
+    ],
+  },
+  {
+    activityType: 'sink.sftp', nodeType: 'sink', label: 'SFTP (destination)', color: '#536DFE',
+    requiredFeature: 'advancedConnectors',
+    fields: [
+      { key: 'connection', label: 'SFTP connection', type: 'instance-picker', provider: 'sftp', writes: ['connectionId'] },
+      { key: 'path', label: 'Remote file', type: 'text', placeholder: '/imports/{executionId}.jsonl' },
+      { key: 'format', label: 'Format', type: 'select', options: ['jsonl', 'json'] },
+    ],
+  },
+  {
+    activityType: 'sink.snowflake', nodeType: 'sink', label: 'Snowflake (destination)', color: '#29B5E8',
+    requiredFeature: 'advancedConnectors',
+    fields: [
+      { key: 'connection', label: 'Snowflake connection', type: 'instance-picker', provider: 'snowflake', writes: ['connectionId'] },
+      { key: 'table', label: 'Target table', type: 'text', placeholder: 'ANALYTICS.ORDERS' },
     ],
   },
   {
@@ -248,8 +308,8 @@ export const CATALOG: CatalogEntry[] = [
   {
     activityType: 'sink.webhook', nodeType: 'sink', label: 'Webhook (destination)', color: '#639922',
     fields: [
-      { key: 'url', label: 'URL', type: 'text' },
-      { key: 'secret', label: 'HMAC secret', type: 'text' },
+      { key: 'connection', label: 'Stored HTTP credential (optional)', type: 'instance-picker', provider: 'http', writes: ['connectionId'] },
+      { key: 'url', label: 'URL', type: 'text', help: 'Used only when no stored HTTP credential is selected' },
     ],
   },
   {
@@ -262,3 +322,18 @@ export const CATALOG: CatalogEntry[] = [
 ];
 
 export const catalogByType = Object.fromEntries(CATALOG.map(c => [c.activityType, c]));
+
+export function catalogForFeatures(catalog: CatalogEntry[], features: PaidFeatures): CatalogEntry[] {
+  return catalog
+    .filter(entry => !entry.requiredFeature || features[entry.requiredFeature])
+    .map(entry => ({
+      ...entry,
+      fields: entry.fields.map(field => {
+        if (!field.options) return field;
+        const options = field.options.filter(option =>
+          (features.realtime || (option !== 'cdc' && option !== 'apply-cdc'))
+          && (features.statefulProcessing || option !== 'pipeline'));
+        return options.length === field.options.length ? field : { ...field, options };
+      }),
+    }));
+}

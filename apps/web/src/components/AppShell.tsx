@@ -1,7 +1,8 @@
 import {
-  BarChart3, Cable, CreditCard, History, LogOut, Moon, Network, Rocket, Sparkles, Sun, Users, Workflow, Gauge,
+  BarChart3, Cable, CreditCard, History, LogOut, Menu, Moon, Network, Rocket, Sparkles, Sun, Users, Workflow, Gauge, X,
 } from 'lucide-react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
@@ -35,14 +36,36 @@ export function AppShell() {
   const { user, logout } = useAuth();
   const { dark, toggle } = useTheme();
   const navigate = useNavigate();
-  const pathname = typeof window !== 'undefined' ? window.location.pathname : '/pipelines';
-  const meta = PAGE_META[pathname] ?? PAGE_META['/pipelines'];
+  const { pathname } = useLocation();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const meta = PAGE_META[pathname] ?? PAGE_META[Object.keys(PAGE_META).find(k => pathname.startsWith(k + '/')) ?? ''] ?? PAGE_META['/pipelines'];
   const initials = user?.email?.slice(0, 2).toUpperCase() ?? 'DF';
 
   return (
     <div className="canvas-root flex h-screen overflow-hidden">
+      {/* ── mobile nav overlay ── */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 z-50 sm:hidden">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setSidebarOpen(false)} />
+          <aside className="absolute left-0 top-0 bottom-0 flex w-[200px] flex-col items-center gap-1 py-3
+            border-r border-gray-200 dark:border-white/[0.08]
+            bg-white/98 dark:bg-[#0d0f17]/98 backdrop-blur-lg">
+            <button className="self-end mr-2 mb-2 flex h-8 w-8 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.08]" onClick={() => setSidebarOpen(false)}><X size={15} /></button>
+            {NAV.map(({ to, label, icon: Icon, end }) => (
+              <NavLink key={to} to={to} end={end} onClick={() => setSidebarOpen(false)}
+                className={({ isActive }) => `flex w-[180px] items-center gap-3 px-3 h-9 rounded-[10px] border transition-all ${
+                  isActive ? 'border-brand-300/20 bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'border-transparent text-gray-600 dark:text-white/50 hover:bg-gray-100 dark:hover:bg-white/[0.055]'
+                }`}>
+                <Icon size={17} strokeWidth={1.75} />
+                <span className="text-sm font-medium">{label}</span>
+              </NavLink>
+            ))}
+          </aside>
+        </div>
+      )}
+
       {/* ── sidebar: 52px compact glass, matches canvas ── */}
-      <aside className="flex w-[52px] flex-none flex-col items-center gap-1 py-3
+      <aside className="hidden sm:flex w-[52px] flex-none flex-col items-center gap-1 py-3
         border-r border-gray-200 dark:border-white/[0.08]
         bg-white/95 dark:bg-[#0d0f17]/95 backdrop-blur-lg shrink-0">
 
@@ -100,8 +123,11 @@ export function AppShell() {
 
       {/* ── content ── */}
       <div className="flex flex-1 flex-col min-w-0 min-h-0">
-        <header className="flex items-center px-6 h-14 border-b border-gray-200 dark:border-white/[0.06]
+        <header className="flex items-center px-4 sm:px-6 h-14 border-b border-gray-200 dark:border-white/[0.06]
           bg-white/90 dark:bg-black/20 backdrop-blur-lg shrink-0">
+          <button className="flex sm:hidden h-8 w-8 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.08] mr-2" onClick={() => setSidebarOpen(true)} aria-label="Menu">
+            <Menu size={18} />
+          </button>
           <div>
             <p className="text-[10px] font-medium uppercase tracking-[.18em] text-gray-400 dark:text-white/30">{meta.eyebrow}</p>
             <h1 className="text-[13px] font-semibold tracking-tight text-gray-900 dark:text-white/90">{meta.title}</h1>

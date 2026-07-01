@@ -61,6 +61,15 @@ export function validatePipeline(def: PipelineDefinition) {
     if (node.activityType === 'transform.map') {
       validateSafeExpression(String(node.config?.expression ?? ''), 'map');
     }
+    if (node.activityType === 'transform.formula') {
+      if (!/^[A-Za-z_$][A-Za-z0-9_$-]*$/.test(String(node.config?.outputField ?? ''))) {
+        throw new Error('transform.formula: a valid outputField is required');
+      }
+      validateSafeExpression(String(node.config?.expression ?? ''), 'formula');
+    }
+    if (node.activityType === 'transform.select' && !String(node.config?.expression ?? '').trim()) {
+      throw new Error('transform.select: expression is required');
+    }
     if (node.activityType === 'transform.rename') {
       let mapping: any;
       try { mapping = typeof node.config?.mapping === 'string' ? JSON.parse(node.config.mapping) : node.config?.mapping; }
@@ -75,8 +84,8 @@ export function validatePipeline(def: PipelineDefinition) {
       if (ap !== undefined && !['index', 'stringify', 'keep'].includes(String(ap)))
         throw new Error('transform.flatten: arrayPolicy must be index|stringify|keep');
       const md = node.config?.maxDepth;
-      if (md !== undefined && (!Number.isFinite(Number(md)) || Number(md) < 1))
-        throw new Error('transform.flatten: maxDepth must be a positive number');
+      if (md !== undefined && (!Number.isInteger(Number(md)) || Number(md) < 1))
+        throw new Error('transform.flatten: maxDepth must be a positive integer');
     }
     if (node.activityType === 'transform.parse') {
       const onErr = node.config?.onError;
@@ -85,6 +94,27 @@ export function validatePipeline(def: PipelineDefinition) {
       const fields = node.config?.fields;
       const hasFields = Array.isArray(fields) ? fields.length > 0 : String(fields ?? '').trim().length > 0;
       if (!hasFields) throw new Error('transform.parse: at least one field is required');
+    }
+    if (node.activityType === 'transform.dedupe') {
+      const keys = Array.isArray(node.config?.key)
+        ? node.config.key.map(String).map(key => key.trim()).filter(Boolean)
+        : String(node.config?.key ?? '').split(',').map(key => key.trim()).filter(Boolean);
+      if (!keys.length) throw new Error('transform.dedupe: at least one key is required');
+      if (node.config?.keep !== undefined && !['first', 'last'].includes(String(node.config.keep))) {
+        throw new Error('transform.dedupe: keep must be first|last');
+      }
+      if (node.config?.scope !== undefined && !['run', 'pipeline'].includes(String(node.config.scope))) {
+        throw new Error('transform.dedupe: scope must be run|pipeline');
+      }
+    }
+    if (node.type === 'merge') {
+      const strategy = node.mergeStrategy ?? 'concat';
+      if (!['concat', 'union', 'innerJoin', 'leftJoin', 'outerJoin', 'appendWithSourceTag'].includes(strategy)) {
+        throw new Error('flow.merge: unsupported merge strategy');
+      }
+      if (['innerJoin', 'leftJoin', 'outerJoin'].includes(strategy) && !node.joinKey?.trim()) {
+        throw new Error(`flow.merge: ${strategy} requires a joinKey`);
+      }
     }
     if (node.activityType === 'transform.contract') {
       let schema: any;
@@ -111,6 +141,16 @@ export function validatePipeline(def: PipelineDefinition) {
     if (node.activityType === 's3.fetch') {
       if (!node.config?.connectionId || !node.config?.bucket || !node.config?.key) throw new Error('s3.fetch: connection, bucket, and key are required');
     }
+    if (node.activityType === 'sftp.fetch' && (!node.config?.connectionId || !node.config?.path)) {
+      throw new Error('sftp.fetch: connection and path are required');
+    }
+    if (node.activityType === 'snowflake.fetch') {
+      if (!node.config?.connectionId || !node.config?.table) throw new Error('snowflake.fetch: connection and table are required');
+      if (node.config?.syncMode !== 'changes' && !node.config?.cursorColumn) throw new Error('snowflake.fetch: cursorColumn is required in cursor mode');
+    }
+    if (node.activityType === 'iceberg.fetch' && (!node.config?.connectionId || !node.config?.namespace || !node.config?.table)) {
+      throw new Error('iceberg.fetch: connection, namespace, and table are required');
+    }
     if (node.activityType === 'kafka.fetch') {
       if (!node.config?.connectionId || !node.config?.topic) throw new Error('kafka.fetch: connection and topic are required');
       if (!validKafkaTopic(node.config.topic)) throw new Error('kafka.fetch: invalid topic');
@@ -121,6 +161,7 @@ export function validatePipeline(def: PipelineDefinition) {
     const sinkResource: Record<string, string> = {
       'sink.postgres': 'table', 'sink.mysql': 'table', 'sink.mongodb': 'collection',
       'sink.clickhouse': 'table', 'sink.s3': 'bucket', 'sink.kafka': 'topic',
+      'sink.sftp': 'path', 'sink.snowflake': 'table',
     };
     const resource = sinkResource[node.activityType];
     if (resource) {
@@ -138,6 +179,9 @@ export function validatePipeline(def: PipelineDefinition) {
     if (node.activityType === 'sink.gsheets') {
       if (!node.config?.connectionId) throw new Error('sink.gsheets: a destination connector instance is required');
       if (!node.config?.spreadsheetId) throw new Error('sink.gsheets: spreadsheetId is required');
+    }
+    if (node.activityType === 'sink.webhook' && !node.config?.connectionId && !node.config?.url) {
+      throw new Error('sink.webhook: URL or HTTP connector instance is required');
     }
   }
   for (const edge of def.edges ?? []) {

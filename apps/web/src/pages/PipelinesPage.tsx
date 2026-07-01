@@ -1,14 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowDownToLine, BadgeHelp, Braces, ChevronRight, Clock,
-  Database, FileJson, FileSpreadsheet, Filter, GitFork, Globe2,
-  HardDrive, Merge, Play, RefreshCw, RotateCcw, Search, Sheet,
-  Triangle, Webhook, X,
+  ChevronRight, Clock, Play, RefreshCw, RotateCcw, Search, X,
 } from 'lucide-react';
 import { api } from '../api';
 import { deriveStage, type Stage } from './LifecyclePage';
 import { useCatalog } from '../context/CatalogContext';
+import { ActivityIcon } from '../components/canvas/FlowNode';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -54,25 +52,7 @@ function duration(started: string, completed: string | null): string {
   return `${Math.round(ms / 60000)}m`;
 }
 
-function activityIcon(activityType?: string, nodeType?: string, size = 13) {
-  const Icon =
-    activityType?.startsWith('zendesk.')  ? BadgeHelp
-    : activityType?.startsWith('gsheets.') ? Sheet
-    : activityType?.startsWith('gdrive.')  ? Triangle
-    : activityType?.startsWith('excel.')   ? FileSpreadsheet
-    : activityType?.startsWith('http.')    ? Globe2
-    : activityType === 'sink.postgres'     ? Database
-    : activityType === 'sink.webhook'      ? Webhook
-    : activityType === 'sink.records'      ? HardDrive
-    : activityType === 'transform.filter'  ? Filter
-    : activityType?.startsWith('transform.parse') ? FileJson
-    : nodeType === 'source' ? Database
-    : nodeType === 'sink'   ? ArrowDownToLine
-    : nodeType === 'fork'   ? GitFork
-    : nodeType === 'merge'  ? Merge
-    : Braces;
-  return <Icon size={size} strokeWidth={1.8} />;
-}
+// ponytail: activityIcon() removed — use ActivityIcon from FlowNode directly
 
 function stageOf(p: Pipeline): Stage { return deriveStage(p.status, p.environment); }
 
@@ -115,7 +95,7 @@ function ConnChain({ definition }: { definition: any }) {
                 border-gray-200 bg-gray-50 dark:border-white/[0.1] dark:bg-white/[0.05]"
               style={{ color: entry?.color ?? '#7c6cf2' }}
               title={entry?.label ?? n.activityType}>
-              {activityIcon(n.activityType, n.nodeType)}
+              <ActivityIcon activityType={n.activityType} nodeType={n.nodeType} size={13} />
             </span>
             {i < nodes.length - 1 && <span className="text-[10px] text-gray-300 dark:text-white/20">→</span>}
           </div>
@@ -145,7 +125,7 @@ function PipelineDrawer({ pipeline, onClose }: { pipeline: Pipeline; onClose: ()
   const navigate = useNavigate();
   const { byType } = useCatalog();
   const [runs, setRuns] = useState<Execution[]>([]);
-  const [tab, setTab] = useState<'runs' | 'lineage' | 'config' | 'access'>('runs');
+  const [tab, setTab] = useState<'runs'>('runs');
   const stage = stageOf(pipeline);
   const cfg = STAGE_CFG[stage];
   const nodes = pipelineNodes(pipeline.definition);
@@ -177,16 +157,16 @@ function PipelineDrawer({ pipeline, onClose }: { pipeline: Pipeline; onClose: ()
             <X size={13} />
           </button>
         </div>
-        <div className="text-[13px] font-semibold tracking-tight text-gray-900 dark:text-white/90 mb-1">{pipeline.name}</div>
+        <div className="text-[13px] font-semibold tracking-tight text-gray-900 dark:text-white/90 mb-1 min-w-0 truncate">{pipeline.name}</div>
         <div className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-white/35">
           <Clock size={11} />
           <span>v{pipeline.version} · {triggerLabel(pipeline.definition)}</span>
         </div>
         <div className="flex gap-1.5 mt-3">
           {[
-            { label: 'Edit',     icon: <ChevronRight size={12}/>, action: () => navigate(`/?pipeline=${pipeline.id}`) },
+            { label: 'Edit',     icon: <ChevronRight size={12}/>, action: () => navigate('/', { state: { pipelineId: pipeline.id } }) },
             { label: 'Run now',  icon: <Play size={11}/>,         action: () => api.run(pipeline.id).catch(() => {}) },
-            { label: 'Backfill', icon: <RotateCcw size={11}/>,    action: () => navigate(`/?pipeline=${pipeline.id}&backfill=1`) },
+            { label: 'Backfill', icon: <RotateCcw size={11}/>,    action: () => navigate('/', { state: { pipelineId: pipeline.id, openBackfill: true } }) },
           ].map(({ label, icon, action }) => (
             <button key={label} onClick={action}
               className="flex items-center gap-1 px-2.5 py-1 rounded-[8px] text-[11px] font-medium transition-all
@@ -215,7 +195,8 @@ function PipelineDrawer({ pipeline, onClose }: { pipeline: Pipeline; onClose: ()
 
       {/* tabs */}
       <div className="flex border-b border-gray-100 dark:border-white/[0.07] px-4 shrink-0">
-        {(['runs', 'lineage', 'config', 'access'] as const).map(t => (
+        {/* ponytail: lineage/config/access tabs hidden until implemented */}
+        {(['runs'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`py-2.5 px-2.5 text-[11px] font-medium capitalize border-b-2 -mb-px transition-all ${
               tab === t
@@ -275,7 +256,7 @@ function PipelineDrawer({ pipeline, onClose }: { pipeline: Pipeline; onClose: ()
                   <span className="flex items-center gap-1 px-2 py-1 rounded-[6px] border text-[11px] font-medium
                     border-gray-200 bg-gray-50 dark:border-white/[0.1] dark:bg-white/[0.05]"
                     style={{ color: entry?.color ?? '#7c6cf2' }}>
-                    {activityIcon(n.activityType, n.nodeType, 11)}
+                    <ActivityIcon activityType={n.activityType} nodeType={n.nodeType} size={11} />
                     {entry?.label ?? n.activityType}
                   </span>
                   {i < nodes.length - 1 && <span className="text-[10px] text-gray-300 dark:text-white/20">→</span>}
@@ -377,13 +358,13 @@ export default function PipelinesPage() {
                   sel ? 'bg-brand-50 dark:bg-brand-500/[0.06]' : 'hover:bg-gray-50 dark:hover:bg-white/[0.025]'
                 }`}>
                 <div className={`w-[3px] shrink-0 ${cfg.bar}`} />
-                <div className="flex flex-1 items-center gap-3.5 px-5 py-3 min-w-0">
+                <div className="flex flex-1 flex-wrap items-center gap-3.5 px-5 py-3 min-w-0">
                   <ConnChain definition={p.definition} />
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-medium text-gray-900 dark:text-white/88 truncate">{p.name}</div>
                     <div className="text-[11px] text-gray-400 dark:text-white/32 mt-0.5">{triggerLabel(p.definition)}</div>
                   </div>
-                  <div className="flex items-center gap-2.5 shrink-0 ml-auto">
+                  <div className="flex flex-none items-center gap-2.5 ml-auto">
                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${cfg.badge}`}>{cfg.label}</span>
                     <div className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-white/50">
                       <RunDot phase={p.last_run_phase} />

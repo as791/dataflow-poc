@@ -22,6 +22,12 @@ jobs:
         run: npm -w @dataflow/shared test
       - name: Unit tests — connector-sdk (executor + registry)
         run: npm -w @dataflow/connector-sdk test
+      - name: Unit tests — API
+        run: npm -w @dataflow/api test
+      - name: Unit tests — worker
+        run: npm -w @dataflow/worker test
+      - name: Unit tests — web run graph
+        run: npm -w @dataflow/web test
 
       - name: Typecheck API
         run: npm -w @dataflow/api exec tsc -- -p . --noEmit

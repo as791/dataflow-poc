@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { canRetryExecution, decodeExecutionCursor, encodeExecutionCursor, monitoringSummary } from './executions';
+import { canRetryExecution, decodeExecutionCursor, encodeExecutionCursor, monitoringSummary, safeTraceValue } from './executions';
 import { evaluatePipelineHealth } from '@dataflow/shared';
 
 assert.deepEqual(monitoringSummary({ runs: '10', succeeded: '9', failed: '1', running: '0', avg_duration_ms: '1250' }), {
@@ -11,6 +11,9 @@ assert.deepEqual(decodeExecutionCursor(encodeExecutionCursor(cursor)), cursor);
 assert.throws(() => decodeExecutionCursor('nope'), /invalid cursor|Unexpected token/);
 assert.equal(canRetryExecution('failed'), true);
 assert.equal(canRetryExecution('running'), false);
+assert.deepEqual(safeTraceValue({ activityType: 'fetch', input: { password: 'secret' }, message: 'token=abc123' }), {
+  activityType: 'fetch', message: 'token=[REDACTED]',
+});
 
 const health = evaluatePipelineHealth({
   runs: 10, failed: 2, avg_duration_ms: 2500,

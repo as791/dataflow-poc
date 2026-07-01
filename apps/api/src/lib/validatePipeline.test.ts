@@ -36,6 +36,12 @@ assert.throws(() => validatePipeline({ ...base, nodes: [
   { id: 'sink', type: 'sink', activityType: 'sink.kafka', config: { connectionId: 'kafka', topic: '../bad' } },
 ] }), /invalid topic/);
 assert.throws(() => validatePipeline({
+  ...base, nodes: [{ id: 'sink', type: 'sink', activityType: 'sink.webhook', config: {} }],
+}), /URL or HTTP connector instance/);
+assert.doesNotThrow(() => validatePipeline({
+  ...base, nodes: [{ id: 'sink', type: 'sink', activityType: 'sink.webhook', config: { connectionId: 'http' } }],
+}));
+assert.throws(() => validatePipeline({
   ...base, nodes: [{ id: 'contract', type: 'transform', activityType: 'transform.contract', config: { schemaJson: '{bad' } }],
 }), /valid JSON/);
 assert.doesNotThrow(() => validatePipeline({
@@ -44,6 +50,25 @@ assert.doesNotThrow(() => validatePipeline({
 assert.throws(() => validatePipeline({
   ...base, nodes: [{ id: 'rename', type: 'transform', activityType: 'transform.rename', config: { mapping: '{bad' } }],
 }), /mapping must be valid JSON/);
+assert.throws(() => validatePipeline({
+  ...base, nodes: [{ id: 'dedupe', type: 'transform', activityType: 'transform.dedupe', config: {} }],
+}), /at least one key/);
+assert.throws(() => validatePipeline({
+  ...base,
+  nodes: [
+    base.nodes[0],
+    { id: 'other', type: 'source', activityType: 'http.fetch', config: { url: 'https://example.org' } },
+    { id: 'merge', type: 'merge', activityType: 'flow.merge', config: {}, mergeStrategy: 'leftJoin' },
+  ],
+  edges: [
+    { id: 'a', source: 'source', target: 'merge' },
+    { id: 'b', source: 'other', target: 'merge' },
+  ],
+}), /requires a joinKey/);
+assert.doesNotThrow(() => validatePipeline({ ...base, nodes: [{ id: 'formula', type: 'transform', activityType: 'transform.formula', config: { outputField: 'total', expression: 'r.price * r.qty' } }] }));
+assert.throws(() => validatePipeline({ ...base, nodes: [{ id: 'formula', type: 'transform', activityType: 'transform.formula', config: { outputField: 'total', expression: 'process.exit()' } }] }), /unsupported/);
+assert.throws(() => validatePipeline({ ...base, nodes: [{ id: 'select', type: 'transform', activityType: 'transform.select', config: {} }] }), /expression is required/);
+assert.throws(() => validatePipeline({ ...base, nodes: [{ id: 'dedupe', type: 'transform', activityType: 'transform.dedupe', config: { key: 'id', scope: 'forever' } }] }), /scope must be/);
 
 for (const file of [
   'zendesk-to-postgres.json', 'medallion-bronze-orders.json',
