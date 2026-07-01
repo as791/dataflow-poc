@@ -21,8 +21,8 @@ const LEGEND_STYLE = { wrapperStyle: { fontSize: 11, color: 'rgba(255,255,255,0.
 
 export function ChartRenderer({ widget }: { widget: WidgetDef }) {
   const data = widget.data ?? [];
-  const xKey = widget.spec.x_column;
-  const yKey = widget.spec.y_column;
+  const xKey = widget.spec.groupBy?.[0] ?? widget.spec.select?.[0] ?? '';
+  const yKey = widget.spec.aggregate ? 'aggregate_value' : (widget.spec.select?.[1] ?? widget.spec.select?.[0] ?? '');
 
   if (data.length === 0) {
     return (

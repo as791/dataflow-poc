@@ -7,31 +7,8 @@ import type { Dataset, SchemaField, WidgetDef, DashboardDefinition, Dashboard } 
 import { ChartRenderer } from '../components/analytics/ChartRenderer';
 import { AddWidgetModal } from '../components/analytics/AddWidgetModal';
 import { SaveDashboardModal } from '../components/analytics/SaveDashboardModal';
-
-// ─── API helpers ──────────────────────────────────────────────────────────────
-
-async function apiFetch(path: string, init: RequestInit = {}): Promise<any> {
-  const headers = new Headers(init.headers);
-  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  const res = await fetch(path, { ...init, headers, credentials: 'include' });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`${res.status} ${txt}`);
-  }
-  return res.json();
-}
-
-const analyticsApi = {
-  datasets: (): Promise<Dataset[]> => apiFetch('/api/analytics/datasets'),
-  schema: (name: string): Promise<SchemaField[]> => apiFetch(`/api/analytics/datasets/${encodeURIComponent(name)}/schema`),
-  query: (body: object): Promise<{ rows: any[] }> =>
-    apiFetch('/api/analytics/query', { method: 'POST', body: JSON.stringify(body) }),
-  listDashboards: (): Promise<Dashboard[]> => apiFetch('/api/analytics/dashboards'),
-  createDashboard: (body: object): Promise<Dashboard> =>
-    apiFetch('/api/analytics/dashboards', { method: 'POST', body: JSON.stringify(body) }),
-  updateDashboard: (id: string, body: object): Promise<Dashboard> =>
-    apiFetch(`/api/analytics/dashboards/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
-};
+import { api } from '../api';
+import { ApiError } from '../components/ApiError';
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
@@ -65,8 +42,8 @@ export function AnalyticsPage() {
       setLoadingDatasets(true);
       try {
         const [ds, dbs] = await Promise.all([
-          analyticsApi.datasets().catch(() => [] as Dataset[]),
-          analyticsApi.listDashboards().catch(() => [] as Dashboard[]),
+          api.getAnalyticsDatasets().catch(() => [] as Dataset[]),
+          api.listDashboards().catch(() => [] as Dashboard[]),
         ]);
         setDatasets(ds);
         setDashboards(dbs);
@@ -92,7 +69,7 @@ export function AnalyticsPage() {
   const fetchWidgetData = useCallback(async (widget: WidgetDef) => {
     setLoadingData(prev => ({ ...prev, [widget.id]: true }));
     try {
-      const { rows } = await analyticsApi.query({ dataset: widget.dataset, spec: widget.spec });
+      const { rows } = await api.queryAnalytics({ dataset: widget.dataset, spec: widget.spec });
       setWidgets(prev => prev.map(w => w.id === widget.id ? { ...w, data: rows } : w));
     } catch { /* chart shows "No data" */ }
     finally {
@@ -130,10 +107,10 @@ export function AnalyticsPage() {
     };
     let saved: Dashboard;
     if (existingId) {
-      saved = await analyticsApi.updateDashboard(existingId, { name, definition });
+      saved = await api.updateDashboard(existingId, { name, definition });
       setDashboards(prev => prev.map(d => d.id === existingId ? saved : d));
     } else {
-      saved = await analyticsApi.createDashboard({ name, definition });
+      saved = await api.createDashboard({ name, definition });
       setDashboards(prev => [...prev, saved]);
     }
     setActiveDashboard(saved);
@@ -208,7 +185,7 @@ export function AnalyticsPage() {
             {dirty && <span className="glass-badge text-warning/80 border-warning/30">● Unsaved</span>}
           </div>
           <div className="flex items-center gap-2">
-            {error && <span className="text-xs text-danger/80 max-w-xs truncate">{error}</span>}
+            {error && <ApiError message={error} />}
             <button className="glass-btn-ghost text-sm" onClick={() => setShowAddModal(true)}><Plus size={15} /> Add widget</button>
             <button
               className={`glass-btn-primary text-sm ${!dirty ? 'opacity-50' : ''}`}
@@ -268,7 +245,7 @@ export function AnalyticsPage() {
       {showAddModal && (
         <AddWidgetModal
           datasets={datasets}
-          schema={analyticsApi.schema}
+          schema={async (name: string): Promise<SchemaField[]> => { const r = await api.getAnalyticsSchema(name); return r.schema; }}
           onClose={() => setShowAddModal(false)}
           onAdd={addWidget}
         />

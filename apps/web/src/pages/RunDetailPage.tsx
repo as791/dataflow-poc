@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import ReactFlow, { Background, BackgroundVariant, Handle, Position, type NodeProps } from 'reactflow';
 import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { api } from '../api';
+import { ApiError } from '../components/ApiError';
 import { useCatalog } from '../context/CatalogContext';
 import { buildRunGraph, type NodeRun } from './runGraph';
 import { displayEnvironment } from './LifecyclePage';
@@ -90,11 +91,7 @@ export default function RunDetailPage() {
           </button>
         )}
       </div>
-      {error && (
-        <div className="mx-6 mt-4 text-xs text-red-600 dark:text-danger/90 bg-red-50 dark:bg-danger/10 border border-red-200 dark:border-danger/30 rounded-lg px-3 py-2">
-          {error}
-        </div>
-      )}
+      {error && <div className="mx-6 mt-4"><ApiError message={error} /></div>}
       {!!data?.qualityResults?.length && <div className="flex flex-wrap gap-2 border-b border-gray-100 px-6 py-3 dark:border-white/[0.07]">
         {data.qualityResults.map(result => <div key={result.node_id} className={`rounded-lg border px-3 py-2 text-xs ${result.status === 'passed' ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-500/10' : result.status === 'failed' ? 'border-red-300 bg-red-50 dark:bg-red-500/10' : 'border-amber-300 bg-amber-50 dark:bg-amber-500/10'}`}>
           <p className="font-semibold">{result.node_id} · quality {result.status}</p>
