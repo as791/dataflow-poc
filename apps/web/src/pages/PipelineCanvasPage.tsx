@@ -81,7 +81,7 @@ export default function PipelineCanvasPage() {
   const [mermaidDraft, setMermaidDraft] = useState('');
   const [showAI, setShowAI] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
-  const { generate: aiGenerate, loading: aiLoading, error: aiError } = useAiGenerate();
+  const { generate: aiGenerate, refine: aiRefine, loading: aiLoading, error: aiError } = useAiGenerate();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [bottomTab, setBottomTab] = useState<BottomTab>('runs');
@@ -344,19 +344,37 @@ export default function PipelineCanvasPage() {
 
   const runAI = async () => {
     if (!aiPrompt.trim()) return;
-    setMsg('Generating pipeline');
-    const result = await aiGenerate(aiPrompt);
+    const hasExisting = nodes.length > 0;
+    setMsg(hasExisting ? 'Refining pipeline…' : 'Generating pipeline…');
+
+    // Preserve existing node configs before any updates
+    const prevData = new Map(nodes.map(n => [n.id, n.data]));
+
+    const result = hasExisting
+      ? await aiRefine(buildDefinition(), aiPrompt)
+      : await aiGenerate(aiPrompt);
+
     if (result) {
       const def = result.definition;
-      const { nodes: ns, edges: es } = definitionToFlow(def, byType);
+      const flow = definitionToFlow(def, byType);
+      // Merge: keep config/ingestion for nodes that survived the update
+      flow.nodes.forEach(n => {
+        const prev = prevData.get(n.id);
+        if (prev) {
+          n.data.config = prev.config;
+          if (prev.ingestion) n.data.ingestion = prev.ingestion;
+        }
+      });
       fitPending.current = true;
-      setNodes(ns); setEdges(es);
-      if (def.suggestedName || def.name) setName(def.suggestedName ?? def.name);
-      if (def.trigger) setTrigger(def.trigger);
+      setNodes(flow.nodes); setEdges(flow.edges);
+      if (!hasExisting) {
+        if (def.suggestedName || def.name) setName(def.suggestedName ?? def.name);
+        if (def.trigger) setTrigger(def.trigger);
+      }
       setMermaidDraft(result.mermaid ?? definitionToMermaid(def.nodes, def.edges));
       setBottomTab('mermaid'); setDrawerOpen(true);
       setShowAI(false); setAiPrompt('');
-      setMsg('AI pipeline generated. DAG and Mermaid ready.');
+      setMsg(hasExisting ? 'Pipeline refined. Review changes in Mermaid.' : 'AI pipeline generated. DAG and Mermaid ready.');
     }
   };
 
@@ -435,8 +453,8 @@ export default function PipelineCanvasPage() {
         <MiniMap position="bottom-left" pannable zoomable
           style={{ left: 126, bottom: drawerOpen ? drawerOffset : 12, width: 190, height: 112 }}
           nodeColor={n => byType[n.data.activityType]?.color ?? '#6965db'}
-          nodeStrokeColor={dark ? '#ffffff' : '#111827'} nodeStrokeWidth={2}
-          maskColor={dark ? 'rgba(8,10,16,.7)' : 'rgba(245,245,245,.7)'} />
+          nodeStrokeColor={dark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.25)'} nodeStrokeWidth={2}
+          maskColor={dark ? 'rgba(8,10,18,0.78)' : 'rgba(235,237,245,0.78)'} />
       </ReactFlow>
 
       {contextAdd && (
@@ -469,15 +487,16 @@ export default function PipelineCanvasPage() {
       )}
 
       {/* Left Miro-style toolbar */}
-      <aside data-canvas-sidebar className="absolute left-3 top-3 bottom-3 z-20 flex w-[52px] flex-col items-center gap-1 overflow-hidden rounded-2xl
+      <aside data-canvas-sidebar className="absolute left-3 top-3 bottom-3 z-20 flex w-[52px] flex-col items-center gap-1 rounded-2xl
         border border-gray-200 dark:border-white/[0.08]
         bg-white/95 dark:bg-[#0d0f17]/95 backdrop-blur-lg py-3 shadow-sm dark:shadow-glass">
         <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-[10px] bg-gradient-to-br from-brand-400 to-brand-600 shadow-md shadow-brand-500/20">
           <Zap size={16} className="text-white" strokeWidth={2.5} />
         </div>
         <button title="All pipelines" onClick={() => navigate('/pipelines')}
-          className="flex h-9 w-9 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
+          className="group relative flex h-9 w-9 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
           <LayoutList size={17} strokeWidth={1.75} />
+          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">All pipelines</span>
         </button>
         <div className="my-1 h-px w-8 bg-gray-200 dark:bg-white/[0.08]" />
         {TOOLBAR_CATS.map(cat => {
@@ -486,53 +505,67 @@ export default function PipelineCanvasPage() {
           return (
             <button key={cat.id} title={cat.label}
               onClick={() => { setActiveCat(isActive ? null : cat.id as CatId); setWorkspacePanel(null); setCatQuery(''); }}
-              className={`flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
+              className={`group relative flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
                 isActive
                   ? 'text-white shadow-md'
                   : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
               }`}
               style={isActive ? { background: cat.color } : undefined}>
               <Icon size={17} strokeWidth={1.75} />
+              <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">{cat.label}</span>
             </button>
           );
         })}
         <div className="my-1 h-px w-8 bg-gray-200 dark:bg-white/[0.08]" />
         <button title="Quick AI add" onClick={() => { setShowAI(v => !v); setActiveCat(null); setWorkspacePanel(null); }}
-          className={`flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
+          className={`group relative flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
             showAI ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
           }`}>
           <Sparkles size={17} strokeWidth={1.75} />
+          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Quick AI add</span>
         </button>
         <button title="Edit as Mermaid" onClick={() => { setActiveCat(null); setWorkspacePanel(null); openMermaid(); }}
-          className="flex h-9 w-9 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
+          className="group relative flex h-9 w-9 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
           <Code2 size={17} strokeWidth={1.75} />
+          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Edit as Mermaid</span>
         </button>
         <div className="flex-1" />
         <div className="my-1 h-px w-8 bg-gray-200 dark:bg-white/[0.08]" />
         <button title="Connectors" onClick={() => {
           setWorkspacePanel(workspacePanel === 'connectors' ? null : 'connectors'); setActiveCat(null);
-        }} className={`flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
+        }} className={`group relative flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
           workspacePanel === 'connectors' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
-        }`}><Cable size={17} strokeWidth={1.75} /></button>
+        }`}>
+          <Cable size={17} strokeWidth={1.75} />
+          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Connectors</span>
+        </button>
         <button title="Pipeline runs"
           onClick={() => { setActiveCat(null); setWorkspacePanel(null); drawerOpen && bottomTab === 'runs' ? setDrawerOpen(false) : openDrawer('runs'); }}
-          className={`flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
+          className={`group relative flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
             drawerOpen && bottomTab === 'runs' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
           }`}>
           <History size={17} strokeWidth={1.75} />
+          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Pipeline runs</span>
         </button>
         <button title="Pipeline lifecycle" onClick={() => { setActiveCat(null); setWorkspacePanel(null); drawerOpen && bottomTab === 'lifecycle' ? setDrawerOpen(false) : openDrawer('lifecycle'); }}
-          className={`flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
+          className={`group relative flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
             drawerOpen && bottomTab === 'lifecycle' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
-          }`}><Rocket size={17} strokeWidth={1.75} /></button>
+          }`}>
+          <Rocket size={17} strokeWidth={1.75} />
+          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Pipeline lifecycle</span>
+        </button>
         <button title="Profile and settings" onClick={() => {
           setWorkspacePanel(workspacePanel === 'settings' ? null : 'settings'); setActiveCat(null);
-        }} className={`flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
+        }} className={`group relative flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
           workspacePanel === 'settings' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
-        }`}><Settings size={17} strokeWidth={1.75} /></button>
+        }`}>
+          <Settings size={17} strokeWidth={1.75} />
+          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Settings</span>
+        </button>
         <button title={dark ? 'Switch to light mode' : 'Switch to dark mode'} onClick={toggleTheme}
-          className="flex h-9 w-9 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
+          className="group relative flex h-9 w-9 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
           {dark ? <Sun size={16} /> : <Moon size={16} />}
+          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">{dark ? 'Light mode' : 'Dark mode'}</span>
         </button>
       </aside>
 
@@ -769,12 +802,12 @@ export default function PipelineCanvasPage() {
               <Sparkles size={16} className="text-brand-500 flex-none" />
               <input
                 className="flex-1 bg-transparent text-sm text-gray-900 dark:text-white/90 outline-none placeholder-gray-400 dark:placeholder-white/30"
-                placeholder="Describe your pipeline… e.g. Sync Zendesk tickets to Postgres"
+                placeholder={nodes.length > 0 ? 'Describe changes… e.g. Add a filter step before the Postgres sink' : 'Describe your pipeline… e.g. Sync Zendesk tickets to Postgres'}
                 value={aiPrompt} onChange={e => setAiPrompt(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && runAI()} autoFocus />
               <button className="glass-btn-primary text-xs flex-none"
                 disabled={aiLoading || !aiPrompt.trim()} onClick={runAI}>
-                {aiLoading ? '…' : 'Generate'}
+                {aiLoading ? '…' : nodes.length > 0 ? 'Refine' : 'Generate'}
               </button>
               <button className="glass-btn-ghost text-xs flex-none" onClick={() => navigate('/ai-builder')}>
                 Open full AI Builder →

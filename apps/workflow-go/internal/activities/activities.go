@@ -1,0 +1,481 @@
+package activities
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/dataflow-poc/workflow-go/internal/connectors"
+	"github.com/dataflow-poc/workflow-go/internal/database"
+	"github.com/dataflow-poc/workflow-go/internal/model"
+	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/temporal"
+)
+
+type Activities struct {
+	DB             *database.DB
+	Payloads       *Payloads
+	Runtime        *connectors.Runtime
+	PrivateKeyPath string
+}
+
+type ScheduledExecutionParams struct {
+	ExecutionID   string `json:"executionId"`
+	PipelineRowID string `json:"pipelineRowId"`
+	TenantID      string `json:"tenantId"`
+	Environment   string `json:"environment"`
+	WorkflowID    string `json:"workflowId"`
+	RunID         string `json:"runId"`
+}
+
+func (a *Activities) PrepareScheduledExecution(ctx context.Context, p ScheduledExecutionParams) error {
+	tx, err := a.DB.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err = tx.Exec(ctx, `INSERT INTO billing_plans (tenant_id) VALUES ($1) ON CONFLICT DO NOTHING`, p.TenantID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO usage_counters (tenant_id,month,execution_count) VALUES ($1,date_trunc('month',now() at time zone 'utc')::date,0) ON CONFLICT DO NOTHING`, p.TenantID); err != nil {
+		return err
+	}
+	var limit, used int
+	if err = tx.QueryRow(ctx, `SELECT bp.free_tier_limit+bp.extra_quota,uc.execution_count FROM billing_plans bp JOIN usage_counters uc ON uc.tenant_id=bp.tenant_id AND uc.month=date_trunc('month',now() at time zone 'utc')::date WHERE bp.tenant_id=$1 FOR UPDATE OF bp,uc`, p.TenantID).Scan(&limit, &used); err != nil {
+		return err
+	}
+	if used >= limit {
+		return temporal.NewNonRetryableApplicationError("scheduled execution quota exceeded", "QuotaExceededError", nil)
+	}
+	if _, err = tx.Exec(ctx, `UPDATE usage_counters SET execution_count=execution_count+1 WHERE tenant_id=$1 AND month=date_trunc('month',now() at time zone 'utc')::date`, p.TenantID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO executions (id,pipeline_id,tenant_id,trigger_type,phase,environment,workflow_id,run_id) VALUES ($1,$2,$3,'cron','running',$4,$5,$6) ON CONFLICT(id) DO NOTHING`, p.ExecutionID, p.PipelineRowID, p.TenantID, p.Environment, p.WorkflowID, p.RunID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+type FetchSourceParams struct {
+	ActivityType string                 `json:"activityType"`
+	Config       map[string]interface{} `json:"config"`
+	Ingestion    *model.IngestionConfig `json:"ingestion,omitempty"`
+	TenantID     string                 `json:"tenantId"`
+	ConnectionID string                 `json:"connectionId"`
+	ExecutionID  string                 `json:"executionId"`
+	NodeID       string                 `json:"nodeId"`
+	Cursor       map[string]interface{} `json:"cursor,omitempty"`
+	EncryptedDEK string                 `json:"encryptedDek,omitempty"`
+}
+type FetchSourceResult struct {
+	OutputRef   *model.DataRef         `json:"outputRef"`
+	HasMore     bool                   `json:"hasMore"`
+	RecordCount int                    `json:"recordCount"`
+	Checkpoint  map[string]interface{} `json:"checkpoint,omitempty"`
+}
+
+func (a *Activities) dek(encoded string) ([]byte, error) {
+	if encoded == "" {
+		return nil, nil
+	}
+	return UnwrapDEK(encoded, a.PrivateKeyPath)
+}
+func (a *Activities) FetchSourcePage(ctx context.Context, p FetchSourceParams) (FetchSourceResult, error) {
+	activity.RecordHeartbeat(ctx)
+	if err := a.requireEntitlement(ctx, p.TenantID, p.ActivityType, p.Config); err != nil {
+		return FetchSourceResult{}, err
+	}
+	if err := a.verifyConnectorOwnership(ctx, p.TenantID, p.Config); err != nil {
+		return FetchSourceResult{}, err
+	}
+	if p.Cursor == nil {
+		var raw []byte
+		_ = a.DB.Pool.QueryRow(ctx, `SELECT cursor FROM connector_state WHERE tenant_id=$1 AND connection_id=$2`, p.TenantID, p.ConnectionID).Scan(&raw)
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &p.Cursor)
+		}
+	}
+	if p.Cursor == nil {
+		p.Cursor = map[string]interface{}{}
+	}
+	started := time.Now()
+	result, err := a.Runtime.Fetch(ctx, p.ActivityType, connectors.SourceParams{Config: p.Config, Cursor: p.Cursor, Ingestion: p.Ingestion, TenantID: p.TenantID})
+	if err != nil {
+		return FetchSourceResult{}, err
+	}
+	dek, err := a.dek(p.EncryptedDEK)
+	if err != nil {
+		return FetchSourceResult{}, err
+	}
+	ref, err := a.Payloads.Write(ctx, result.Records, p.TenantID, p.ExecutionID, p.NodeID, dek)
+	if err != nil {
+		return FetchSourceResult{}, err
+	}
+	_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "success", time.Since(started), len(result.Records), "")
+	return FetchSourceResult{OutputRef: ref, HasMore: result.HasMore, RecordCount: len(result.Records), Checkpoint: result.NextCursor}, nil
+}
+
+type CommitCursorParams struct {
+	TenantID string `json:"tenantId"`
+	Cursors  []struct {
+		ConnectionID string                 `json:"connectionId"`
+		Checkpoint   map[string]interface{} `json:"checkpoint"`
+	} `json:"cursors"`
+}
+
+func (a *Activities) CommitSourceCursors(ctx context.Context, p CommitCursorParams) error {
+	tx, err := a.DB.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	for _, cursor := range p.Cursors {
+		next := cursor.Checkpoint
+		if incoming, ok := cursor.Checkpoint["offsets"].(map[string]interface{}); ok {
+			var existingBytes []byte
+			_ = tx.QueryRow(ctx, `SELECT cursor FROM connector_state WHERE tenant_id=$1 AND connection_id=$2 FOR UPDATE`, p.TenantID, cursor.ConnectionID).Scan(&existingBytes)
+			var existing map[string]interface{}
+			_ = json.Unmarshal(existingBytes, &existing)
+			merged := map[string]interface{}{}
+			if stringValue(existing["topic"]) == stringValue(cursor.Checkpoint["topic"]) {
+				if values, ok := existing["offsets"].(map[string]interface{}); ok {
+					for key, value := range values {
+						merged[key] = value
+					}
+				}
+			}
+			for partition, value := range incoming {
+				if current, exists := merged[partition]; !exists || numberValue(value) > numberValue(current) {
+					merged[partition] = value
+				}
+			}
+			next = cloneMap(cursor.Checkpoint)
+			next["offsets"] = merged
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO connector_state (tenant_id,connection_id,cursor,updated_at) VALUES ($1,$2,$3,now()) ON CONFLICT(tenant_id,connection_id) DO UPDATE SET cursor=$3,updated_at=now()`, p.TenantID, cursor.ConnectionID, next); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+type CommitDedupeParams struct {
+	TenantID    string `json:"tenantId"`
+	Checkpoints []struct {
+		PipelineID string   `json:"pipelineId"`
+		NodeID     string   `json:"nodeId"`
+		Hashes     []string `json:"hashes"`
+	} `json:"checkpoints"`
+}
+
+func (a *Activities) CommitDedupeKeys(ctx context.Context, p CommitDedupeParams) error {
+	for _, checkpoint := range p.Checkpoints {
+		if len(checkpoint.Hashes) == 0 {
+			continue
+		}
+		if _, err := a.DB.Pool.Exec(ctx, `INSERT INTO dedupe_keys (tenant_id,pipeline_id,node_id,key_hash) SELECT $1,$2,$3,hash FROM unnest($4::text[]) hash ON CONFLICT DO NOTHING`, p.TenantID, checkpoint.PipelineID, checkpoint.NodeID, checkpoint.Hashes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type DispatchParams struct {
+	ActivityType string                 `json:"activityType"`
+	Config       map[string]interface{} `json:"config"`
+	InputRef     *model.DataRef         `json:"inputRef,omitempty"`
+	TenantID     string                 `json:"tenantId"`
+	ExecutionID  string                 `json:"executionId"`
+	NodeID       string                 `json:"nodeId"`
+	EncryptedDEK string                 `json:"encryptedDek,omitempty"`
+}
+
+func (a *Activities) DispatchNode(ctx context.Context, p DispatchParams) (model.NodeResult, error) {
+	started := time.Now()
+	if err := a.requireEntitlement(ctx, p.TenantID, p.ActivityType, p.Config); err != nil {
+		return model.NodeResult{}, err
+	}
+	if err := a.verifyConnectorOwnership(ctx, p.TenantID, p.Config); err != nil {
+		return model.NodeResult{}, err
+	}
+	dek, err := a.dek(p.EncryptedDEK)
+	if err != nil {
+		return model.NodeResult{}, err
+	}
+	var input interface{}
+	if p.InputRef != nil {
+		input, err = a.Payloads.Read(ctx, p.InputRef, dek)
+		if err != nil {
+			return model.NodeResult{}, err
+		}
+	}
+	output, meta, err := a.Runtime.Handle(ctx, p.ActivityType, input, p.Config, connectors.HandlerContext{TenantID: p.TenantID, ExecutionID: p.ExecutionID, NodeID: p.NodeID})
+	if err == nil && p.ActivityType == "transform.dedupe" && p.Config["scope"] == "pipeline" {
+		output, meta, err = a.filterCrossRunDedupe(ctx, output, p, meta)
+	}
+	duration := time.Since(started)
+	if err != nil {
+		_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "failed", duration, 0, err.Error())
+		return model.NodeResult{}, err
+	}
+	var ref *model.DataRef
+	if output != nil {
+		ref, err = a.Payloads.Write(ctx, output, p.TenantID, p.ExecutionID, p.NodeID, dek)
+		if err != nil {
+			return model.NodeResult{}, err
+		}
+	}
+	count := 0
+	if ref != nil {
+		count = ref.RecordCount
+	} else if p.InputRef != nil {
+		count = p.InputRef.RecordCount
+	}
+	_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "success", duration, count, "")
+	if meta == nil {
+		meta = map[string]interface{}{}
+	}
+	if p.ActivityType == "transform.contract" {
+		a.recordQualityResult(ctx, p, meta)
+	}
+	meta["durationMs"] = duration.Milliseconds()
+	if count > 0 {
+		meta["recordCount"] = count
+	}
+	return model.NodeResult{NodeID: p.NodeID, Status: "success", OutputRef: ref, Meta: meta}, nil
+}
+
+func (a *Activities) requireEntitlement(ctx context.Context, tenantID, activityType string, config map[string]interface{}) error {
+	feature := ""
+	if activityType == "kafka.fetch" || activityType == "sink.kafka" || stringValue(config["syncMode"]) == "cdc" || stringValue(config["writeMode"]) == "apply-cdc" {
+		feature = "realtime"
+	}
+	if activityType == "transform.dedupe" && stringValue(config["scope"]) == "pipeline" {
+		feature = "statefulProcessing"
+	}
+	for _, advanced := range []string{"sftp.fetch", "sink.sftp", "snowflake.fetch", "sink.snowflake", "iceberg.fetch"} {
+		if activityType == advanced {
+			feature = "advancedConnectors"
+		}
+	}
+	if feature == "" {
+		return nil
+	}
+	var enabled bool
+	err := a.DB.Pool.QueryRow(ctx, `SELECT enabled FROM tenant_feature_entitlements WHERE tenant_id=$1 AND feature=$2`, tenantID, feature).Scan(&enabled)
+	if err != nil || !enabled {
+		return temporal.NewNonRetryableApplicationError(feature+" is not enabled for this workspace", "FeatureNotEnabled", err)
+	}
+	return nil
+}
+
+func (a *Activities) verifyConnectorOwnership(ctx context.Context, tenantID string, config map[string]interface{}) error {
+	id := stringValue(config["connectionId"])
+	if id == "" {
+		return nil
+	}
+	var exists bool
+	if err := a.DB.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM connector_instances WHERE id=$1 AND tenant_id=$2)`, id, tenantID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return temporal.NewNonRetryableApplicationError("connector not found", "ConnectorNotFound", nil)
+	}
+	return nil
+}
+
+func (a *Activities) filterCrossRunDedupe(ctx context.Context, output interface{}, p DispatchParams, meta map[string]interface{}) (interface{}, map[string]interface{}, error) {
+	rows, ok := output.([]interface{})
+	if !ok {
+		return nil, nil, fmt.Errorf("transform.dedupe: input must be an array")
+	}
+	var pipelineID string
+	if err := a.DB.Pool.QueryRow(ctx, `SELECT pipeline_id FROM executions WHERE id=$1 AND tenant_id=$2`, p.ExecutionID, p.TenantID).Scan(&pipelineID); err != nil {
+		return nil, nil, fmt.Errorf("transform.dedupe: execution pipeline not found: %w", err)
+	}
+	keys := connectors.DedupeKeyFields(p.Config["key"])
+	hashes := make([]string, 0, len(rows))
+	byHash := map[string]interface{}{}
+	for _, raw := range rows {
+		row, ok := raw.(map[string]interface{})
+		if !ok {
+			return nil, nil, fmt.Errorf("transform.dedupe: records must be objects")
+		}
+		hash := connectors.DedupeHash(row, keys)
+		hashes = append(hashes, hash)
+		byHash[hash] = raw
+	}
+	existing := map[string]bool{}
+	if len(hashes) > 0 {
+		result, err := a.DB.Pool.Query(ctx, `SELECT key_hash FROM dedupe_keys WHERE tenant_id=$1 AND pipeline_id=$2 AND node_id=$3 AND key_hash=ANY($4::text[])`, p.TenantID, pipelineID, p.NodeID, hashes)
+		if err != nil {
+			return nil, nil, err
+		}
+		for result.Next() {
+			var hash string
+			_ = result.Scan(&hash)
+			existing[hash] = true
+		}
+		result.Close()
+	}
+	filtered := []interface{}{}
+	fresh := []string{}
+	for _, hash := range hashes {
+		if !existing[hash] {
+			filtered = append(filtered, byHash[hash])
+			fresh = append(fresh, hash)
+		}
+	}
+	if meta == nil {
+		meta = map[string]interface{}{}
+	}
+	meta["dedupeCheckpoint"] = map[string]interface{}{"pipelineId": pipelineID, "nodeId": p.NodeID, "hashes": fresh}
+	return filtered, meta, nil
+}
+
+func (a *Activities) recordQualityResult(ctx context.Context, p DispatchParams, meta map[string]interface{}) {
+	status := stringValue(meta["qualityStatus"])
+	if status == "" {
+		return
+	}
+	passed := int(numberValue(meta["passedCount"]))
+	failed := int(numberValue(meta["failedCount"]))
+	_, _ = a.DB.Pool.Exec(ctx, `INSERT INTO data_quality_results(tenant_id,pipeline_id,execution_id,node_id,status,passed_count,failed_count,error_samples) SELECT $1,e.pipeline_id,$2,$3,$4,$5,$6,'[]'::jsonb FROM executions e WHERE e.id=$2 ON CONFLICT(execution_id,node_id) DO UPDATE SET status=$4,passed_count=$5,failed_count=$6,evaluated_at=now()`, p.TenantID, p.ExecutionID, p.NodeID, status, passed, failed)
+}
+
+func cloneMap(value map[string]interface{}) map[string]interface{} {
+	out := map[string]interface{}{}
+	for key, item := range value {
+		out[key] = item
+	}
+	return out
+}
+func stringValue(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprint(value)
+}
+func numberValue(value interface{}) float64 {
+	switch value := value.(type) {
+	case float64:
+		return value
+	case int:
+		return float64(value)
+	case int64:
+		return float64(value)
+	case string:
+		var number float64
+		_, _ = fmt.Sscan(value, &number)
+		return number
+	}
+	return 0
+}
+
+type MergeParams struct {
+	InputRefs    []*model.DataRef `json:"inputRefs"`
+	Strategy     string           `json:"strategy"`
+	JoinKey      string           `json:"joinKey"`
+	TenantID     string           `json:"tenantId"`
+	ExecutionID  string           `json:"executionId"`
+	NodeID       string           `json:"nodeId"`
+	EncryptedDEK string           `json:"encryptedDek"`
+}
+
+func (a *Activities) MergeRefs(ctx context.Context, p MergeParams) (model.NodeResult, error) {
+	started := time.Now()
+	dek, err := a.dek(p.EncryptedDEK)
+	if err != nil {
+		return model.NodeResult{}, err
+	}
+	arrays := make([][]interface{}, 0, len(p.InputRefs))
+	for _, ref := range p.InputRefs {
+		value, err := a.Payloads.Read(ctx, ref, dek)
+		if err != nil {
+			return model.NodeResult{}, err
+		}
+		records, ok := value.([]interface{})
+		if !ok {
+			return model.NodeResult{}, fmt.Errorf("merge input must be an array")
+		}
+		arrays = append(arrays, records)
+	}
+	merged, err := connectors.MergeArrays(p.Strategy, arrays, p.JoinKey)
+	if err != nil {
+		return model.NodeResult{}, err
+	}
+	ref, err := a.Payloads.Write(ctx, merged, p.TenantID, p.ExecutionID, p.NodeID, dek)
+	if err != nil {
+		return model.NodeResult{}, err
+	}
+	_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "success", time.Since(started), len(merged), "")
+	return model.NodeResult{NodeID: p.NodeID, Status: "success", OutputRef: ref, Meta: map[string]interface{}{"durationMs": time.Since(started).Milliseconds(), "recordCount": len(merged)}}, nil
+}
+
+type EdgeConditionParams struct {
+	Condition    string         `json:"condition"`
+	InputRef     *model.DataRef `json:"inputRef,omitempty"`
+	EncryptedDEK string         `json:"encryptedDek,omitempty"`
+}
+
+func (a *Activities) EvalEdgeCondition(ctx context.Context, p EdgeConditionParams) (bool, error) {
+	if p.InputRef == nil {
+		return true, nil
+	}
+	dek, err := a.dek(p.EncryptedDEK)
+	if err != nil {
+		return false, err
+	}
+	value, err := a.Payloads.Read(ctx, p.InputRef, dek)
+	if err != nil {
+		return false, err
+	}
+	return connectors.EvaluatePredicate(p.Condition, value)
+}
+
+type MarkExecutionParams struct {
+	ExecutionID string `json:"executionId"`
+	Phase       string `json:"phase"`
+}
+
+func (a *Activities) MarkExecution(ctx context.Context, p MarkExecutionParams) error {
+	_, err := a.DB.Pool.Exec(ctx, `UPDATE executions SET phase=$2,completed_at=CASE WHEN $2 IN('completed','failed','cancelled') THEN now() ELSE completed_at END WHERE id=$1`, p.ExecutionID, p.Phase)
+	if err != nil {
+		return err
+	}
+	_, _ = a.DB.Pool.Exec(ctx, `WITH changed AS (UPDATE backfill_partitions bp SET status=$2,completed_at=now() FROM executions e WHERE e.id=$1 AND e.backfill_partition_id=bp.id RETURNING bp.job_id) UPDATE backfill_jobs bj SET status=CASE WHEN EXISTS(SELECT 1 FROM backfill_partitions p WHERE p.job_id=bj.id AND p.status='failed') THEN 'failed' WHEN EXISTS(SELECT 1 FROM backfill_partitions p WHERE p.job_id=bj.id AND p.status='cancelled') THEN 'cancelled' ELSE 'completed' END,completed_at=now() FROM changed WHERE bj.id=changed.job_id AND NOT EXISTS(SELECT 1 FROM backfill_partitions p WHERE p.job_id=bj.id AND p.status IN('pending','starting','running'))`, p.ExecutionID, p.Phase)
+	return nil
+}
+
+func (a *Activities) recordNodeRun(ctx context.Context, executionID, nodeID, tenantID, status string, duration time.Duration, count int, errorText string) error {
+	_, err := a.DB.Pool.Exec(ctx, `INSERT INTO node_runs (execution_id,node_id,tenant_id,status,duration_ms,record_count,error) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(execution_id,node_id) DO UPDATE SET status=$4,duration_ms=$5,record_count=$6,error=$7,finished_at=now()`, executionID, nodeID, tenantID, status, duration.Milliseconds(), nullableCount(count), redactError(errorText))
+	return err
+}
+func nullableCount(value int) interface{} {
+	if value == 0 {
+		return nil
+	}
+	return value
+}
+func redactError(value string) interface{} {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func Register(worker interface {
+	RegisterActivityWithOptions(interface{}, activity.RegisterOptions)
+}, a *Activities) {
+	worker.RegisterActivityWithOptions(a.PrepareScheduledExecution, activity.RegisterOptions{Name: "prepareScheduledExecution"})
+	worker.RegisterActivityWithOptions(a.FetchSourcePage, activity.RegisterOptions{Name: "fetchSourcePage"})
+	worker.RegisterActivityWithOptions(a.CommitSourceCursors, activity.RegisterOptions{Name: "commitSourceCursors"})
+	worker.RegisterActivityWithOptions(a.CommitDedupeKeys, activity.RegisterOptions{Name: "commitDedupeKeys"})
+	worker.RegisterActivityWithOptions(a.DispatchNode, activity.RegisterOptions{Name: "dispatchNode"})
+	worker.RegisterActivityWithOptions(a.MergeRefs, activity.RegisterOptions{Name: "mergeRefs"})
+	worker.RegisterActivityWithOptions(a.EvalEdgeCondition, activity.RegisterOptions{Name: "evalEdgeCondition"})
+	worker.RegisterActivityWithOptions(a.MarkExecution, activity.RegisterOptions{Name: "markExecution"})
+	slog.Info("registered Temporal activities")
+}

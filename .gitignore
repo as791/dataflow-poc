@@ -14,3 +14,6 @@ dist/
 
 # OS cruft
 .DS_Store
+
+# Generated graphify output
+graphify-out/

@@ -116,7 +116,7 @@ function RunLabel({ phase }: { phase: string | null }) {
   if (phase === 'completed') return <span className="text-emerald-600 dark:text-emerald-400">Success</span>;
   if (phase === 'failed')    return <span className="text-red-600 dark:text-red-400">Failed</span>;
   if (phase === 'running')   return <span className="text-cyan-600 dark:text-cyan-400">Running</span>;
-  return <span className="text-gray-400 dark:text-white/30">Never run</span>;
+  return <span className="text-gray-400 dark:text-white/40">Never run</span>;
 }
 
 // ── drawer ────────────────────────────────────────────────────────────────────
@@ -166,7 +166,7 @@ function PipelineDrawer({ pipeline, onClose }: { pipeline: Pipeline; onClose: ()
           {[
             { label: 'Edit',     icon: <ChevronRight size={12}/>, action: () => navigate('/', { state: { pipelineId: pipeline.id } }) },
             { label: 'Run now',  icon: <Play size={11}/>,         action: () => api.run(pipeline.id).catch(() => {}) },
-            { label: 'Backfill', icon: <RotateCcw size={11}/>,    action: () => navigate('/', { state: { pipelineId: pipeline.id, openBackfill: true } }) },
+            { label: 'Backfill', icon: <RotateCcw size={11}/>,    action: () => navigate('/lifecycle', { state: { openBackfillId: pipeline.id } }) },
           ].map(({ label, icon, action }) => (
             <button key={label} onClick={action}
               className="flex items-center gap-1 px-2.5 py-1 rounded-[8px] text-[11px] font-medium transition-all
@@ -188,7 +188,7 @@ function PipelineDrawer({ pipeline, onClose }: { pipeline: Pipeline; onClose: ()
         ].map(({ val, lbl, hi }) => (
           <div key={lbl} className="py-3 text-center border-r border-gray-100 dark:border-white/[0.06] last:border-r-0">
             <div className={`text-[17px] font-semibold tracking-tight ${hi ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-900 dark:text-white/90'}`}>{val}</div>
-            <div className="text-[9px] uppercase tracking-[.08em] text-gray-400 dark:text-white/28 mt-0.5">{lbl}</div>
+            <div className="text-[10px] uppercase tracking-[.08em] text-gray-400 dark:text-white/40 mt-0.5">{lbl}</div>
           </div>
         ))}
       </div>
@@ -212,7 +212,7 @@ function PipelineDrawer({ pipeline, onClose }: { pipeline: Pipeline; onClose: ()
       <div className="flex-1 overflow-y-auto">
         {tab === 'runs' && (
           runs.length === 0
-            ? <div className="flex items-center justify-center h-32 text-[12px] text-gray-400 dark:text-white/25">No runs yet</div>
+            ? <div className="flex items-center justify-center h-32 text-[12px] text-gray-400 dark:text-white/40">No runs yet</div>
             : runs.map(run => (
               <div key={run.id}
                 className="flex items-center gap-2.5 px-4 py-2.5 border-b border-gray-100 dark:border-white/[0.05]
@@ -230,24 +230,24 @@ function PipelineDrawer({ pipeline, onClose }: { pipeline: Pipeline; onClose: ()
                   <div className="text-[12px] font-medium text-gray-700 dark:text-white/80 truncate">
                     {reltime(run.started_at)}
                     {run.record_count != null && (
-                      <span className="ml-1.5 text-gray-400 dark:text-white/35">{run.record_count.toLocaleString()} rows</span>
+                      <span className="ml-1.5 text-gray-400 dark:text-white/45">{run.record_count.toLocaleString()} rows</span>
                     )}
                   </div>
                   {run.error && <div className="text-[10px] text-red-500 dark:text-red-400/80 truncate mt-0.5">{run.error}</div>}
                 </div>
-                <span className="text-[11px] text-gray-400 dark:text-white/35 shrink-0">{duration(run.started_at, run.completed_at)}</span>
+                <span className="text-[11px] text-gray-400 dark:text-white/45 shrink-0">{duration(run.started_at, run.completed_at)}</span>
               </div>
             ))
         )}
         {tab !== 'runs' && (
-          <div className="flex items-center justify-center h-32 text-[12px] text-gray-400 dark:text-white/25">Coming soon</div>
+          <div className="flex items-center justify-center h-32 text-[12px] text-gray-400 dark:text-white/40">Coming soon</div>
         )}
       </div>
 
       {/* mini topology */}
       {nodes.length > 0 && (
         <div className="px-4 py-3 border-t border-gray-100 dark:border-white/[0.07] shrink-0">
-          <div className="text-[9px] font-semibold uppercase tracking-[.1em] text-gray-400 dark:text-white/28 mb-2">Topology</div>
+          <div className="text-[10px] font-semibold uppercase tracking-[.1em] text-gray-400 dark:text-white/40 mb-2">Topology</div>
           <div className="flex flex-wrap items-center gap-1.5">
             {nodes.map((n, i) => {
               const entry = byType[n.activityType];

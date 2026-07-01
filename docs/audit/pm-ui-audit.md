@@ -1,5 +1,7 @@
 # DataFlow Web — PM UI Audit
 
+> Archived pre-ADR-002 audit; backend path references are historical.
+
 Conducted by driving the live app (apps/web on Vite :3000, apps/api on :4000, against the
 existing `dataflow-postgres-local` dev database) through `/login`, all 14 routes in
 `apps/web/src/App.tsx`, and the primary interactive flows on each. Auth was reached via the

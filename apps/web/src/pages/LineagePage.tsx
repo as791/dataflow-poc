@@ -8,6 +8,7 @@ import { AlertTriangle, Database, History, RefreshCw, Search, Workflow } from 'l
 import { filterWorkspaceLineage, type PipelineLineageChange, type WorkspaceLineage } from '@dataflow/shared';
 import { api } from '../api';
 import { useTheme } from '../context/ThemeContext';
+import { ApiError } from '../components/ApiError';
 
 const LAYER_X: Record<string, number> = { external: 40, bronze: 520, silver: 1000, gold: 1480 };
 const LAYER_COLOR: Record<string, string> = {
@@ -37,15 +38,15 @@ function AssetNode({ data }: NodeProps) {
         <span className="truncate text-xs font-semibold text-gray-900 dark:text-white/90">{data.name}</span>
       </div>
       <p className="mt-1 truncate text-[10px] text-gray-400 dark:text-white/45">{data.platform} · {data.namespace}</p>
-      {data.schema?.fields?.length > 0 && <p className="mt-1 text-[9px] text-violet-500">Contract · {data.schema.fields.length} fields</p>}
-      {data.materialization && <p className="mt-1 text-[9px] text-emerald-600 dark:text-emerald-300">
+      {data.schema?.fields?.length > 0 && <p className="mt-1 text-[10px] text-violet-500">Contract · {data.schema.fields.length} fields</p>}
+      {data.materialization && <p className="mt-1 text-[10px] text-emerald-600 dark:text-emerald-400">
         Updated {new Date(data.materialization.materializedAt).toLocaleString()}
         {data.materialization.recordCount != null ? ` · ${data.materialization.recordCount.toLocaleString()} rows` : ''}
       </p>}
-      {data.quality && <p className={`mt-1 text-[9px] font-semibold ${data.quality.status === 'passed' ? 'text-emerald-600' : data.quality.status === 'failed' ? 'text-red-500' : 'text-amber-600'}`}>
+      {data.quality && <p className={`mt-1 text-[10px] font-semibold ${data.quality.status === 'passed' ? 'text-emerald-600 dark:text-emerald-400' : data.quality.status === 'failed' ? 'text-red-500 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`}>
         Quality {data.quality.status} · {data.quality.failedCount.toLocaleString()} rejected
       </p>}
-      <span className="mt-1 inline-flex rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white"
+      <span className="mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white"
         style={{ background: LAYER_COLOR[layer] }}>{layer}</span>
       <Handle type="source" position={Position.Right} />
     </div>
@@ -65,11 +66,11 @@ function PipelineNode({ data }: NodeProps) {
       <p className="mt-1 text-[10px] text-gray-500 dark:text-white/50">
         {data.external ? `${data.namespace} · external` : `v${data.version} · ${data.environment === 'prod' ? 'Production' : 'Integration'} · ${data.status}`}
       </p>
-      {!data.external && <p className="mt-1 flex items-center gap-1 text-[9px] font-semibold capitalize" style={{ color: HEALTH_COLOR[health] }}>
+      {!data.external && <p className="mt-1 flex items-center gap-1 text-[10px] font-semibold capitalize" style={{ color: HEALTH_COLOR[health] }}>
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: HEALTH_COLOR[health] }} />
         {health}{data.breaches?.length ? ` · ${data.breaches.length} breach${data.breaches.length === 1 ? '' : 'es'}` : ''}
       </p>}
-      {(data.metadata?.domain || data.metadata?.owner) && <p className="mt-1 truncate text-[9px] text-gray-400 dark:text-white/35">
+      {(data.metadata?.domain || data.metadata?.owner) && <p className="mt-1 truncate text-[10px] text-gray-400 dark:text-white/45">
         {data.metadata?.domain ?? 'Unassigned'}{data.metadata?.owner ? ` · ${data.metadata.owner}` : ''}
       </p>}
       <Handle type="source" position={Position.Right} />
@@ -137,8 +138,9 @@ export default function LineagePage() {
     setLoading(true); setError(null);
     try {
       const [lineage, monitoring, history] = await Promise.all([
-        api.workspaceLineage(environment || undefined), api.monitoringOverview(7),
-        api.lineageChanges(environment || undefined, 30),
+        api.workspaceLineage(environment || undefined),
+        api.monitoringOverview(7).catch(() => ({ pipelines: [] })),
+        api.lineageChanges(environment || undefined, 30).catch(() => ({ items: [] })),
       ]);
       setGraph(lineage);
       setChanges(history.items);
@@ -220,18 +222,44 @@ export default function LineagePage() {
           </div>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <select className="glass-input" value={environment} onChange={e => setEnvironment(e.target.value)} aria-label="Environment">
-            <option value="">All environments</option><option value="test">Integration</option><option value="prod">Production</option>
-          </select>
-          <select className="glass-input" value={healthFilter} onChange={e => { setHealthFilter(e.target.value); setSelectedId(null); }} aria-label="Pipeline health">
-            <option value="">All health</option><option value="critical">Critical</option><option value="warning">Warning</option><option value="healthy">Healthy</option><option value="unmonitored">Unmonitored</option>
-          </select>
+          {/* environment pills */}
+          {([['', 'All'], ['test', 'Integration'], ['prod', 'Production']] as const).map(([val, lbl]) => (
+            <button key={val} onClick={() => setEnvironment(val)}
+              className={`px-3 py-1 rounded-full text-[11px] font-medium border transition-all ${
+                environment === val
+                  ? 'bg-gray-900 border-gray-900 text-white dark:bg-white/[0.12] dark:border-white/[0.2] dark:text-white'
+                  : 'bg-transparent border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:border-white/[0.07] dark:text-white/45 dark:hover:bg-white/[0.065] dark:hover:text-white/75'
+              }`}>{lbl}</button>
+          ))}
+
+          <div className="h-4 w-px bg-gray-200 dark:bg-white/10 mx-1" />
+
+          {/* health pills */}
+          {([['', 'All health'], ['critical', 'Critical', 'bg-red-400'], ['warning', 'Warning', 'bg-amber-400'], ['healthy', 'Healthy', 'bg-emerald-400'], ['unmonitored', 'Unmonitored', 'bg-gray-400']] as const).map(([val, lbl, dot]) => (
+            <button key={val} onClick={() => { setHealthFilter(val); setSelectedId(null); }}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border transition-all ${
+                healthFilter === val
+                  ? 'bg-gray-900 border-gray-900 text-white dark:bg-white/[0.12] dark:border-white/[0.2] dark:text-white'
+                  : 'bg-transparent border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:border-white/[0.07] dark:text-white/45 dark:hover:bg-white/[0.065] dark:hover:text-white/75'
+              }`}>
+              {dot && <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />}{lbl}
+            </button>
+          ))}
+
+          <div className="h-4 w-px bg-gray-200 dark:bg-white/10 mx-1" />
+
           <select className="glass-input" value={domainFilter} onChange={e => { setDomainFilter(e.target.value); setSelectedId(null); }} aria-label="Data domain">
             <option value="">All domains</option>{domains.map(domain => <option key={domain} value={domain}>{domain}</option>)}
           </select>
-          <select className="glass-input" value={layerFilter} onChange={e => { setLayerFilter(e.target.value); setSelectedId(null); }} aria-label="Medallion layer">
-            <option value="">All layers</option><option value="external">Sources</option><option value="bronze">Bronze</option><option value="silver">Silver</option><option value="gold">Gold</option>
-          </select>
+          {/* layer pills */}
+          {([['', 'All'], ['external', 'Sources'], ['bronze', 'Bronze'], ['silver', 'Silver'], ['gold', 'Gold']] as const).map(([val, lbl]) => (
+            <button key={val} onClick={() => { setLayerFilter(val); setSelectedId(null); }}
+              className={`px-3 py-1 rounded-full text-[11px] font-medium border transition-all ${
+                layerFilter === val
+                  ? 'bg-gray-900 border-gray-900 text-white dark:bg-white/[0.12] dark:border-white/[0.2] dark:text-white'
+                  : 'bg-transparent border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:border-white/[0.07] dark:text-white/45 dark:hover:bg-white/[0.065] dark:hover:text-white/75'
+              }`}>{lbl}</button>
+          ))}
           <select className="glass-input" value={focusDepth} onChange={e => setFocusDepth(Number(e.target.value))} disabled={!selected} aria-label="Graph focus">
             <option value={0}>Full graph</option><option value={1}>Selected + 1 hop</option><option value={2}>Selected + 2 hops</option>
           </select>
@@ -249,7 +277,7 @@ export default function LineagePage() {
           </div>}
         </div>
       </div>
-      {error && <p className="m-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600 dark:border-danger/30 dark:bg-danger/10 dark:text-danger">{error}</p>}
+      {error && <div className="m-4"><ApiError message={error} onRetry={refresh} /></div>}
       <div className="relative flex-1">
         <div className="pointer-events-none absolute left-4 right-4 top-3 z-10 grid grid-cols-4 gap-2 text-center text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-white/35">
           {(['external', 'bronze', 'silver', 'gold'] as const).map(layer => <span key={layer}>{layer === 'external' ? 'Sources' : layer}</span>)}
@@ -283,7 +311,12 @@ export default function LineagePage() {
           onNodeClick={(_, node) => setSelectedId(node.id)} onPaneClick={() => setSelectedId(null)}>
           <Background variant={BackgroundVariant.Dots} gap={24} size={1} color={dark ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.06)'} />
           <Controls showInteractive={false} />
-          <MiniMap pannable zoomable nodeColor={node => node.type === 'pipeline' ? '#7c6cf2' : LAYER_COLOR[node.data.layer ?? 'external']} />
+          <MiniMap pannable zoomable
+            nodeColor={node => node.type === 'pipeline' ? '#7c6cf2' : LAYER_COLOR[node.data.layer ?? 'external']}
+            nodeStrokeColor={dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.3)'}
+            nodeStrokeWidth={2}
+            maskColor={dark ? 'rgba(8,10,18,0.78)' : 'rgba(235,237,245,0.78)'}
+          />
         </ReactFlow>
       </div>
     </div>
