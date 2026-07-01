@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BadgeHelp, Blocks, RefreshCw, Sheet, ShieldCheck, Plug } from 'lucide-react';
 import { api } from '../api';
+import { ApiError } from '../components/ApiError';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,28 +21,7 @@ interface Connection {
   connected_at?: string;
 }
 
-// ─── API calls ────────────────────────────────────────────────────────────────
-
-async function startOAuth(provider: 'google' | 'microsoft'): Promise<void> {
-  const res = await fetch(`/api/connectors/${provider}/auth`, {
-    credentials: 'include',
-  });
-  if (!res.ok) throw new Error(`${res.status}`);
-  const { url } = await res.json();
-  window.location.href = url;
-}
-
-async function startZendeskOAuth(subdomain: string): Promise<void> {
-  const res = await fetch('/api/connectors/zendesk/auth', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ subdomain }),
-  });
-  if (!res.ok) throw new Error(`${res.status}`);
-  const { url } = await res.json();
-  window.location.href = url;
-}
+// ponytail: local startOAuth/startZendeskOAuth removed — use api.startConnectorOAuth / api.startZendeskOAuth
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -174,7 +154,7 @@ function CredentialModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
       } else {
         body = { provider, name, config: { baseUrl: f.baseUrl }, secret: { apiKey: f.apiKey } };
       }
-      await api.createConnector(body);
+      await api.createConnector(body as { provider: string; name: string; config?: Record<string, any>; secret?: Record<string, any> });
       onSaved(); onClose();
     } catch (ex: any) { setErr(ex.message ?? 'Failed to save'); setBusy(false); }
   };
@@ -419,8 +399,8 @@ export function ConnectorsPage() {
     try {
       const list = await api.listConnectors();
       setConnections(list);
-      setCdcResources(current => Object.fromEntries(list.map(c => [c.id, current[c.id] ?? c.cdc?.resources?.join(', ') ?? ''])));
-      setCdcStatus(current => Object.fromEntries(list.map(c => [c.id, current[c.id] ?? c.cdc ?? { enabled: false }])));
+      setCdcResources(current => Object.fromEntries(list.map((c: Connection) => [c.id, current[c.id] ?? c.cdc?.resources?.join(', ') ?? ''])));
+      setCdcStatus(current => Object.fromEntries(list.map((c: Connection) => [c.id, current[c.id] ?? c.cdc ?? { enabled: false }])));
     } catch (e: any) {
       setError(e.message ?? 'Failed to load connectors');
     } finally {
@@ -437,18 +417,19 @@ export function ConnectorsPage() {
 
   const handleConnectGoogle = async () => {
     setActionBusy('google');
-    try { await startOAuth('google'); }
+    try { const res = await api.startConnectorOAuth('google'); window.location.href = res.url; }
     catch (e: any) { setError(e.message); setActionBusy(null); }
   };
 
   const handleConnectMicrosoft = async () => {
     setActionBusy('microsoft');
-    try { await startOAuth('microsoft'); }
+    try { const res = await api.startConnectorOAuth('microsoft'); window.location.href = res.url; }
     catch (e: any) { setError(e.message); setActionBusy(null); }
   };
 
   const handleConnectZendesk = async (subdomain: string) => {
-    await startZendeskOAuth(subdomain);
+    const res = await api.startZendeskOAuth(subdomain);
+    window.location.href = res.url;
   };
 
   const byProvider = (p: Provider) => connections.filter(c => c.provider === p);
@@ -483,11 +464,7 @@ export function ConnectorsPage() {
           </div>
         </div>
 
-        {error && (
-          <div className="mt-4 text-xs text-danger/90 bg-danger/10 border border-danger/30 rounded-lg px-3 py-2">
-            {error}
-          </div>
-        )}
+        {error && <div className="mt-4"><ApiError message={error} onRetry={refresh} /></div>}
       </div>
 
       {/* Connector cards */}

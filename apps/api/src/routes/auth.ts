@@ -1,10 +1,13 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
+import bcrypt from 'bcrypt';
 import { google } from 'googleapis';
 import { pool } from '../db';
 import { signAccessToken, requireAuth } from '../middleware/auth';
 import { auditAs } from '../middleware/audit';
 import { rateLimit, ipKey } from '../middleware/rateLimit';
+
+const PASSWORD_AUTH_ENABLED = process.env.AUTH_PASSWORD_ENABLED === 'true';
 
 export const auth = Router();
 
@@ -355,6 +358,59 @@ auth.get('/oidc/callback', async (req, res) => {
     res.redirect(`${APP_URL}/login?error=oidc_failed`);
   }
 });
+
+// ─── POST /register — email/password registration (AUTH_PASSWORD_ENABLED=true) ──
+auth.post('/register',
+  rateLimit({ scope: 'password-register', keyFn: ipKey, limit: 10, windowSeconds: 60 }),
+  async (req, res) => {
+    if (!PASSWORD_AUTH_ENABLED) return res.status(404).json({ error: 'not found' });
+    const { email, password, tenantName } = req.body ?? {};
+    if (!email || typeof email !== 'string' || !password || password.length < 8) {
+      return res.status(400).json({ error: 'email and a password of at least 8 characters are required' });
+    }
+    const normalizedEmail = email.toLowerCase();
+    const existing = await pool.query(`SELECT id FROM users WHERE email=$1`, [normalizedEmail]);
+    if (existing.rows.length) return res.status(409).json({ error: 'an account with this email already exists' });
+    const hash = await bcrypt.hash(password, 12);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const t = await client.query(`INSERT INTO tenants (name) VALUES ($1) RETURNING id`,
+        [tenantName?.trim() || normalizedEmail.split('@')[0]]);
+      const u = await client.query(
+        `INSERT INTO users (tenant_id, email, password_hash, role, email_verified)
+         VALUES ($1,$2,$3,'owner',true) RETURNING id`,
+        [t.rows[0].id, normalizedEmail, hash]);
+      await client.query('COMMIT');
+      const userId = u.rows[0].id;
+      auditAs(t.rows[0].id, userId, 'auth.register', req.ip ?? null, req.get('user-agent') ?? null, { provider: 'password' });
+      const refresh = await issueRefreshToken(userId);
+      setRefreshCookie(res, refresh);
+      res.status(201).json({ ok: true });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally { client.release(); }
+  });
+
+// ─── POST /login — email/password login (AUTH_PASSWORD_ENABLED=true) ─────────
+auth.post('/login',
+  rateLimit({ scope: 'password-login', keyFn: ipKey, limit: 10, windowSeconds: 60 }),
+  async (req, res) => {
+    if (!PASSWORD_AUTH_ENABLED) return res.status(404).json({ error: 'not found' });
+    const { email, password } = req.body ?? {};
+    if (!email || !password) return res.status(400).json({ error: 'email and password are required' });
+    const { rows } = await pool.query(
+      `SELECT id, tenant_id, password_hash FROM users WHERE email=$1`, [String(email).toLowerCase()]);
+    const user = rows[0];
+    if (!user?.password_hash || !(await bcrypt.compare(password, user.password_hash))) {
+      return res.status(401).json({ error: 'invalid email or password' });
+    }
+    auditAs(user.tenant_id, user.id, 'auth.login', req.ip ?? null, req.get('user-agent') ?? null, { provider: 'password' });
+    const refresh = await issueRefreshToken(user.id);
+    setRefreshCookie(res, refresh);
+    res.json({ ok: true });
+  });
 
 // ─── GET /accept-invite — validate token (used by the /accept-invite UI) ─────
 auth.get('/accept-invite', async (req, res) => {
