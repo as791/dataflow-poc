@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Activity, ArrowDownToLine, Braces, Cable, ChevronDown, ChevronUp,
   Clock, Code2, CreditCard, Database, GitFork, History, LayoutList, Layers3,
@@ -19,6 +19,7 @@ import { useTheme } from '../context/ThemeContext';
 import { MermaidPreview } from '../components/MermaidPreview';
 import { api } from '../api';
 import { ActivityIcon, nodeTypes } from '../components/canvas/FlowNode';
+import { useAiGenerate } from '../hooks/useAiGenerate';
 import { ConfigPanel } from '../components/canvas/ConfigPanel';
 import { ExecutionMonitor } from '../components/canvas/ExecutionMonitor';
 import { definitionToFlow, flowToDefinition } from '../utils/pipelineConvert';
@@ -48,6 +49,7 @@ export default function PipelineCanvasPage() {
   const { catalog, byType } = useCatalog();
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { dark, toggle: toggleTheme } = useTheme();
   const { user } = useAuth();
   const hydrated = useRef<string | null>(null);
@@ -79,8 +81,7 @@ export default function PipelineCanvasPage() {
   const [mermaidDraft, setMermaidDraft] = useState('');
   const [showAI, setShowAI] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiState, setAiState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const { generate: aiGenerate, loading: aiLoading, error: aiError } = useAiGenerate();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [bottomTab, setBottomTab] = useState<BottomTab>('runs');
@@ -100,42 +101,49 @@ export default function PipelineCanvasPage() {
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteMsg, setInviteMsg] = useState('');
 
+  const hydrateFromDefinition = useCallback((def: any, message: string) => {
+    const { nodes: ns, edges: es } = definitionToFlow(def, byType);
+    fitPending.current = true;
+    setNodes(ns); setEdges(es);
+    if (def.name) setName(def.name);
+    if (def.id) setPipelineKey(def.id);
+    if (def.trigger) setTrigger(def.trigger);
+    setPolicy({
+      owner: def.metadata?.owner ?? '', domain: def.metadata?.domain ?? '', tags: (def.metadata?.tags ?? []).join(', '),
+      freshnessMinutes: def.slo?.freshnessMinutes?.toString() ?? '',
+      maxFailureRatePercent: def.slo?.maxFailureRatePercent?.toString() ?? '',
+      maxDurationSeconds: def.slo?.maxDurationMs ? String(def.slo.maxDurationMs / 1000) : '',
+      notificationConnectionId: def.notifications?.connectionId ?? '',
+      minimumSeverity: def.notifications?.minimumSeverity ?? 'critical',
+    });
+    setMsg(message);
+  }, [byType]);
+
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      const rowId = new URLSearchParams(location.search).get('pipeline');
-      const stateDef = rowId ? null : (location.state as any)?.definition;
-      const hydrationKey = rowId ?? (stateDef ? 'generated' : null);
-      if (!hydrationKey || hydrated.current === hydrationKey) return;
-      if (rowId) {
-        setSavedRowId(null); setSelected(null); setSelectedEdge(null);
-        setNodes([]); setEdges([]); setMsg('Loading pipeline…');
-      }
-      const row = rowId ? await api.getPipeline(rowId) : null;
-      const def = stateDef ?? row?.definition;
-      if (!def || cancelled) return;
+    const stateDef = (location.state as any)?.definition;
+    const pipelineId = (location.state as any)?.pipelineId ?? new URLSearchParams(location.search).get('pipeline');
+    const openBackfill = (location.state as any)?.openBackfill === true || new URLSearchParams(location.search).get('backfill') === '1';
+    const hydrationKey = pipelineId ?? (stateDef ? 'generated' : null);
+    if (!hydrationKey || hydrated.current === hydrationKey) return;
+
+    if (stateDef) {
       hydrated.current = hydrationKey;
-      const { nodes: ns, edges: es } = definitionToFlow(def, byType);
-      fitPending.current = true;
-      setNodes(ns); setEdges(es);
-      if (def.name) setName(def.name);
-      if (def.id) setPipelineKey(def.id);
-      if (def.trigger) setTrigger(def.trigger);
-      if (row) {
+      hydrateFromDefinition(stateDef, 'Loaded from AI builder — review and Save');
+      return;
+    }
+    if (pipelineId) {
+      setSavedRowId(null); setSelected(null); setSelectedEdge(null);
+      setNodes([]); setEdges([]); setMsg('Loading pipeline…');
+      api.getPipeline(pipelineId).then((row: any) => {
+        if (cancelled) return;
+        hydrated.current = hydrationKey;
+        hydrateFromDefinition(row.definition, `Loaded v${row.version}`);
         setSavedRowId(row.id);
         setPipelineStage(deriveStage(row.status, row.environment));
-      }
-      setPolicy({
-        owner: def.metadata?.owner ?? '', domain: def.metadata?.domain ?? '', tags: (def.metadata?.tags ?? []).join(', '),
-        freshnessMinutes: def.slo?.freshnessMinutes?.toString() ?? '',
-        maxFailureRatePercent: def.slo?.maxFailureRatePercent?.toString() ?? '',
-        maxDurationSeconds: def.slo?.maxDurationMs ? String(def.slo.maxDurationMs / 1000) : '',
-        notificationConnectionId: def.notifications?.connectionId ?? '',
-        minimumSeverity: def.notifications?.minimumSeverity ?? 'critical',
-      });
-      setMsg(row ? `Loaded v${row.version}` : 'Loaded from AI builder — review and Save');
-    };
-    load().catch((e: any) => setMsg(`Load failed: ${e.message}`));
+        if (openBackfill) { setShowLifecycle(true); openDrawer('lifecycle'); }
+      }).catch((e: any) => { if (!cancelled) setMsg(`Load failed: ${e.message}`); });
+    }
     return () => { cancelled = true; };
   }, [location.search, location.state, byType]);
 
@@ -336,21 +344,20 @@ export default function PipelineCanvasPage() {
 
   const runAI = async () => {
     if (!aiPrompt.trim()) return;
-    setAiLoading(true); setAiState('loading'); setMsg('Generating pipeline');
-    try {
-      const response = await api.generatePipeline(aiPrompt);
-      const def = response.definition ?? response;
+    setMsg('Generating pipeline');
+    const result = await aiGenerate(aiPrompt);
+    if (result) {
+      const def = result.definition;
       const { nodes: ns, edges: es } = definitionToFlow(def, byType);
       fitPending.current = true;
       setNodes(ns); setEdges(es);
       if (def.suggestedName || def.name) setName(def.suggestedName ?? def.name);
       if (def.trigger) setTrigger(def.trigger);
-      setMermaidDraft(response.mermaid ?? definitionToMermaid(def.nodes, def.edges));
-      setBottomTab('mermaid'); setDrawerOpen(true); setAiState('success');
+      setMermaidDraft(result.mermaid ?? definitionToMermaid(def.nodes, def.edges));
+      setBottomTab('mermaid'); setDrawerOpen(true);
       setShowAI(false); setAiPrompt('');
       setMsg('AI pipeline generated. DAG and Mermaid ready.');
-    } catch (e: any) { setAiState('error'); setMsg(`AI failed: ${e.message}`); }
-    finally { setAiLoading(false); }
+    }
   };
 
   const openDrawer = async (tab: BottomTab = 'runs') => {
@@ -490,7 +497,7 @@ export default function PipelineCanvasPage() {
           );
         })}
         <div className="my-1 h-px w-8 bg-gray-200 dark:bg-white/[0.08]" />
-        <button title="AI Builder" onClick={() => { setShowAI(v => !v); setActiveCat(null); setWorkspacePanel(null); }}
+        <button title="Quick AI add" onClick={() => { setShowAI(v => !v); setActiveCat(null); setWorkspacePanel(null); }}
           className={`flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
             showAI ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
           }`}>
@@ -769,12 +776,15 @@ export default function PipelineCanvasPage() {
                 disabled={aiLoading || !aiPrompt.trim()} onClick={runAI}>
                 {aiLoading ? '…' : 'Generate'}
               </button>
+              <button className="glass-btn-ghost text-xs flex-none" onClick={() => navigate('/ai-builder')}>
+                Open full AI Builder →
+              </button>
               <button className="icon-button h-7 w-7 border-transparent bg-transparent flex-none" onClick={() => setShowAI(false)}>
                 <X size={14} />
               </button>
             </div>
-            {aiState === 'error' && <p className="border-t border-red-100 bg-red-50 px-4 py-2 text-[10px] text-red-600 dark:border-red-500/15 dark:bg-red-500/[0.06] dark:text-red-300">{msg}</p>}
-            {aiState === 'loading' && <div className="h-0.5 animate-pulse bg-brand-500" />}
+            {aiError && <p className="border-t border-red-100 bg-red-50 px-4 py-2 text-[10px] text-red-600 dark:border-red-500/15 dark:bg-red-500/[0.06] dark:text-red-300">{aiError}</p>}
+            {aiLoading && <div className="h-0.5 animate-pulse bg-brand-500" />}
           </div>
         </div>
       )}

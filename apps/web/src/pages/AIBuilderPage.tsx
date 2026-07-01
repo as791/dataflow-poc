@@ -3,8 +3,9 @@ import { ArrowRight, Code2, Sparkles, WandSparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { mermaidToDefinition } from '@dataflow/shared';
 import { useCatalog } from '../context/CatalogContext';
-import { api } from '../api';
 import { MermaidPreview } from '../components/MermaidPreview';
+import { ApiError } from '../components/ApiError';
+import { useAiGenerate } from '../hooks/useAiGenerate';
 
 interface Definition {
   nodes: any[]; edges: any[]; trigger: any; suggestedName?: string;
@@ -17,23 +18,22 @@ export default function AIBuilderPage() {
   const [mermaid, setMermaid] = useState('');
   const [definition, setDefinition] = useState<Definition | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState('');
+  const [statusMsg, setStatusMsg] = useState('');
+  const { generate: aiGenerate, refine: aiRefine, loading: busy, error: aiError } = useAiGenerate();
 
   const canOpen = !!definition?.nodes?.length;
 
-  const generate = async (refine: boolean) => {
-    setBusy(true); setMsg(refine ? 'Refining…' : 'Generating…');
-    try {
-      const r = refine && definition
-        ? await api.refinePipeline(definition, prompt)
-        : await api.generatePipeline(prompt);
-      setMermaid(r.mermaid);
-      setDefinition(r.definition);
+  const generate = async (doRefine: boolean) => {
+    setStatusMsg(doRefine ? 'Refining…' : 'Generating…');
+    const result = doRefine && definition
+      ? await aiRefine(definition, prompt)
+      : await aiGenerate(prompt);
+    if (result) {
+      setMermaid(result.mermaid);
+      setDefinition(result.definition);
       setWarnings([]);
-      setMsg(`Generated ${r.definition.nodes.length} node(s)`);
-    } catch (e: any) { setMsg(`Failed: ${e.message}`); }
-    finally { setBusy(false); }
+      setStatusMsg(`Generated ${result.definition.nodes.length} node(s)`);
+    }
   };
 
   const onMermaidChange = (src: string) => {
@@ -77,7 +77,7 @@ export default function AIBuilderPage() {
             Refine
           </button>
         </div>
-        <span className="text-[11px] text-gray-500 dark:opacity-70">{msg}</span>
+        {aiError ? <ApiError message={aiError} /> : <span className="text-[11px] text-gray-500 dark:opacity-70">{statusMsg}</span>}
 
         {warnings.length > 0 && (
           <div className="glass-panel p-2 mt-1">

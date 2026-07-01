@@ -101,7 +101,7 @@ export default function MonitoringPage() {
     { label: 'Success rate', value: data.summary.successRate == null ? '—' : `${data.summary.successRate}%`, icon: CheckCircle2, tone: 'text-emerald-500' },
     { label: 'Failures', value: data.summary.failed, icon: AlertTriangle, tone: 'text-red-500' },
     { label: 'Average duration', value: duration(data.summary.avgDurationMs), icon: Clock3, tone: 'text-amber-500' },
-    { label: 'SLO breaches', value: data.pipelines.filter(p => p.health === 'critical' || p.health === 'warning').length, icon: AlertTriangle, tone: 'text-red-500' },
+    { label: 'SLO breaches', value: data.pipelines.filter(p => p.health === 'critical' || p.health === 'warning').length, icon: AlertTriangle, tone: 'text-red-500', title: 'SLO breaches include availability SLOs (e.g. pipeline-not-run-in-N-hours) evaluated independently of the run count window' },
     { label: 'Quality rejects', value: data.quality.failedRows, icon: AlertTriangle, tone: data.quality.failedRows ? 'text-red-500' : 'text-emerald-500' },
   ] : [];
 
@@ -121,7 +121,7 @@ export default function MonitoringPage() {
       {error && <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600 dark:border-danger/30 dark:bg-danger/10 dark:text-danger">{error}</p>}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        {cards.map(({ label, value, icon: Icon, tone }) => <div key={label} className="glass-card p-4">
+        {cards.map(({ label, value, icon: Icon, tone, title }: any) => <div key={label} className="glass-card p-4" title={title}>
           <div className="flex items-center justify-between"><p className="text-xs text-gray-500 dark:text-white/45">{label}</p><Icon size={16} className={tone} /></div>
           <p className="mt-2 text-2xl font-semibold text-gray-900 dark:text-white/90">{value}</p>
         </div>)}

@@ -42,15 +42,7 @@ app.get('/metrics', async (_req, res) => {
 });
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
-// Dev-only: set a seeded refresh cookie so QA can bypass Google OAuth
-if (process.env.NODE_ENV !== 'production') {
-  app.get('/dev/login', (_req, res) => {
-    const token = process.env.DEV_REFRESH_TOKEN ?? '';
-    if (!token) return res.status(400).json({ error: 'DEV_REFRESH_TOKEN not set' });
-    res.cookie('refresh_token', token, { httpOnly: true, path: '/api/auth', sameSite: 'lax' });
-    res.redirect('http://localhost:3002');
-  });
-}
+// ponytail: /dev/login removed — use AUTH_PASSWORD_ENABLED=true + /api/auth/register for local dev
 
 // ── Auth + webhook trigger routes (public — auth handles its own creds,
 //    webhooks use HMAC signature) ───────────────────────────────────────────

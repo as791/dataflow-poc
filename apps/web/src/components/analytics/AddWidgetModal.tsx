@@ -15,7 +15,7 @@ export function AddWidgetModal({ datasets, onClose, onAdd, schema }: Props) {
   const [fields, setFields] = useState<SchemaField[]>([]);
   const [xCol, setXCol] = useState('');
   const [yCol, setYCol] = useState('');
-  const [agg, setAgg] = useState<QuerySpec['agg']>('count');
+  const [agg, setAgg] = useState<'count' | 'sum' | 'avg' | 'min' | 'max' | 'none'>('count');
   const [loadingSchema, setLoadingSchema] = useState(false);
   const [schemaErr, setSchemaErr] = useState<string | null>(null);
 
@@ -30,19 +30,24 @@ export function AddWidgetModal({ datasets, onClose, onAdd, schema }: Props) {
   }, [dataset, schema]);
 
   const handleAdd = () => {
+    const spec: QuerySpec = chartType === 'table'
+      ? { select: [xCol, ...(yCol ? [yCol] : [])], limit: 50 }
+      : agg === 'none'
+        ? { select: [xCol, yCol], limit: 50 }
+        : { groupBy: [xCol], aggregate: { field: yCol, fn: agg as 'count' | 'sum' | 'avg' | 'min' | 'max' }, limit: 50 };
     onAdd({
       id: `w_${Date.now()}`,
       layout: { x: 0, y: Infinity, w: 4, h: 4 },
       type: chartType,
       dataset,
       title,
-      spec: { x_column: xCol, y_column: yCol, agg, limit: 50 },
+      spec,
     });
     onClose();
   };
 
   const chartTypes: ChartType[] = ['bar', 'line', 'pie', 'table'];
-  const aggOptions: QuerySpec['agg'][] = ['count', 'sum', 'avg', 'min', 'max', 'none'];
+  const aggOptions: Array<'count' | 'sum' | 'avg' | 'min' | 'max' | 'none'> = ['count', 'sum', 'avg', 'min', 'max', 'none'];
   const cols = fields.map(f => f.name);
 
   return (
@@ -109,7 +114,7 @@ export function AddWidgetModal({ datasets, onClose, onAdd, schema }: Props) {
           {chartType !== 'table' && (
             <div>
               <label className="glass-label">Aggregation</label>
-              <select className="glass-select w-full" value={agg} onChange={e => setAgg(e.target.value as QuerySpec['agg'])}>
+              <select className="glass-select w-full" value={agg} onChange={e => setAgg(e.target.value as 'count' | 'sum' | 'avg' | 'min' | 'max' | 'none')}>
                 {aggOptions.map(a => <option key={a} value={a}>{a}</option>)}
               </select>
             </div>
