@@ -1,0 +1,26 @@
+# Code owners are automatically requested for review on PRs that touch their files.
+# Order matters: last matching rule wins.
+
+# Default: repo owner reviews everything
+*                           @aryaman-sinha
+
+# Frontend
+apps/web/                   @aryaman-sinha
+
+# Go backend
+apps/workflow-go/           @aryaman-sinha
+
+# Connectors (invite connector authors here as the ecosystem grows)
+connectors/                 @aryaman-sinha
+
+# Shared packages
+packages/                   @aryaman-sinha
+
+# CI/CD and infra
+.github/                    @aryaman-sinha
+docker-compose*.yml         @aryaman-sinha
+scripts/                    @aryaman-sinha
+
+# Security-sensitive files — always require owner review
+SECURITY.md                 @aryaman-sinha
+apps/workflow-go/internal/crypto/  @aryaman-sinha

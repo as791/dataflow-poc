@@ -1,18 +1,48 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 
-interface ThemeCtx { dark: boolean; toggle: () => void }
-const ThemeContext = createContext<ThemeCtx>({ dark: false, toggle: () => {} });
+export type ThemeMode = 'dark' | 'light' | 'system';
+
+interface ThemeCtx {
+  dark: boolean;
+  mode: ThemeMode;
+  setMode: (m: ThemeMode) => void;
+  toggle: () => void;
+}
+
+const ThemeContext = createContext<ThemeCtx>({ dark: false, mode: 'system', setMode: () => {}, toggle: () => {} });
+
+function systemDark() { return window.matchMedia('(prefers-color-scheme: dark)').matches; }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [dark, setDark] = useState(() => localStorage.getItem('theme') === 'dark');
+  const [mode, setModeState] = useState<ThemeMode>(() => {
+    const v = localStorage.getItem('theme');
+    return v === 'dark' || v === 'light' || v === 'system' ? v : 'system';
+  });
+
+  const dark = mode === 'system' ? systemDark() : mode === 'dark';
+
+  const setMode = (m: ThemeMode) => {
+    localStorage.setItem('theme', m);
+    setModeState(m);
+  };
+
+  const toggle = () => setMode(mode === 'dark' ? 'light' : 'dark');
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
-    localStorage.setItem('theme', dark ? 'dark' : 'light');
   }, [dark]);
 
+  // Re-apply when OS preference changes (only when mode === 'system')
+  useEffect(() => {
+    if (mode !== 'system') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const h = () => document.documentElement.classList.toggle('dark', mq.matches);
+    mq.addEventListener('change', h);
+    return () => mq.removeEventListener('change', h);
+  }, [mode]);
+
   return (
-    <ThemeContext.Provider value={{ dark, toggle: () => setDark(d => !d) }}>
+    <ThemeContext.Provider value={{ dark, mode, setMode, toggle }}>
       {children}
     </ThemeContext.Provider>
   );

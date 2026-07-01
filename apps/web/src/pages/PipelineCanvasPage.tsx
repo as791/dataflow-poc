@@ -81,7 +81,7 @@ export default function PipelineCanvasPage() {
   const [mermaidDraft, setMermaidDraft] = useState('');
   const [showAI, setShowAI] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
-  const { generate: aiGenerate, loading: aiLoading, error: aiError } = useAiGenerate();
+  const { generate: aiGenerate, refine: aiRefine, loading: aiLoading, error: aiError } = useAiGenerate();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [bottomTab, setBottomTab] = useState<BottomTab>('runs');
@@ -344,19 +344,37 @@ export default function PipelineCanvasPage() {
 
   const runAI = async () => {
     if (!aiPrompt.trim()) return;
-    setMsg('Generating pipeline');
-    const result = await aiGenerate(aiPrompt);
+    const hasExisting = nodes.length > 0;
+    setMsg(hasExisting ? 'Refining pipeline…' : 'Generating pipeline…');
+
+    // Preserve existing node configs before any updates
+    const prevData = new Map(nodes.map(n => [n.id, n.data]));
+
+    const result = hasExisting
+      ? await aiRefine(buildDefinition(), aiPrompt)
+      : await aiGenerate(aiPrompt);
+
     if (result) {
       const def = result.definition;
-      const { nodes: ns, edges: es } = definitionToFlow(def, byType);
+      const flow = definitionToFlow(def, byType);
+      // Merge: keep config/ingestion for nodes that survived the update
+      flow.nodes.forEach(n => {
+        const prev = prevData.get(n.id);
+        if (prev) {
+          n.data.config = prev.config;
+          if (prev.ingestion) n.data.ingestion = prev.ingestion;
+        }
+      });
       fitPending.current = true;
-      setNodes(ns); setEdges(es);
-      if (def.suggestedName || def.name) setName(def.suggestedName ?? def.name);
-      if (def.trigger) setTrigger(def.trigger);
+      setNodes(flow.nodes); setEdges(flow.edges);
+      if (!hasExisting) {
+        if (def.suggestedName || def.name) setName(def.suggestedName ?? def.name);
+        if (def.trigger) setTrigger(def.trigger);
+      }
       setMermaidDraft(result.mermaid ?? definitionToMermaid(def.nodes, def.edges));
       setBottomTab('mermaid'); setDrawerOpen(true);
       setShowAI(false); setAiPrompt('');
-      setMsg('AI pipeline generated. DAG and Mermaid ready.');
+      setMsg(hasExisting ? 'Pipeline refined. Review changes in Mermaid.' : 'AI pipeline generated. DAG and Mermaid ready.');
     }
   };
 
@@ -435,8 +453,8 @@ export default function PipelineCanvasPage() {
         <MiniMap position="bottom-left" pannable zoomable
           style={{ left: 126, bottom: drawerOpen ? drawerOffset : 12, width: 190, height: 112 }}
           nodeColor={n => byType[n.data.activityType]?.color ?? '#6965db'}
-          nodeStrokeColor={dark ? '#ffffff' : '#111827'} nodeStrokeWidth={2}
-          maskColor={dark ? 'rgba(8,10,16,.7)' : 'rgba(245,245,245,.7)'} />
+          nodeStrokeColor={dark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.25)'} nodeStrokeWidth={2}
+          maskColor={dark ? 'rgba(8,10,18,0.78)' : 'rgba(235,237,245,0.78)'} />
       </ReactFlow>
 
       {contextAdd && (
@@ -784,12 +802,12 @@ export default function PipelineCanvasPage() {
               <Sparkles size={16} className="text-brand-500 flex-none" />
               <input
                 className="flex-1 bg-transparent text-sm text-gray-900 dark:text-white/90 outline-none placeholder-gray-400 dark:placeholder-white/30"
-                placeholder="Describe your pipeline… e.g. Sync Zendesk tickets to Postgres"
+                placeholder={nodes.length > 0 ? 'Describe changes… e.g. Add a filter step before the Postgres sink' : 'Describe your pipeline… e.g. Sync Zendesk tickets to Postgres'}
                 value={aiPrompt} onChange={e => setAiPrompt(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && runAI()} autoFocus />
               <button className="glass-btn-primary text-xs flex-none"
                 disabled={aiLoading || !aiPrompt.trim()} onClick={runAI}>
-                {aiLoading ? '…' : 'Generate'}
+                {aiLoading ? '…' : nodes.length > 0 ? 'Refine' : 'Generate'}
               </button>
               <button className="glass-btn-ghost text-xs flex-none" onClick={() => navigate('/ai-builder')}>
                 Open full AI Builder →

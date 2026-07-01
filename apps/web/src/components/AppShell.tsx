@@ -1,5 +1,5 @@
 import {
-  BarChart3, Cable, CreditCard, History, LogOut, Menu, Moon, Network, Rocket, Sparkles, Sun, Users, Workflow, Gauge, X,
+  BarChart3, Cable, CreditCard, History, LogOut, Menu, Milestone, Moon, Network, Settings, Sun, Users, Workflow, Gauge, X,
 } from 'lucide-react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
@@ -8,8 +8,7 @@ import { useTheme } from '../context/ThemeContext';
 
 const NAV = [
   { to: '/pipelines',  label: 'Pipelines',  icon: Workflow,  end: false },
-  { to: '/ai-builder', label: 'AI Builder', icon: Sparkles },
-  { to: '/lifecycle',  label: 'Lifecycle',  icon: Rocket },
+  { to: '/lifecycle',  label: 'Lifecycle',  icon: Milestone },
   { to: '/runs',       label: 'Runs',       icon: History },
   { to: '/monitoring', label: 'Monitoring', icon: Gauge },
   { to: '/lineage',    label: 'Lineage',    icon: Network },
@@ -30,6 +29,8 @@ const PAGE_META: Record<string, { title: string; eyebrow: string }> = {
   '/analytics':  { title: 'Analytics',   eyebrow: 'Explore outcomes' },
   '/team':       { title: 'Team',        eyebrow: 'Workspace access' },
   '/billing':    { title: 'Billing',     eyebrow: 'Usage & plan' },
+  '/settings':   { title: 'Settings',    eyebrow: 'Preferences' },
+  '/profile':    { title: 'Profile',     eyebrow: 'Your account' },
 };
 
 export function AppShell() {
@@ -105,18 +106,37 @@ export function AppShell() {
             hover:bg-gray-100 dark:hover:bg-white/[0.08] hover:text-gray-700 dark:hover:text-white transition-all">
           {dark ? <Sun size={15} /> : <Moon size={15} />}
         </button>
-        <button title={user?.email}
-          onClick={async () => { await logout(); navigate('/login', { replace: true }); }}
-          className="relative flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 dark:border-white/[0.1]
-            bg-gray-50 dark:bg-white/[0.06] text-[11px] font-semibold text-gray-600 dark:text-white/70
-            hover:border-gray-300 dark:hover:border-white/20 hover:text-gray-900 dark:hover:text-white">
+        <NavLink to="/settings" title="Settings"
+          className={({ isActive }) =>
+            `group relative flex h-9 w-9 items-center justify-center rounded-[10px] border transition-all ${
+              isActive
+                ? 'border-brand-300/20 bg-brand-500/15 text-brand-500 dark:text-brand-300'
+                : 'border-transparent text-gray-400 dark:text-white/30 hover:bg-gray-100 dark:hover:bg-white/[0.08] hover:text-gray-700 dark:hover:text-white'
+            }`
+          }>
+          <Settings size={15} />
+          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">
+            Settings
+          </span>
+        </NavLink>
+        <NavLink to="/profile" title={user?.email ?? 'Profile'}
+          className={({ isActive }) =>
+            `group relative flex h-9 w-9 items-center justify-center rounded-full border text-[11px] font-semibold transition-all ${
+              isActive
+                ? 'border-brand-400/40 bg-brand-500/15 text-brand-500 dark:text-brand-300'
+                : 'border-gray-200 dark:border-white/[0.1] bg-gray-50 dark:bg-white/[0.06] text-gray-600 dark:text-white/70 hover:border-gray-300 dark:hover:border-white/20 hover:text-gray-900 dark:hover:text-white'
+            }`
+          }>
           {initials}
           <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white dark:border-[#0a0c12] bg-emerald-400" />
-        </button>
+          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">
+            Profile
+          </span>
+        </NavLink>
         <button onClick={async () => { await logout(); navigate('/login', { replace: true }); }}
           title="Sign out"
           className="flex h-9 w-9 items-center justify-center rounded-[10px] border-transparent
-            text-gray-400 dark:text-white/30 hover:text-gray-700 dark:hover:text-white transition-all">
+            text-gray-400 dark:text-white/30 hover:text-red-500 dark:hover:text-red-400 transition-all">
           <LogOut size={15} />
         </button>
       </aside>
