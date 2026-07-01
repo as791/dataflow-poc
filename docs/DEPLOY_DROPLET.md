@@ -29,9 +29,17 @@ alone would not protect published ports.
 
 ## Create a droplet
 
-Prereqs: [doctl](https://docs.digitalocean.com/reference/doctl/how-to/install/)
-authenticated (`doctl auth init`), an SSH key uploaded to DO
-(`doctl compute ssh-key list`), and a domain you control.
+Prereqs: an SSH key uploaded to your DO account
+(`doctl compute ssh-key list` or the control panel) and a domain you control.
+
+**From GitHub (recommended):** add the `DIGITALOCEAN_ACCESS_TOKEN` repository
+secret (a DO API token with write scope), then run the **Provision Droplet**
+workflow from the Actions tab with your domain and SSH key ID. The run summary
+prints the IP and next steps.
+
+**From your machine:** with
+[doctl](https://docs.digitalocean.com/reference/doctl/how-to/install/)
+authenticated (`doctl auth init`):
 
 ```bash
 ./deploy/droplet/deploy.sh create \
@@ -60,13 +68,14 @@ From your machine:
 ./deploy/droplet/deploy.sh update --host <ip> --ref main
 ```
 
-Or from GitHub: the **Deploy to Droplet** workflow (`workflow_dispatch`) runs
-the same update over SSH. Configure two repository secrets:
+Or from GitHub: the **Deploy to Droplet** workflow (`workflow_dispatch`)
+resolves the droplet IP by name through doctl and runs the same update over
+SSH. Configure two repository secrets:
 
 | Secret | Value |
 |---|---|
-| `DROPLET_HOST` | droplet IP or hostname |
-| `DROPLET_SSH_KEY` | private key matching the `--ssh-key` used at create time |
+| `DIGITALOCEAN_ACCESS_TOKEN` | DO API token (also used by Provision Droplet) |
+| `DROPLET_SSH_KEY` | private key matching the SSH key used at create time |
 
 ## Reaching internal services
 

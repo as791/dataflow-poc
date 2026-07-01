@@ -1,10 +1,10 @@
-# Manual deploy to the DigitalOcean droplet provisioned by
-# deploy/droplet/deploy.sh. Mirrors that script's `update` mode so a deploy
-# can be triggered from the Actions tab without a local doctl/ssh setup.
+# Manual deploy to the DigitalOcean droplet created by the Provision Droplet
+# workflow (or deploy/droplet/deploy.sh). Resolves the droplet's IP through
+# doctl by name, then updates the stack over SSH.
 #
 # Required repository secrets:
-#   DROPLET_HOST      droplet IP or hostname
-#   DROPLET_SSH_KEY   private key whose public half was passed to `create`
+#   DIGITALOCEAN_ACCESS_TOKEN   DO API token (read is enough here)
+#   DROPLET_SSH_KEY             private key whose public half is on the droplet
 name: Deploy to Droplet
 
 on:
@@ -14,6 +14,10 @@ on:
         description: Git ref to deploy
         required: true
         default: main
+      name:
+        description: Droplet name
+        required: true
+        default: dataflow
 
 concurrency:
   group: deploy-droplet
@@ -24,10 +28,21 @@ jobs:
     runs-on: ubuntu-latest
     environment: droplet
     steps:
+      - uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Resolve droplet IP
+        id: droplet
+        run: |
+          IP=$(doctl compute droplet get "${{ inputs.name }}" --format PublicIPv4 --no-header)
+          [ -n "$IP" ] || { echo "droplet '${{ inputs.name }}' not found" >&2; exit 1; }
+          echo "ip=$IP" >> "$GITHUB_OUTPUT"
+
       - name: Deploy over SSH
         env:
           SSH_KEY: ${{ secrets.DROPLET_SSH_KEY }}
-          HOST: ${{ secrets.DROPLET_HOST }}
+          HOST: ${{ steps.droplet.outputs.ip }}
           REF: ${{ inputs.ref }}
         run: |
           mkdir -p ~/.ssh
@@ -40,3 +55,4 @@ jobs:
              git checkout --detach FETCH_HEAD
              docker compose -f docker-compose.yml -f deploy/droplet/docker-compose.droplet.yml up -d --build
              docker image prune -f"
+          echo "✓ deployed $REF to $HOST" >> "$GITHUB_STEP_SUMMARY"

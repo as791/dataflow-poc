@@ -1,0 +1,90 @@
+# Create the DataFlow droplet from the Actions tab — the GitHub-hosted
+# equivalent of `deploy/droplet/deploy.sh create`, using DigitalOcean's
+# official doctl action.
+#
+# Required repository secrets:
+#   DIGITALOCEAN_ACCESS_TOKEN   DO API token with write scope
+#
+# The SSH key must already be uploaded to the DO account; find its ID with
+# `doctl compute ssh-key list` or in the DO control panel.
+name: Provision Droplet
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: Public hostname (A record will point at the droplet)
+        required: true
+      ssh_key:
+        description: DigitalOcean SSH key ID or fingerprint
+        required: true
+      name:
+        description: Droplet name
+        required: true
+        default: dataflow
+      region:
+        description: DO region slug
+        required: true
+        default: blr1
+      size:
+        description: Droplet size slug
+        required: true
+        default: s-4vcpu-8gb
+      ref:
+        description: Git ref the droplet deploys on first boot
+        required: true
+        default: main
+
+concurrency:
+  group: provision-droplet
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    environment: droplet
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Render cloud-init
+        env:
+          DOMAIN: ${{ inputs.domain }}
+          REF: ${{ inputs.ref }}
+        run: |
+          sed -e "s|__DATAFLOW_DOMAIN__|$DOMAIN|g" \
+              -e "s|__REPO_URL__|https://github.com/${{ github.repository }}.git|g" \
+              -e "s|__GIT_REF__|$REF|g" \
+              deploy/droplet/cloud-init.yml > user-data.yml
+
+      - name: Create droplet
+        run: |
+          doctl compute droplet create "${{ inputs.name }}" \
+            --image ubuntu-24-04-x64 \
+            --size "${{ inputs.size }}" \
+            --region "${{ inputs.region }}" \
+            --ssh-keys "${{ inputs.ssh_key }}" \
+            --user-data-file user-data.yml \
+            --tag-name dataflow \
+            --wait \
+            --format ID,Name,PublicIPv4
+
+      - name: Next steps
+        run: |
+          IP=$(doctl compute droplet get "${{ inputs.name }}" --format PublicIPv4 --no-header)
+          {
+            echo "## Droplet created"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| IP | \`$IP\` |"
+            echo "| Domain | \`${{ inputs.domain }}\` |"
+            echo
+            echo "1. Point an **A record** for \`${{ inputs.domain }}\` at \`$IP\`."
+            echo "2. Provisioning takes ~10 min: \`ssh root@$IP tail -f /var/log/cloud-init-output.log\`"
+            echo "3. Then open https://${{ inputs.domain }}"
+            echo "4. Later deploys: run the **Deploy to Droplet** workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
