@@ -59,7 +59,7 @@ export default function AIBuilderPage() {
   }, [definition]);
 
   return (
-    <div className="grid h-[calc(100vh-64px)]" style={{ gridTemplateColumns: '340px 1fr 260px' }}>
+    <div className="grid h-full" style={{ gridTemplateColumns: '340px 1fr 260px' }}>
       {/* ── Prompt panel ── */}
       <div className="flex flex-col gap-3 overflow-auto border-r border-gray-200 dark:border-white/[0.07] bg-gray-50/80 dark:bg-white/[0.018] p-5">
         <span className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl border border-brand-300/20 bg-brand-500/10 text-brand-500 dark:text-brand-300">

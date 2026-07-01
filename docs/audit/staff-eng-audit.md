@@ -1,5 +1,7 @@
 # Staff Engineer Audit — dataflow-poc frontend/backend integration
 
+> Archived pre-ADR-002 audit; referenced TypeScript backend paths were removed.
+
 Scope: `apps/web/src/pages/**`, `apps/web/src/components/**`, matched against `apps/api/src/routes/**`. Read-only audit, no code changes.
 
 ## Bugs Found

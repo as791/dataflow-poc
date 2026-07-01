@@ -3,8 +3,8 @@
 Self-serve, open-core data pipeline platform — an n8n-shaped product on a
 Temporal-durable engine. Build DAG workflows visually **or** describe them in
 natural language and let a local LLM draft them. A generic Go Temporal workflow
-interprets every pipeline while TypeScript activity workers run connectors,
-transforms, and sinks.
+interprets every pipeline while Go activity workers run connectors, transforms,
+and sinks. The HTTP control plane is Go as well.
 
 **What sets it apart from n8n:**
 - **AI + Mermaid authoring.** Describe a pipeline in English → a local **Ollama**
@@ -32,8 +32,8 @@ The UI (React Flow) emits a frozen `PipelineDefinition` JSON. The API stores it
 as an immutable version and registers its trigger (Temporal Schedule for cron,
 HTTP route for webhook, Redis subscriber for events). Every firing starts the Go
 `DynamicDAGWorkflow` with the **full definition as input** — replay-deterministic
-by construction. Go workflow workers poll `dynamic-dag-<env>` while TypeScript
-activity workers poll `dynamic-activities-<env>`. The workflow topologically
+by construction. Go workflow workers poll `dynamic-dag-<env>` while Go activity
+workers poll `dynamic-activities-<env>`. The workflow topologically
 sorts the DAG into parallel levels and dispatches each node by stable activity
 name. Source nodes merge up to 50 cursor pages per execution and persist
 progress in Postgres (`connector_state`). Payloads travel as encrypted
@@ -69,7 +69,7 @@ Kafka producer retries are idempotent within a producer session; pipeline
 re-runs can still re-emit messages, so downstream consumers should deduplicate
 by the configured message key when exactly-once business effects are required.
 Run the broker conformance smoke with
-`KAFKA_TEST_BROKERS=localhost:9092 npm -w apps/worker run test:kafka`; it verifies
+`cd apps/workflow-go && go test ./internal/connectors`; the Compose smoke verifies
 produce, bounded paging, and offset resume against a real Kafka-compatible broker.
 
 Monitoring persists deduplicated SLO incidents in `pipeline_alerts`; operators
@@ -121,7 +121,7 @@ keypair, and random encryption keys, then starts the stack (idempotent):
 DataFlow is open core. Everything that makes it a product — visual + AI
 authoring, all connectors, test/prod environments, execution, observability — is
 free in the **community** edition. Set `EDITION=enterprise` to unlock governance
-features behind the seam in `apps/api/src/lib/edition.ts` (audit-log export
+features behind the seam in `apps/workflow-go/internal/api/routes_core.go` (audit-log export
 today; SSO/SAML and advanced RBAC are scaffolded). `GET /api/edition` reports the
 active edition and feature flags.
 
@@ -138,18 +138,17 @@ or curl access, add `ports: ["4000:4000"]` to the `api` service, or run the
 smoke test from inside the network:
 
 ```bash
-docker compose exec api sh -c "apt-get install -y curl >/dev/null 2>&1; \
+docker compose exec api sh -c "apk add --no-cache curl >/dev/null 2>&1; \
   curl -s http://localhost:4000/health"
 ```
 
-Startup ordering is enforced: Postgres healthcheck gates Temporal; a
-`wait-for.sh` wrapper inside api/worker images blocks until `temporal:7233`
-accepts connections (auto-setup takes ~30s on first boot).
+Startup ordering is enforced by service health checks and the one-shot Temporal
+namespace initializer.
 
 Scale workers horizontally:
 
 ```bash
-docker compose up -d --scale worker=3
+docker compose up -d --scale worker-test=3 --scale worker-prod=3
 ```
 
 Tear down completely (including pipeline data):
@@ -165,9 +164,10 @@ For fast iteration on app code with infra in containers:
 ```bash
 docker compose up -d postgres redis temporal temporal-ui otel-collector prometheus grafana jaeger
 npm install
-npm run dev:worker   # terminal 1
-npm run dev:api      # terminal 2
-npm run dev:web      # terminal 3 → http://localhost:3000
+npm run dev:workflow-worker   # terminal 1
+npm run dev:activity-worker   # terminal 2
+npm run dev:api               # terminal 3
+npm run dev:web               # terminal 4 → http://localhost:3000
 ```
 
 (Point `.env` at `localhost` ports in this mode: `DATABASE_URL=postgres://dataflow:dataflow@localhost:5433/dataflow`, etc. Add `ports: ["5433:5432"]` to postgres and `ports: ["7233:7233"]` to temporal in the compose file.)
@@ -181,7 +181,7 @@ Each source node declares `ingestion.mode`:
   Sheets row-hash diffing, custom API watermark params.
 - **backfill** — pages from `backfillStart` until the connector reports
   `end of stream`, then **automatically anchors the incremental cursor** at
-  that moment (see `gdrive.ts`) — no gap, no overlap.
+  that moment — no gap, no overlap.
 - Cursor checkpoints commit to `connector_state` only after the full DAG
   succeeds. Failed transforms or sinks therefore cannot skip source rows.
 
@@ -193,21 +193,11 @@ Each partition handles at most 50 × 10,000 source rows; split denser ranges
 before retrying. Use idempotent sink keys because reprocessing intentionally
 re-emits historical records.
 
-## Dev → prod: the actor model with Build IDs
+## Deployment model
 
-Every worker image is stamped with a `BUILD_ID` (git SHA) and registers with
-`useVersioning: true`. Each workflow execution is an isolated actor **pinned to
-the build that started it**:
-
-```bash
-docker build -f apps/worker/Dockerfile --build-arg BUILD_ID=$(git rev-parse --short HEAD) -t worker:$SHA .
-# run the new image alongside the old one, then atomically promote:
-node scripts/promote-build.js $SHA
-```
-
-New executions route to the new build; in-flight executions keep replaying on
-the old image until they drain (then it can be retired). Rollback = promote the
-previous build ID. A bad deploy can never corrupt a running workflow's replay.
+This repository is an unused POC, so backend releases use direct image
+replacement. Workflow and activity queues remain separate, but there are no
+proxy layers, dual queues, runtime cutover flags, or Build-ID promotion scripts.
 
 ## Observability
 
@@ -215,7 +205,7 @@ previous build ID. A bad deploy can never corrupt a running workflow's replay.
   executions/min, node p95 duration, node failures, records ingested per
   connector, cursor lag.
 - **Traces** (OTel → Jaeger): API request → workflow → each activity.
-- **Logs**: structured pino JSON from API and worker.
+- **Logs**: structured `slog` JSON from the API and workers.
 - **Live execution state**: the UI polls the workflow's `status` query handler —
   node-by-node status painted directly on the canvas; pause/resume/cancel
   buttons send Temporal signals.
@@ -228,24 +218,23 @@ previous build ID. A bad deploy can never corrupt a running workflow's replay.
 ## Repo layout
 
 ```
-packages/shared      PipelineDefinition, DataRef, NodeResult types
-apps/workflow-go     Go Temporal workflow state machine + payload codec
-apps/api             control plane: pipeline CRUD, triggers, executions
-apps/worker          TypeScript Temporal activity workers + connector catalog
+packages/shared      Frontend catalog, Mermaid, lineage, and TypeScript types
+apps/workflow-go     Go API, activity worker, workflow worker, and connectors
 apps/web             React Flow self-serve builder + live monitor
 db/init.sql          control plane + cursor state + data plane tables
 observability/       otel-collector, prometheus, grafana provisioning
-scripts/             promote-build.js (build ID promotion), smoke-test.sh
+scripts/             bootstrap, development startup, backup, and smoke tests
 examples/            ready-to-import pipeline definitions
 ```
 
 ## Production gaps (deliberate POC cuts)
 
-- Credentials are env vars → move to the envelope-encrypted vault (KMS + per-user DEK)
-  from the main design doc.
+- Connector and OAuth secrets are encrypted in PostgreSQL, but production
+  master keys should live in a managed KMS.
 - Per-tenant customer-managed payload keys are not implemented.
 - Configure S3-compatible DataRefs plus bucket lifecycle/retention in production;
   Postgres remains the zero-config development fallback.
-- Event trigger uses Redis pub/sub → Kafka with consumer groups + DLQ.
+- Event triggers use Redis pub/sub and Streams; production should use a durable
+  multi-node event service with a DLQ.
 - Docker Compose is a development topology; production Cassandra,
   Elasticsearch, and Temporal require multi-node deployment and backups.

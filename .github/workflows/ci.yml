@@ -14,27 +14,24 @@ jobs:
         with:
           node-version: '20'
           cache: npm
-      # npm ci runs the shared + connector-sdk `prepare` builds, so their dist
-      # exists before the app typechecks resolve @dataflow/* .d.ts files.
       - run: npm ci
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/workflow-go/go.mod
+          cache-dependency-path: apps/workflow-go/go.sum
 
       - name: Unit tests — shared (mermaid round-trip)
         run: npm -w @dataflow/shared test
-      - name: Unit tests — connector-sdk (executor + registry)
-        run: npm -w @dataflow/connector-sdk test
-      - name: Unit tests — API
-        run: npm -w @dataflow/api test
-      - name: Unit tests — worker
-        run: npm -w @dataflow/worker test
       - name: Unit tests — web run graph
         run: npm -w @dataflow/web test
-
-      - name: Typecheck API
-        run: npm -w @dataflow/api exec tsc -- -p . --noEmit
-      - name: Typecheck worker
-        run: npm -w @dataflow/worker exec tsc -- -p . --noEmit
       - name: Build web
         run: npm -w @dataflow/web run build
+      - name: Go tests with race detector
+        working-directory: apps/workflow-go
+        run: go test -race ./...
+      - name: Go vet
+        working-directory: apps/workflow-go
+        run: go vet ./...
 
   compose:
     runs-on: ubuntu-latest

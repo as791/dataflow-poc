@@ -1,12 +1,12 @@
 {
   "name": "dataflow-poc",
   "private": true,
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": ["packages/shared", "apps/web"],
   "scripts": {
-    "dev:api": "npm -w apps/api run dev",
-    "dev:worker": "npm -w apps/worker run dev",
+    "dev:api": "cd apps/workflow-go && go run ./cmd/api",
+    "dev:activity-worker": "cd apps/workflow-go && go run ./cmd/activity-worker",
+    "dev:workflow-worker": "cd apps/workflow-go && go run ./cmd/worker",
     "dev:web": "npm -w apps/web run dev",
-    "build": "npm -ws run build",
-    "promote": "node scripts/promote-build.js"
+    "build": "npm -ws run build"
   }
 }
