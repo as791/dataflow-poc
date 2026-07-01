@@ -165,13 +165,25 @@
     @apply block text-xs font-medium text-gray-500 mb-2
            dark:text-white/55;
   }
+  /* Page-level heading — main body h1 */
   .page-heading {
-    @apply text-xl font-semibold tracking-[-0.03em] text-gray-900
-           dark:text-white;
+    @apply text-[22px] font-bold tracking-[-0.04em] text-gray-900 leading-tight
+           dark:text-white/95;
   }
+  /* Descriptive copy beneath page-heading */
   .page-subtitle {
-    @apply text-sm text-gray-500
+    @apply text-[13px] leading-relaxed text-gray-500
            dark:text-white/40;
+  }
+  /* Section / card title inside page body */
+  .section-heading {
+    @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400
+           dark:text-white/35;
+  }
+  /* Footer / count row in lists */
+  .list-footer {
+    @apply text-[11px] text-gray-400 tabular-nums
+           dark:text-white/30;
   }
 
   /* ── Icon button ── */
@@ -344,18 +356,28 @@
 }
 .react-flow__controls,
 .react-flow__minimap {
-  background: rgba(255,255,255,.92) !important;
-  border: 1px solid rgba(0,0,0,.08) !important;
+  background: rgba(255,255,255,.95) !important;
+  border: 1px solid rgba(0,0,0,.09) !important;
   border-radius: 14px !important;
-  box-shadow: 0 4px 16px rgba(0,0,0,.08) !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,.10) !important;
   overflow: hidden;
 }
 .dark .react-flow__controls,
 .dark .react-flow__minimap {
-  background: rgba(15,17,25,.72) !important;
-  border: 1px solid rgba(255,255,255,.09) !important;
+  background: rgba(13,15,23,.88) !important;
+  border: 1px solid rgba(255,255,255,.11) !important;
   backdrop-filter: blur(20px) !important;
-  box-shadow: 0 14px 36px rgba(0,0,0,.28) !important;
+  box-shadow: 0 14px 36px rgba(0,0,0,.36) !important;
+}
+/* Minimap viewport rectangle */
+.react-flow__minimap-mask {
+  fill: rgba(235,237,245,0.78) !important;
+}
+.dark .react-flow__minimap-mask {
+  fill: rgba(8,10,18,0.78) !important;
+}
+.react-flow__minimap-node {
+  stroke-width: 2;
 }
 .react-flow__controls-button {
   background: transparent !important;

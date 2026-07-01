@@ -6,24 +6,32 @@ import { Handle, Position } from 'reactflow';
 import { type CatalogEntry } from '../../catalog';
 import { useCatalog } from '../../context/CatalogContext';
 
+type LucideIcon = typeof Braces;
+const EXACT_ICON: Record<string, LucideIcon> = {
+  'sink.postgres': Database, 'sink.webhook': Webhook,
+  'sink.records': HardDrive, 'transform.filter': Filter,
+};
+const PREFIX_ICON: Array<[string, LucideIcon]> = [
+  ['zendesk.', BadgeHelp], ['gsheets.', Sheet], ['gdrive.', Triangle],
+  ['excel.', FileSpreadsheet], ['http.', Globe2], ['transform.parse', FileJson],
+];
+const NODE_TYPE_ICON: Record<string, LucideIcon> = {
+  source: Database, sink: ArrowDownToLine, fork: GitFork, merge: Merge,
+};
+
+function resolveIcon(activityType?: string, nodeType?: string): LucideIcon {
+  if (activityType) {
+    if (EXACT_ICON[activityType]) return EXACT_ICON[activityType];
+    const match = PREFIX_ICON.find(([p]) => activityType.startsWith(p));
+    if (match) return match[1];
+  }
+  return (nodeType && NODE_TYPE_ICON[nodeType]) || Braces;
+}
+
 export function ActivityIcon({ activityType, nodeType, size = 16 }: {
   activityType?: string; nodeType?: string; size?: number;
 }) {
-  const Icon = activityType?.startsWith('zendesk.') ? BadgeHelp
-    : activityType?.startsWith('gsheets.') ? Sheet
-    : activityType?.startsWith('gdrive.') ? Triangle
-    : activityType?.startsWith('excel.') ? FileSpreadsheet
-    : activityType?.startsWith('http.') ? Globe2
-    : activityType === 'sink.postgres' ? Database
-    : activityType === 'sink.webhook' ? Webhook
-    : activityType === 'sink.records' ? HardDrive
-    : activityType === 'transform.filter' ? Filter
-    : activityType?.startsWith('transform.parse') ? FileJson
-    : nodeType === 'source' ? Database
-    : nodeType === 'sink' ? ArrowDownToLine
-    : nodeType === 'fork' ? GitFork
-    : nodeType === 'merge' ? Merge
-    : Braces;
+  const Icon = resolveIcon(activityType, nodeType);
   return <Icon size={size} strokeWidth={1.8} />;
 }
 

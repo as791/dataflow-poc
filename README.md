@@ -1,251 +1,168 @@
-# DataFlow
+<div align="center">
+  <h1>DataFlow</h1>
+  <p><strong>Visual, durable data pipelines powered by Go and Temporal</strong></p>
 
-Self-serve, open-core data pipeline platform — an n8n-shaped product on a
-Temporal-durable engine. Build DAG workflows visually **or** describe them in
-natural language and let a local LLM draft them. A generic Go Temporal workflow
-interprets every pipeline while TypeScript activity workers run connectors,
-transforms, and sinks.
+  <p>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"></a>
+    <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"></a>
+    <a href="CODE_OF_CONDUCT.md"><img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg" alt="Contributor Covenant"></a>
+    <img src="https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white" alt="Go 1.22+">
+    <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black" alt="React 18">
+    <img src="https://img.shields.io/badge/Temporal-Durable_Workflows-141414" alt="Temporal">
+  </p>
 
-**What sets it apart from n8n:**
-- **AI + Mermaid authoring.** Describe a pipeline in English → a local **Ollama**
-  model drafts an editable **Mermaid** diagram kept in sync with the canvas. No
-  API key, opt-in. See [docs/AI_BUILDER.md](docs/AI_BUILDER.md).
-- **Plug-and-play connectors.** Add a REST source with a single JSON manifest —
-  no code, no redeploy. See [docs/CONNECTORS.md](docs/CONNECTORS.md).
-- **Temporal-durable execution.** Pause/resume/cancel, durable cursors, crash-safe
-  backfill, replay-deterministic by construction.
-- **Test → production environments.** Iterate in `test`, promote a tested version
-  to `prod`; each environment is its own Temporal namespace + worker pool.
-- **Open core.** The whole product is free in the community edition; an
-  `EDITION=enterprise` seam unlocks governance features (audit export, …).
+  <p>
+    Build pipelines on a React Flow canvas or draft them from natural language<br/>
+    with a local Ollama model. Run them on a Go backend with durable execution.
+  </p>
+</div>
 
-Sources: Zendesk, Google Sheets, Google Drive, Microsoft Excel, PostgreSQL,
-MySQL, MongoDB, Kafka/Redpanda, S3, custom REST, plus any manifest connector. Sinks include
-PostgreSQL, MySQL, MongoDB, Kafka/Redpanda, ClickHouse, S3, Sheets, and webhooks. Triggers
-(cron / webhook / event) are declared **inside
-the pipeline definition**. Historical backfill + incremental ingestion with
-durable cursor state. Full observability (OTel → Prometheus/Grafana/Jaeger).
+---
 
-## Architecture in one paragraph
+DataFlow is an **Apache 2.0-licensed**, open-core data pipeline POC. It combines
+visual and Mermaid-based authoring, pluggable connectors, test and production
+environments, lineage, monitoring, and encrypted payload storage in one local
+Docker Compose stack.
 
-The UI (React Flow) emits a frozen `PipelineDefinition` JSON. The API stores it
-as an immutable version and registers its trigger (Temporal Schedule for cron,
-HTTP route for webhook, Redis subscriber for events). Every firing starts the Go
-`DynamicDAGWorkflow` with the **full definition as input** — replay-deterministic
-by construction. Go workflow workers poll `dynamic-dag-<env>` while TypeScript
-activity workers poll `dynamic-activities-<env>`. The workflow topologically
-sorts the DAG into parallel levels and dispatches each node by stable activity
-name. Source nodes merge up to 50 cursor pages per execution and persist
-progress in Postgres (`connector_state`). Payloads travel as encrypted
-`DataRef` pointers instead of raw datasets.
+The backend is entirely Go: one module builds the API, Temporal workflow worker,
+and activity worker. React/Vite remains the frontend. Public REST contracts,
+Temporal names and queues, connector manifests, and AES-256-GCM payload formats
+are documented and kept stable.
 
-## Database cursor and CDC modes
+## Key Features
 
-PostgreSQL, MySQL, and MongoDB sources support `Cursor` polling or managed CDC.
-CDC runs as bounded micro-batches from Debezium topics; offsets commit only
-after the full DAG succeeds, so retries are at-least-once. Database sinks can
-use `apply-cdc` to upsert creates/updates and delete by primary key.
+- **Visual and AI authoring** — React Flow and Mermaid stay synchronized; an
+  optional local Ollama model can draft pipeline definitions.
+- **Durable execution** — Temporal provides retries, pause/resume/cancel,
+  schedules, crash-safe backfills, and deterministic workflow replay.
+- **Pluggable data plane** — built-in database, file, SaaS, Kafka, Snowflake,
+  Iceberg, and manifest-driven HTTP connectors.
+- **Incremental state** — cursors, CDC offsets, dedupe state, and execution
+  completion commit only after the full DAG succeeds.
+- **Encrypted payloads** — inline, PostgreSQL, or S3-compatible `DataRef` storage
+  uses AES-256-GCM encryption.
+- **Operational visibility** — lineage, execution monitoring, alerts, audit data,
+  Prometheus metrics, Grafana dashboards, and Jaeger traces.
 
-```bash
-docker compose --profile cdc up -d
+## Architecture
+
+```mermaid
+flowchart LR
+    User["Browser"] --> Web["React / Vite UI<br/>nginx"]
+    Web --> API["Go API"]
+
+    API --> Postgres["PostgreSQL<br/>metadata, RLS, state"]
+    API --> Redis["Redis<br/>events and outbox"]
+    API --> Temporal["Temporal Server"]
+
+    Temporal --> Workflow["Go Workflow Workers<br/>DynamicDAGWorkflow"]
+    Workflow --> Activities["Go Activity Workers"]
+    Activities --> Connectors["Sources and Sinks"]
+    Activities --> Payloads["Encrypted DataRef<br/>inline / PostgreSQL / S3"]
+    Activities --> ClickHouse["ClickHouse Analytics"]
+
+    API -.-> OTel["OpenTelemetry"]
+    Workflow -.-> OTel
+    Activities -.-> OTel
+    OTel --> Observability["Prometheus / Grafana / Jaeger"]
 ```
 
-Add a database credential, enable CDC for a comma-separated resource allowlist
-(`public.orders`, `app.orders`, or `database.collection`), then select `CDC` on
-the source node. PostgreSQL requires logical replication/`pgoutput`; MySQL
-requires ROW binlogs and a replication-capable user; MongoDB requires a replica
-set. The managed CDC Redpanda and Kafka Connect services remain internal-only.
+The UI emits an immutable `PipelineDefinition`. The API stores a version and
+registers its cron, webhook, or event trigger. Each firing starts
+`DynamicDAGWorkflow`; workflow workers poll `dynamic-dag-<env>` and activity
+workers poll `dynamic-activities-<env>`. The workflow runs independent DAG nodes
+in parallel while the activity workers perform connector I/O and checkpoint
+state only after successful completion.
 
-## Kafka / Redpanda pipelines
+## Quick Start
 
-Add a Kafka credential with comma-separated brokers, optional TLS, and optional
-SASL/PLAIN or SCRAM credentials. `kafka.fetch` reads bounded pages from an
-`earliest` or `latest` initial position; partition offsets join the same
-post-DAG checkpoint transaction as database cursors. `sink.kafka` publishes
-acknowledged JSON batches and can derive message keys from a record field.
-Set the same **Lineage cluster name** on producer and consumer nodes so separate
-pipelines meet at one `kafka://cluster/topic` asset in workspace lineage.
-Kafka producer retries are idempotent within a producer session; pipeline
-re-runs can still re-emit messages, so downstream consumers should deduplicate
-by the configured message key when exactly-once business effects are required.
-Run the broker conformance smoke with
-`KAFKA_TEST_BROKERS=localhost:9092 npm -w apps/worker run test:kafka`; it verifies
-produce, bounded paging, and offset resume against a real Kafka-compatible broker.
-
-Monitoring persists deduplicated SLO incidents in `pipeline_alerts`; operators
-can acknowledge or resolve them from `/monitoring`, and a later healthy run
-auto-resolves cleared breaches. Fresh installations apply migrations through
-`db/020_cross_run_dedupe.sql` automatically. Existing Docker volumes must apply
-migrations 011–020 once before incidents, run retry, asset history, quality,
-external lineage, partitioned backfills, RBAC, and paid feature controls are available.
-
-Multi-pipeline chaining uses tenant/environment-scoped Redis Stream events backed
-by `pipeline_event_outbox`. Choose **Asset materialized** for medallion consumers:
-the asset history row and event outbox entry commit atomically, and stable URNs
-survive producer replacement. Choose **Upstream pipeline** for pipeline-specific
-completed, failed, or cancelled events. Both appear in workspace lineage.
-
-Set `OPENLINEAGE_URL` to emit durable START and terminal RunEvents to Marquez or
-another OpenLineage backend. External tools can POST standard RunEvents to
-`/api/openlineage?environment=prod`; their jobs and datasets merge into `/lineage`
-whenever dataset names use the same stable asset URNs. An owner creates or rotates
-the tenant token with `POST /api/pipelines/lineage/openlineage-key`; only its hash
-is stored. Send the returned value as `Authorization: Bearer <token>`. Revoke it
-with `DELETE /api/pipelines/lineage/openlineage-key`.
-
-## Run it — one command
-
-Everything runs in containers on one private Docker network. No Node, no npm,
-no Postgres on your host. The bootstrap script generates `.env`, the worker RSA
-keypair, and random encryption keys, then starts the stack (idempotent):
+Requirements: Docker Desktop with at least 8 GB RAM and 4 CPUs.
 
 ```bash
-./scripts/bootstrap.sh          # generate config + secrets, then start
-./scripts/bootstrap.sh --ai     # also start the Ollama AI builder
-./scripts/smoke-test.sh         # end-to-end verification, no creds needed
+./scripts/bootstrap.sh          # generate local secrets and start the stack
+./scripts/bootstrap.sh --ai     # also start Ollama for AI pipeline drafting
+./scripts/smoke-test.sh         # run the end-to-end smoke test
 ```
 
-| Service     | URL                    |
-|-------------|------------------------|
-| Pipeline UI | http://localhost:3002  |
-| Temporal UI | http://localhost:8082  |
-| Grafana     | http://localhost:3001  |
-| Jaeger      | http://localhost:16686 |
-| Prometheus  | http://localhost:9090  |
+| Service | URL |
+|---|---|
+| Pipeline UI | http://localhost:3002 |
+| API | http://localhost:4000 |
+| Temporal UI | http://localhost:8082 |
+| Grafana | http://localhost:3001 |
+| Jaeger | http://localhost:16686 |
+| Prometheus | http://localhost:9090 |
 
-> Connector OAuth still expects `APP_URL=http://localhost:3000`; the web app is
-> served on `:3002` and proxies `/api` internally.
+Stop the stack and delete local data with `docker compose down -v`.
 
-## Editions
+## Local Development
 
-DataFlow is open core. Everything that makes it a product — visual + AI
-authoring, all connectors, test/prod environments, execution, observability — is
-free in the **community** edition. Set `EDITION=enterprise` to unlock governance
-features behind the seam in `apps/api/src/lib/edition.ts` (audit-log export
-today; SSO/SAML and advanced RBAC are scaffolded). `GET /api/edition` reports the
-active edition and feature flags.
-
-**Encryption status:** Temporal workflow history uses a cross-SDK AES-256-GCM
-payload codec, OAuth tokens are encrypted at rest, and intermediate
-`node_payloads` plus oversized webhook payloads are encrypted with the platform
-payload key. Set `PAYLOAD_S3_BUCKET` to move payloads larger than 4 KiB to any
-S3-compatible store; the object body is encrypted before upload and its bucket/key
-travels as a `DataRef`. Per-tenant customer-managed keys are not currently provided.
-
-The API is **not** exposed to the host by default — the web container proxies
-`/api` to it over the internal network (nginx). To expose it for the smoke test
-or curl access, add `ports: ["4000:4000"]` to the `api` service, or run the
-smoke test from inside the network:
+Run the stack in containers and start Vite locally for frontend hot reload:
 
 ```bash
-docker compose exec api sh -c "apt-get install -y curl >/dev/null 2>&1; \
-  curl -s http://localhost:4000/health"
-```
-
-Startup ordering is enforced: Postgres healthcheck gates Temporal; a
-`wait-for.sh` wrapper inside api/worker images blocks until `temporal:7233`
-accepts connections (auto-setup takes ~30s on first boot).
-
-Scale workers horizontally:
-
-```bash
-docker compose up -d --scale worker=3
-```
-
-Tear down completely (including pipeline data):
-
-```bash
-docker compose down -v
-```
-
-## Run it — hybrid dev mode
-
-For fast iteration on app code with infra in containers:
-
-```bash
-docker compose up -d postgres redis temporal temporal-ui otel-collector prometheus grafana jaeger
+./scripts/bootstrap.sh
 npm install
-npm run dev:worker   # terminal 1
-npm run dev:api      # terminal 2
-npm run dev:web      # terminal 3 → http://localhost:3000
+npm run dev:web               # http://localhost:3000
 ```
 
-(Point `.env` at `localhost` ports in this mode: `DATABASE_URL=postgres://dataflow:dataflow@localhost:5433/dataflow`, etc. Add `ports: ["5433:5432"]` to postgres and `ports: ["7233:7233"]` to temporal in the compose file.)
+Vite proxies `/api` to the containerized API on port `4000`. Rebuild the
+affected Compose service after backend changes. See `.env.example` for the
+supported configuration.
 
-## Ingestion modes & state management
+## Repository Layout
 
-Each source node declares `ingestion.mode`:
+| Path | Purpose |
+|---|---|
+| `apps/workflow-go` | Go API, workflow worker, activity worker, connectors, and storage |
+| `apps/web` | React Flow pipeline builder, monitoring, lineage, and analytics UI |
+| `packages/shared` | Frontend catalog, Mermaid, lineage, and TypeScript types |
+| `connectors/manifests` | JSON manifests for no-code HTTP connectors |
+| `db` | PostgreSQL schema, RLS policies, and migrations |
+| `observability` | OpenTelemetry, Prometheus, Grafana, and Jaeger configuration |
+| `examples` | Ready-to-import pipeline definitions |
+| `scripts` | Bootstrap, development, backup, and smoke-test commands |
 
-- **incremental** — cursor-based change detection per connector:
-  Zendesk incremental export cursors, Drive changes feed (`startPageToken`),
-  Sheets row-hash diffing, custom API watermark params.
-- **backfill** — pages from `backfillStart` until the connector reports
-  `end of stream`, then **automatically anchors the incremental cursor** at
-  that moment (see `gdrive.ts`) — no gap, no overlap.
-- Cursor checkpoints commit to `connector_state` only after the full DAG
-  succeeds. Failed transforms or sinks therefore cannot skip source rows.
+## Documentation
 
-Owners can preview and start date-partitioned PostgreSQL, MySQL, or MongoDB
-backfills from **Lifecycle → Backfill**. Sources must use `cursor` mode with a
-date cursor. Plans use non-overlapping `[from,to)` ranges, cap concurrency at
-five executions, and isolate partition cursors from normal incremental state.
-Each partition handles at most 50 × 10,000 source rows; split denser ranges
-before retrying. Use idempotent sink keys because reprocessing intentionally
-re-emits historical records.
+| Resource | Link |
+|---|---|
+| AI pipeline builder | [docs/AI_BUILDER.md](docs/AI_BUILDER.md) |
+| Connector development | [docs/CONNECTORS.md](docs/CONNECTORS.md) |
+| Backend contracts | [docs/BACKEND_CONTRACTS.md](docs/BACKEND_CONTRACTS.md) |
+| Go backend decision | [docs/ADR-002-GO-BACKEND.md](docs/ADR-002-GO-BACKEND.md) |
+| Medallion architecture | [docs/MEDALLION_ARCHITECTURE.md](docs/MEDALLION_ARCHITECTURE.md) |
+| Product roadmap | [docs/PRODUCTROADMAP.md](docs/PRODUCTROADMAP.md) |
 
-## Dev → prod: the actor model with Build IDs
+## Project Status
 
-Every worker image is stamped with a `BUILD_ID` (git SHA) and registers with
-`useVersioning: true`. Each workflow execution is an isolated actor **pinned to
-the build that started it**:
+DataFlow is an unused POC, not a production-ready hosted service. Docker Compose
+is the supported development topology; production deployments still require
+managed secrets/KMS, durable multi-node infrastructure, backups, and an
+operational security review.
 
-```bash
-docker build -f apps/worker/Dockerfile --build-arg BUILD_ID=$(git rev-parse --short HEAD) -t worker:$SHA .
-# run the new image alongside the old one, then atomically promote:
-node scripts/promote-build.js $SHA
-```
+## Contributing
 
-New executions route to the new build; in-flight executions keep replaying on
-the old image until they drain (then it can be retired). Rollback = promote the
-previous build ID. A bad deploy can never corrupt a running workflow's replay.
+Contributions are welcome — bug reports, connector manifests, docs, and code.
 
-## Observability
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, commit format, and PR process.
+- Check [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before participating.
+- Report security vulnerabilities privately via [SECURITY.md](SECURITY.md).
 
-- **Metrics** (Prometheus, pre-built Grafana dashboard "DataFlow Platform"):
-  executions/min, node p95 duration, node failures, records ingested per
-  connector, cursor lag.
-- **Traces** (OTel → Jaeger): API request → workflow → each activity.
-- **Logs**: structured pino JSON from API and worker.
-- **Live execution state**: the UI polls the workflow's `status` query handler —
-  node-by-node status painted directly on the canvas; pause/resume/cancel
-  buttons send Temporal signals.
-- **Audit tables**: `executions`, `node_runs` retain per-node duration, record
-  counts, and errors after workflows complete.
-- **Activity search**: `/monitoring` searches durable node outcomes across
-  pipelines by level, run, node, pipeline, or error; secrets are redacted both
-  when new errors are stored and when historical errors are returned.
+All contributions are made under the Apache 2.0 license and require a
+[Developer Certificate of Origin](https://developercertificate.org/) sign-off
+(`git commit -s`).
 
-## Repo layout
+## License
 
-```
-packages/shared      PipelineDefinition, DataRef, NodeResult types
-apps/workflow-go     Go Temporal workflow state machine + payload codec
-apps/api             control plane: pipeline CRUD, triggers, executions
-apps/worker          TypeScript Temporal activity workers + connector catalog
-apps/web             React Flow self-serve builder + live monitor
-db/init.sql          control plane + cursor state + data plane tables
-observability/       otel-collector, prometheus, grafana provisioning
-scripts/             promote-build.js (build ID promotion), smoke-test.sh
-examples/            ready-to-import pipeline definitions
-```
+Licensed under the **[Apache License 2.0](LICENSE)**.
+Copyright 2025 DataFlow Contributors. See [NOTICE](NOTICE) for details.
 
-## Production gaps (deliberate POC cuts)
+---
 
-- Credentials are env vars → move to the envelope-encrypted vault (KMS + per-user DEK)
-  from the main design doc.
-- Per-tenant customer-managed payload keys are not implemented.
-- Configure S3-compatible DataRefs plus bucket lifecycle/retention in production;
-  Postgres remains the zero-config development fallback.
-- Event trigger uses Redis pub/sub → Kafka with consumer groups + DLQ.
-- Docker Compose is a development topology; production Cassandra,
-  Elasticsearch, and Temporal require multi-node deployment and backups.
+<div align="center">
+  <a href="docs/AI_BUILDER.md">AI Builder</a> ·
+  <a href="docs/CONNECTORS.md">Connectors</a> ·
+  <a href="docs/BACKEND_CONTRACTS.md">Backend Contracts</a> ·
+  <a href="docs/PRODUCTROADMAP.md">Roadmap</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</div>

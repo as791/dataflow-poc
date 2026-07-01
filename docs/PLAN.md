@@ -1,5 +1,7 @@
 # DataFlow Platform — Implementation Plan
 
+> Historical pre-ADR-002 plan. The current backend lives in `apps/workflow-go`.
+
 Status: **Superseded by implementation and ADR-001**
 Last updated: 2026-06-25
 

@@ -1,5 +1,7 @@
 # Reconciled UI/Engineering Feedback — dataflow-poc apps/web
 
+> Archived pre-ADR-002 feedback; backend path references are historical.
+
 Inputs: [`pm-ui-audit.md`](./pm-ui-audit.md) (live UI walkthrough, product lens) and
 [`staff-eng-audit.md`](./staff-eng-audit.md) (source-level audit, engineering lens), produced
 independently by two agents with no shared context. This doc merges them.
