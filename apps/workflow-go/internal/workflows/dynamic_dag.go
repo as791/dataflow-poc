@@ -157,16 +157,27 @@ func DynamicDAGWorkflow(ctx workflow.Context, input model.WorkflowInput) (model.
 	}
 	if phase == "completed" {
 		cursors := make([]map[string]interface{}, 0)
+		dedupeCheckpoints := make([]map[string]interface{}, 0)
 		for _, result := range state.Results {
 			checkpoint, ok := result.Meta["checkpoint"].(map[string]interface{})
 			connectionID, hasID := result.Meta["connectionId"].(string)
 			if ok && hasID {
 				cursors = append(cursors, map[string]interface{}{"connectionId": connectionID, "checkpoint": checkpoint})
 			}
+			if checkpoint, ok := result.Meta["dedupeCheckpoint"].(map[string]interface{}); ok {
+				dedupeCheckpoints = append(dedupeCheckpoints, checkpoint)
+			}
 		}
 		if len(cursors) > 0 {
 			if err := workflow.ExecuteActivity(ctx, "commitSourceCursors", map[string]interface{}{
 				"tenantId": input.TenantID, "cursors": cursors,
+			}).Get(ctx, nil); err != nil {
+				return model.ExecutionStatus{}, err
+			}
+		}
+		if len(dedupeCheckpoints) > 0 {
+			if err := workflow.ExecuteActivity(ctx, "commitDedupeKeys", map[string]interface{}{
+				"tenantId": input.TenantID, "checkpoints": dedupeCheckpoints,
 			}).Get(ctx, nil); err != nil {
 				return model.ExecutionStatus{}, err
 			}

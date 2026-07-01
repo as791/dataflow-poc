@@ -20,6 +20,7 @@ import { requireAuth, requireVerified } from '../middleware/auth';
 import { auditLog } from '../middleware/audit';
 import { encryptToken, decryptToken } from '../crypto/tokenEnc';
 import { getCatalog } from '../lib/serverCatalog';
+import { hasPaidFeature, paidFeatures, requirePaidFeature } from '../lib/edition';
 
 export const connectors = Router();
 connectors.use(requireAuth, requireVerified);
@@ -28,8 +29,9 @@ connectors.use(requireAuth, requireVerified);
 // connectors with every manifest-driven connector in the registry, so a new
 // connector dropped in as a JSON manifest appears here — and thus in the canvas
 // palette and AI builder — with zero code changes.
-connectors.get('/catalog', (_req, res) => {
-  res.json({ catalog: getCatalog() });
+connectors.get('/catalog', async (req, res) => {
+  const enabled = await paidFeatures(req.tenant.tenantId);
+  res.json({ catalog: getCatalog(enabled) });
 });
 
 // ── Redis-backed state store for OAuth CSRF nonces ────────────────────────
@@ -67,9 +69,9 @@ const GOOGLE_REDIRECT  = `${APP_URL}/api/connectors/google/callback`;
 const MS_REDIRECT      = `${APP_URL}/api/connectors/microsoft/callback`;
 const ZENDESK_REDIRECT = `${APP_URL}/api/connectors/zendesk/callback`;
 
-const GOOGLE_SCOPES = [
+export const GOOGLE_SCOPES = [
   'openid', 'email', 'profile',
-  'https://www.googleapis.com/auth/spreadsheets.readonly',
+  'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/drive.readonly',
 ];
 const MS_SCOPES = [
@@ -109,7 +111,7 @@ interface ConnectionRow {
   created_at: Date;
 }
 
-const CREDENTIAL_PROVIDERS = new Set(['postgres', 'mysql', 'mongodb', 'clickhouse', 's3', 'kafka', 'http']);
+const CREDENTIAL_PROVIDERS = new Set(['postgres', 'mysql', 'mongodb', 'clickhouse', 's3', 'sftp', 'snowflake', 'iceberg', 'kafka', 'http']);
 const CDC_PROVIDERS = new Set(['postgres', 'mysql', 'mongodb']);
 
 function requireFields(value: Record<string, any>, fields: string[], label: string) {
@@ -123,7 +125,7 @@ export function validateCredentialInput(provider: string, config: unknown, secre
   if (!secret || typeof secret !== 'object' || Array.isArray(secret)) throw new Error('secret must be an object');
   const cfg = config as Record<string, any>;
   const sec = secret as Record<string, any>;
-  const misplaced = ['password', 'apiKey', 'accessKeyId', 'secretAccessKey'].filter(key => key in cfg);
+  const misplaced = ['password', 'apiKey', 'hmacSecret', 'accessKeyId', 'secretAccessKey'].filter(key => key in cfg);
   if (misplaced.length) throw new Error(`${misplaced.join(', ')} must be stored in secret`);
   if (provider === 'postgres' || provider === 'mysql') {
     requireFields(cfg, ['host', 'database', 'user'], provider);
@@ -136,6 +138,15 @@ export function validateCredentialInput(provider: string, config: unknown, secre
   } else if (provider === 's3') {
     requireFields(cfg, ['region'], provider);
     requireFields(sec, ['accessKeyId', 'secretAccessKey'], provider);
+  } else if (provider === 'sftp') {
+    requireFields(cfg, ['host', 'user'], provider);
+    if (!sec.password && !sec.privateKey) throw new Error('sftp requires password or privateKey');
+  } else if (provider === 'snowflake') {
+    requireFields(cfg, ['account', 'user', 'warehouse', 'database'], provider);
+    requireFields(sec, ['password'], provider);
+  } else if (provider === 'iceberg') {
+    requireFields(cfg, ['url'], provider);
+    if (!!sec.accessKeyId !== !!sec.secretAccessKey) throw new Error('iceberg requires both accessKeyId and secretAccessKey');
   } else if (provider === 'kafka') {
     requireFields(cfg, ['brokers'], provider);
     const brokers = String(cfg.brokers).split(',').map(value => value.trim()).filter(Boolean);
@@ -400,6 +411,12 @@ connectors.post('/:connectionId/refresh', async (req, res) => {
 connectors.post('/', async (req, res) => {
   const { provider, name, config, secret } = req.body ?? {};
   if (!provider || !name) return res.status(400).json({ error: 'provider and name are required' });
+  if (provider === 'kafka' && !(await hasPaidFeature(req.tenant.tenantId, 'realtime'))) {
+    return res.status(402).json({ error: 'realtime is not enabled for this workspace', feature: 'realtime' });
+  }
+  if (['sftp', 'snowflake', 'iceberg'].includes(provider) && !(await hasPaidFeature(req.tenant.tenantId, 'advancedConnectors'))) {
+    return res.status(402).json({ error: 'advancedConnectors is not enabled for this workspace', feature: 'advancedConnectors' });
+  }
   try { validateCredentialInput(String(provider), config, secret ?? {}); }
   catch (e: any) { return res.status(400).json({ error: e.message }); }
   let id: string;
@@ -440,7 +457,7 @@ connectors.post('/:connectionId/test', async (req, res) => {
 
 // Managed CDC uses the existing encrypted credential instance; only the
 // non-secret resource allowlist and generated topic prefix are stored here.
-connectors.put('/:connectionId/cdc', async (req, res) => {
+connectors.put('/:connectionId/cdc', requirePaidFeature('realtime'), async (req, res) => {
   const row = await withTenantTx(req, async client => {
     const { rows } = await client.query(`SELECT * FROM connector_instances WHERE id=$1`, [req.params.connectionId]);
     return rows[0];
@@ -498,6 +515,9 @@ connectors.delete('/:connectionId/cdc', async (req, res) => {
 
 export async function testInstance(tenantId: string, row: any): Promise<string> {
   if (row.kind === 'oauth') {
+    if (row.provider === 'google' && !row.scopes?.includes('https://www.googleapis.com/auth/spreadsheets')) {
+      throw new Error('Reconnect Google to grant Google Sheets write access');
+    }
     await getLiveToken(tenantId, row as ConnectionRow); // forces refresh if expired
     return 'token OK';
   }
@@ -544,6 +564,31 @@ export async function testInstance(tenantId: string, row: any): Promise<string> 
     if (cfg.bucket) await c.send(new HeadBucketCommand({ Bucket: cfg.bucket }));
     else await c.send(new ListBucketsCommand({}));
     return cfg.bucket ? 'bucket OK' : 'credentials OK';
+  }
+  if (row.provider === 'sftp') {
+    const { default: SftpClient } = await import('ssh2-sftp-client');
+    const client = new SftpClient();
+    await client.connect({ host: cfg.host, port: Number(cfg.port) || 22, username: cfg.user,
+      password: secret.password || undefined, privateKey: secret.privateKey || undefined, readyTimeout: 10_000 });
+    try { await client.list(cfg.testPath || '.'); } finally { await client.end(); }
+    return 'SFTP list OK';
+  }
+  if (row.provider === 'snowflake') {
+    const snowflake = (await import('snowflake-sdk')).default;
+    const connection = snowflake.createConnection({ account: cfg.account, username: cfg.user, password: secret.password,
+      warehouse: cfg.warehouse, database: cfg.database, schema: cfg.schema });
+    await new Promise<void>((resolve, reject) => connection.connect(error => error ? reject(error) : resolve()));
+    try {
+      await new Promise<void>((resolve, reject) => connection.execute({ sqlText: 'SELECT CURRENT_VERSION()', complete: error => error ? reject(error) : resolve() }));
+    } finally { connection.destroy(() => {}); }
+    return 'Snowflake query OK';
+  }
+  if (row.provider === 'iceberg') {
+    const response = await axios.get(`${String(cfg.url).replace(/\/$/, '')}/v1/config`, {
+      params: cfg.warehouse ? { warehouse: cfg.warehouse } : undefined,
+      headers: secret.token ? { Authorization: `Bearer ${secret.token}` } : undefined, timeout: 10_000,
+    });
+    return `Iceberg REST ${response.status}`;
   }
   if (row.provider === 'clickhouse') {
     const { createClient } = await import('@clickhouse/client');

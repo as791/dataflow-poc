@@ -5,6 +5,7 @@ import type { Environment, PipelineDefinition } from '@dataflow/shared';
 import { evaluatePipelineHealth, redactSensitiveText } from '@dataflow/shared';
 import { auditLog } from '../middleware/audit';
 import { executionsStarted } from '../metrics';
+import { requirePaidFeature } from '../lib/edition';
 
 export const executions = Router();
 
@@ -31,6 +32,19 @@ export function decodeExecutionCursor(value: string): ExecutionCursor {
 }
 
 export function canRetryExecution(phase: string): boolean { return phase === 'failed'; }
+
+const TRACE_SECRET_KEY = /payload|input|result|header|memo|searchAttributes|identity|details/i;
+export function safeTraceValue(value: unknown, depth = 0): unknown {
+  if (depth > 4 || value == null || typeof value === 'boolean' || typeof value === 'number') return value;
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'string') return redactSensitiveText(value).slice(0, 500);
+  if (Array.isArray(value)) return value.slice(0, 20).map(item => safeTraceValue(item, depth + 1));
+  if (typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => !TRACE_SECRET_KEY.test(key))
+    .slice(0, 30)
+    .map(([key, item]) => [key, safeTraceValue(item, depth + 1)]));
+  return String(value);
+}
 
 // Each execution lives in its environment's Temporal namespace, so status
 // queries and signals must target that namespace.
@@ -214,6 +228,23 @@ executions.get('/logs', async (req, res) => {
       : `${Number(row.record_count ?? 0).toLocaleString('en-US')} records in ${Number(row.duration_ms ?? 0)}ms`,
     error: undefined,
   })) });
+});
+
+executions.get('/:id/trace', requirePaidFeature('deepObservability'), async (req, res) => {
+  const row = await withTenantTx(req, client => client.query(
+    `SELECT environment,workflow_id,run_id FROM executions WHERE id=$1`, [req.params.id]));
+  if (!row.rows[0]) return res.status(404).json({ error: 'not found' });
+  const identity = row.rows[0];
+  const history = await (await temporal(namespaceFor(identity.environment ?? 'test')))
+    .workflow.getHandle(identity.workflow_id ?? req.params.id, identity.run_id ?? undefined).fetchHistory();
+  const events = (history.events ?? []).map((event: any) => {
+    const attributes = Object.entries(event).find(([key, value]) => key.endsWith('EventAttributes') && value)?.[1];
+    return {
+      eventId: String(event.eventId ?? ''), eventType: event.eventType,
+      eventTime: safeTraceValue(event.eventTime), attributes: safeTraceValue(attributes),
+    };
+  });
+  res.json({ events });
 });
 
 // Run detail: execution + node_runs + pipeline definition (nodes/edges).

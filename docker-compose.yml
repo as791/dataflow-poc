@@ -114,6 +114,10 @@ services:
       - ./db/014_data_quality.sql:/docker-entrypoint-initdb.d/014_data_quality.sql:ro
       - ./db/015_openlineage.sql:/docker-entrypoint-initdb.d/015_openlineage.sql:ro
       - ./db/016_backfills.sql:/docker-entrypoint-initdb.d/016_backfills.sql:ro
+      - ./db/017_pipeline_rbac.sql:/docker-entrypoint-initdb.d/017_pipeline_rbac.sql:ro
+      - ./db/018_oidc_sub.sql:/docker-entrypoint-initdb.d/018_oidc_sub.sql:ro
+      - ./db/019_feature_entitlements.sql:/docker-entrypoint-initdb.d/019_feature_entitlements.sql:ro
+      - ./db/020_cross_run_dedupe.sql:/docker-entrypoint-initdb.d/020_cross_run_dedupe.sql:ro
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dataflow"]

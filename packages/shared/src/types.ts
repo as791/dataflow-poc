@@ -71,7 +71,7 @@ export interface PipelineNode {
   ingestion?: IngestionConfig; // source nodes only
   timeoutSec?: number;
   retry?: { maximumAttempts?: number };
-  mergeStrategy?: 'concat' | 'innerJoin';
+  mergeStrategy?: 'concat' | 'union' | 'innerJoin' | 'leftJoin' | 'outerJoin' | 'appendWithSourceTag';
   joinKey?: string;
   inputAssets?: DataAssetRef[];
   outputAssets?: DataAssetRef[];

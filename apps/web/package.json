@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "test": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' src/pages/runGraph.test.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.9",

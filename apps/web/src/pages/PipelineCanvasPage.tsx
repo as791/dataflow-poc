@@ -9,7 +9,7 @@ import {
 import ReactFlow, {
   Background, BackgroundVariant, Controls, MiniMap,
   addEdge, useNodesState, useEdgesState,
-  type Node, type Connection,
+  type Node, type Connection, type ReactFlowInstance,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { definitionToMermaid, mermaidToDefinition } from '@dataflow/shared';
@@ -50,15 +50,17 @@ export default function PipelineCanvasPage() {
   const navigate = useNavigate();
   const { dark, toggle: toggleTheme } = useTheme();
   const { user } = useAuth();
-  const hydrated = useRef(false);
+  const hydrated = useRef<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const connectSource = useRef<string | null>(null);
   const connected = useRef(false);
+  const fitPending = useRef(false);
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selected, setSelected] = useState<Node | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<any | null>(null);
+  const [flow, setFlow] = useState<ReactFlowInstance | null>(null);
 
   const [name, setName] = useState('My pipeline');
   const [pipelineKey, setPipelineKey] = useState('');
@@ -99,24 +101,43 @@ export default function PipelineCanvasPage() {
   const [inviteMsg, setInviteMsg] = useState('');
 
   useEffect(() => {
-    const def = (location.state as any)?.definition;
-    if (!def || hydrated.current) return;
-    hydrated.current = true;
-    const { nodes: ns, edges: es } = definitionToFlow(def, byType);
-    setNodes(ns); setEdges(es);
-    if (def.name) setName(def.name);
-    if (def.id) setPipelineKey(def.id);
-    if (def.trigger) setTrigger(def.trigger);
-    setPolicy({
-      owner: def.metadata?.owner ?? '', domain: def.metadata?.domain ?? '', tags: (def.metadata?.tags ?? []).join(', '),
-      freshnessMinutes: def.slo?.freshnessMinutes?.toString() ?? '',
-      maxFailureRatePercent: def.slo?.maxFailureRatePercent?.toString() ?? '',
-      maxDurationSeconds: def.slo?.maxDurationMs ? String(def.slo.maxDurationMs / 1000) : '',
-      notificationConnectionId: def.notifications?.connectionId ?? '',
-      minimumSeverity: def.notifications?.minimumSeverity ?? 'critical',
-    });
-    setMsg('Loaded from AI builder — review and Save');
-  }, [location.state]);
+    let cancelled = false;
+    const load = async () => {
+      const rowId = new URLSearchParams(location.search).get('pipeline');
+      const stateDef = rowId ? null : (location.state as any)?.definition;
+      const hydrationKey = rowId ?? (stateDef ? 'generated' : null);
+      if (!hydrationKey || hydrated.current === hydrationKey) return;
+      if (rowId) {
+        setSavedRowId(null); setSelected(null); setSelectedEdge(null);
+        setNodes([]); setEdges([]); setMsg('Loading pipeline…');
+      }
+      const row = rowId ? await api.getPipeline(rowId) : null;
+      const def = stateDef ?? row?.definition;
+      if (!def || cancelled) return;
+      hydrated.current = hydrationKey;
+      const { nodes: ns, edges: es } = definitionToFlow(def, byType);
+      fitPending.current = true;
+      setNodes(ns); setEdges(es);
+      if (def.name) setName(def.name);
+      if (def.id) setPipelineKey(def.id);
+      if (def.trigger) setTrigger(def.trigger);
+      if (row) {
+        setSavedRowId(row.id);
+        setPipelineStage(deriveStage(row.status, row.environment));
+      }
+      setPolicy({
+        owner: def.metadata?.owner ?? '', domain: def.metadata?.domain ?? '', tags: (def.metadata?.tags ?? []).join(', '),
+        freshnessMinutes: def.slo?.freshnessMinutes?.toString() ?? '',
+        maxFailureRatePercent: def.slo?.maxFailureRatePercent?.toString() ?? '',
+        maxDurationSeconds: def.slo?.maxDurationMs ? String(def.slo.maxDurationMs / 1000) : '',
+        notificationConnectionId: def.notifications?.connectionId ?? '',
+        minimumSeverity: def.notifications?.minimumSeverity ?? 'critical',
+      });
+      setMsg(row ? `Loaded v${row.version}` : 'Loaded from AI builder — review and Save');
+    };
+    load().catch((e: any) => setMsg(`Load failed: ${e.message}`));
+    return () => { cancelled = true; };
+  }, [location.search, location.state, byType]);
 
   useEffect(() => {
     api.listPipelines().then((rows: any[]) => {
@@ -150,6 +171,23 @@ export default function PipelineCanvasPage() {
     }
   }, [workspacePanel]);
 
+  useEffect(() => {
+    if (!activeCat && !workspacePanel) return;
+    const close = (event: PointerEvent) => {
+      if (!(event.target as Element).closest('[data-canvas-sidebar]')) {
+        setActiveCat(null); setWorkspacePanel(null);
+      }
+    };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [activeCat, workspacePanel]);
+
+  useEffect(() => {
+    if (!flow || !fitPending.current || !nodes.length) return;
+    fitPending.current = false;
+    requestAnimationFrame(() => flow.fitView({ padding: .2, duration: 300 }));
+  }, [flow, nodes]);
+
   const onConnect = useCallback((c: Connection) => {
     connected.current = true;
     setEdges(eds => addEdge({ ...c, id: `e${Date.now()}` }, eds));
@@ -179,8 +217,8 @@ export default function PipelineCanvasPage() {
     const bounds = canvasRef.current.getBoundingClientRect();
     setContextAdd({
       source: connectSource.current,
-      x: Math.min(point.clientX - bounds.left, bounds.width - 300),
-      y: Math.min(point.clientY - bounds.top, bounds.height - 240),
+      x: Math.max(8, Math.min(point.clientX - bounds.left, bounds.width - 300)),
+      y: Math.max(8, Math.min(point.clientY - bounds.top, bounds.height - 240)),
     });
     connectSource.current = null;
   };
@@ -303,8 +341,9 @@ export default function PipelineCanvasPage() {
       const response = await api.generatePipeline(aiPrompt);
       const def = response.definition ?? response;
       const { nodes: ns, edges: es } = definitionToFlow(def, byType);
+      fitPending.current = true;
       setNodes(ns); setEdges(es);
-      if (def.name) setName(def.name);
+      if (def.suggestedName || def.name) setName(def.suggestedName ?? def.name);
       if (def.trigger) setTrigger(def.trigger);
       setMermaidDraft(response.mermaid ?? definitionToMermaid(def.nodes, def.edges));
       setBottomTab('mermaid'); setDrawerOpen(true); setAiState('success');
@@ -316,9 +355,9 @@ export default function PipelineCanvasPage() {
 
   const openDrawer = async (tab: BottomTab = 'runs') => {
     setBottomTab(tab); setDrawerOpen(true);
-    if (recentRuns.length === 0) {
+    if (tab === 'runs') {
       setRunsLoading(true);
-      try { setRecentRuns(await api.listExecutions({})); }
+      try { setRecentRuns(await api.listExecutions(savedRowId ? { pipeline: savedRowId } : {})); }
       catch { /* ignore */ }
       finally { setRunsLoading(false); }
     }
@@ -333,7 +372,8 @@ export default function PipelineCanvasPage() {
   const startResize = (event: React.PointerEvent) => {
     event.preventDefault();
     const startY = event.clientY;
-    const startHeight = drawerHeight;
+    const startHeight = drawerExpanded ? window.innerHeight * .52 : drawerHeight;
+    setDrawerExpanded(false);
     const move = (e: PointerEvent) => setDrawerHeight(Math.max(150,
       Math.min(window.innerHeight * .52, startHeight + startY - e.clientY)));
     const stop = () => {
@@ -365,13 +405,14 @@ export default function PipelineCanvasPage() {
   }, [catalog, activeCat, catQuery]);
 
   const rightPanelOpen = selected || selectedEdge || showMermaid;
-  const drawerOffset = drawerExpanded ? 'calc(52vh + 12px)' : drawerHeight + 12;
-  const executionOffset = drawerExpanded ? 'calc(52vh + 16px)' : drawerHeight + 16;
+  const drawerOffset = drawerExpanded ? 'calc(52vh + 24px)' : drawerHeight + 24;
+  const executionOffset = drawerExpanded ? 'calc(52vh + 28px)' : drawerHeight + 28;
 
   return (
     <div ref={canvasRef} className="relative h-screen overflow-hidden bg-[#f5f5f5] dark:bg-[#0d0f17]">
       <ReactFlow
         nodes={nodes} edges={edges} nodeTypes={nodeTypes}
+        onInit={setFlow}
         onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onConnectStart={(_, params) => { connectSource.current = params.nodeId; connected.current = false; }}
@@ -383,9 +424,9 @@ export default function PipelineCanvasPage() {
         className="absolute inset-0">
         <Background variant={BackgroundVariant.Dots} gap={24} size={1}
           color={dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'} />
-        <Controls position="bottom-left" style={{ left: 56, bottom: drawerOpen ? drawerOffset : 12 }} />
+        <Controls position="bottom-left" style={{ left: 72, bottom: drawerOpen ? drawerOffset : 12 }} />
         <MiniMap position="bottom-left" pannable zoomable
-          style={{ left: 110, bottom: drawerOpen ? drawerOffset : 12, width: 190, height: 112 }}
+          style={{ left: 126, bottom: drawerOpen ? drawerOffset : 12, width: 190, height: 112 }}
           nodeColor={n => byType[n.data.activityType]?.color ?? '#6965db'}
           nodeStrokeColor={dark ? '#ffffff' : '#111827'} nodeStrokeWidth={2}
           maskColor={dark ? 'rgba(8,10,16,.7)' : 'rgba(245,245,245,.7)'} />
@@ -402,7 +443,7 @@ export default function PipelineCanvasPage() {
             <button className="icon-button h-7 w-7" onClick={() => setContextAdd(null)}><X size={13} /></button>
           </div>
           <div className="max-h-48 overflow-auto pt-1">
-            {catalog.filter(entry => entry.nodeType !== 'source').map(entry => (
+            {nodes.find(node => node.id === contextAdd.source)?.data.nodeType !== 'sink' && catalog.filter(entry => entry.nodeType !== 'source').map(entry => (
               <button key={entry.activityType} onClick={() => addNode(entry, contextAdd.source)}
                 className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left hover:bg-gray-50 dark:hover:bg-white/[0.06]">
                 <span className="h-7 w-1 rounded-full" style={{ background: entry.color }} />
@@ -413,14 +454,17 @@ export default function PipelineCanvasPage() {
                 <Plus size={13} className="text-gray-300 dark:text-white/25" />
               </button>
             ))}
+            {nodes.find(node => node.id === contextAdd.source)?.data.nodeType === 'sink' && (
+              <p className="px-2.5 py-4 text-xs text-gray-400 dark:text-white/35">Destinations end a pipeline branch.</p>
+            )}
           </div>
         </div>
       )}
 
       {/* Left Miro-style toolbar */}
-      <aside className="absolute left-0 top-0 bottom-0 z-20 flex w-[52px] flex-col items-center gap-1
-        border-r border-gray-200 dark:border-white/[0.08]
-        bg-white/95 dark:bg-[#0d0f17]/95 backdrop-blur-lg py-3">
+      <aside data-canvas-sidebar className="absolute left-3 top-3 bottom-3 z-20 flex w-[52px] flex-col items-center gap-1 overflow-hidden rounded-2xl
+        border border-gray-200 dark:border-white/[0.08]
+        bg-white/95 dark:bg-[#0d0f17]/95 backdrop-blur-lg py-3 shadow-sm dark:shadow-glass">
         <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-[10px] bg-gradient-to-br from-brand-400 to-brand-600 shadow-md shadow-brand-500/20">
           <Zap size={16} className="text-white" strokeWidth={2.5} />
         </div>
@@ -470,7 +514,7 @@ export default function PipelineCanvasPage() {
           }`}>
           <History size={17} strokeWidth={1.75} />
         </button>
-        <button title="Pipeline lifecycle" onClick={() => { setActiveCat(null); setWorkspacePanel(null); openDrawer('lifecycle'); }}
+        <button title="Pipeline lifecycle" onClick={() => { setActiveCat(null); setWorkspacePanel(null); drawerOpen && bottomTab === 'lifecycle' ? setDrawerOpen(false) : openDrawer('lifecycle'); }}
           className={`flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
             drawerOpen && bottomTab === 'lifecycle' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
           }`}><Rocket size={17} strokeWidth={1.75} /></button>
@@ -487,8 +531,8 @@ export default function PipelineCanvasPage() {
 
       {/* Category flyout panel */}
       {activeCat && (
-        <div className="absolute left-[52px] top-0 bottom-0 z-10 w-[220px] flex flex-col
-          border-r border-gray-200 dark:border-white/[0.08]
+        <div data-canvas-sidebar className="absolute left-[68px] top-3 bottom-3 z-10 w-[440px] flex flex-col overflow-hidden rounded-r-2xl
+          border border-gray-200 dark:border-white/[0.08]
           bg-white/97 dark:bg-[#0d0f17]/97 backdrop-blur-lg shadow-xl">
           <div className="border-b border-gray-100 dark:border-white/[0.07] p-3">
             <p className="text-xs font-semibold text-gray-900 dark:text-white/90 capitalize mb-2">
@@ -500,10 +544,10 @@ export default function PipelineCanvasPage() {
                 value={catQuery} onChange={e => setCatQuery(e.target.value)} />
             </label>
           </div>
-          <div className="flex-1 overflow-auto p-2">
+          <div className="grid flex-1 grid-cols-2 content-start gap-1 overflow-auto p-2">
             {catEntries.map(entry => (
               <button key={entry.activityType} onClick={() => addNode(entry)}
-                className="group mb-1 flex w-full items-center gap-2.5 rounded-[10px] border border-transparent px-2.5 py-2 text-left transition
+                className="group flex w-full items-center gap-2.5 rounded-[10px] border border-transparent px-2.5 py-2 text-left transition
                   hover:border-gray-200 hover:bg-gray-50 dark:hover:border-white/[0.08] dark:hover:bg-white/[0.05]">
                 <span className="flex h-7 w-7 flex-none items-center justify-center rounded-[8px] border transition-colors
                   border-gray-100 bg-gray-50 dark:border-white/[0.07] dark:bg-white/[0.04]
@@ -524,7 +568,7 @@ export default function PipelineCanvasPage() {
       )}
 
       {workspacePanel && (
-        <aside className="absolute left-[52px] top-0 bottom-0 z-20 flex w-[320px] flex-col border-r border-gray-200 bg-white/97 shadow-xl backdrop-blur-lg dark:border-white/[0.08] dark:bg-[#0d0f17]/97">
+        <aside data-canvas-sidebar className="absolute left-[68px] top-3 bottom-3 z-20 flex w-[320px] flex-col overflow-hidden rounded-r-2xl border border-gray-200 bg-white/97 shadow-xl backdrop-blur-lg dark:border-white/[0.08] dark:bg-[#0d0f17]/97">
           <div className="flex h-14 items-center justify-between border-b border-gray-100 px-4 dark:border-white/[0.07]">
             <div>
               <p className="text-xs font-semibold text-gray-900 dark:text-white/90">
@@ -617,7 +661,7 @@ export default function PipelineCanvasPage() {
 
       {/* Top floating: name pill + lifecycle */}
       <div className="absolute top-4 z-10 flex -translate-x-1/2 items-center gap-2 pointer-events-none transition-[left] duration-200"
-        style={{ left: activeCat || workspacePanel ? 'calc(50% + 150px)' : 'calc(50% + 26px)' }}>
+        style={{ left: workspacePanel ? 'calc(50% + 194px)' : activeCat ? 'calc(50% + 254px)' : 'calc(50% + 34px)' }}>
         <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-gray-200 dark:border-white/[0.09]
           bg-white/95 dark:bg-[#0d1018]/90 px-3 py-2 shadow-sm dark:shadow-glass backdrop-blur-xl">
           <input
@@ -794,8 +838,8 @@ export default function PipelineCanvasPage() {
 
       {/* IDE-style output drawer */}
       {drawerOpen && (
-        <div className="absolute bottom-0 left-[52px] right-0 z-20 flex flex-col
-          border-t border-gray-200 dark:border-white/[0.08]
+        <div className="absolute bottom-3 left-[68px] right-3 z-20 flex flex-col overflow-hidden rounded-2xl
+          border border-gray-200 dark:border-white/[0.08]
           bg-white/97 dark:bg-[#0d1018]/96 backdrop-blur-xl
           shadow-[0_-4px_24px_rgba(0,0,0,.08)] dark:shadow-[0_-8px_32px_rgba(0,0,0,.4)]"
           style={{ height: drawerExpanded ? '52vh' : drawerHeight }}>
@@ -817,8 +861,6 @@ export default function PipelineCanvasPage() {
               onClick={() => setDrawerExpanded(v => !v)}>{drawerExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>
             <button className="icon-button h-7 w-7 border-transparent bg-transparent" title="Collapse panel"
               onClick={() => setDrawerOpen(false)}><ChevronDown size={14} /></button>
-            <button className="icon-button h-6 w-6 border-transparent bg-transparent"
-              onClick={() => setDrawerOpen(false)}><X size={13} /></button>
           </div>
           <div className="flex-1 overflow-auto">
             {bottomTab === 'runs' && runsLoading && (

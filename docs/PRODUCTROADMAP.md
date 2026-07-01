@@ -24,6 +24,26 @@ it just doesn't block first GTM.
 - **Temporal trace proxy**, OLAP/Iceberg CDC, JMESPath select dep, no-code formula/macro engine, audit
   tables, pagination, dual-write reliability hardening. All post-launch, demand-driven.
 
+## Temporal 2026 feature decisions
+
+Reviewed July 2026 against the [Temporal platform changelog](https://temporal.io/changelog).
+New Temporal capabilities do not expand the GTM product surface:
+
+- **Adopt Task Queue Priority and Fairness after the Server 1.31 upgrade.** Use `tenantId` as the
+  fairness key so a large tenant cannot starve others. Keep priority internal: interactive/test runs `2`,
+  scheduled runs `3`, backfills `4`. Do not add scheduling controls to the MVP UI.
+- **Migrate to Worker Deployment Version APIs before Server 1.32.** This replaces the deprecated
+  Build-ID compatibility API and is operational maintenance, not a new product feature.
+- **Keep long-lived workers for GTM.** [Serverless Workers](https://docs.temporal.io/serverless-workers)
+  are pre-release, AWS Lambda-only, and a poor fit for VPC-bound connectors, CDC, and long backfills.
+- **Defer Standalone Activities and Workflow Streams.** Existing connector tests are simpler as direct
+  calls; normal pipelines still need Workflow-level durability. Streams have no validated customer need.
+- **Do not duplicate payload storage.** Temporal External Storage is public preview; retain the existing
+  encrypted `DataRef` path until Temporal support is stable across both Go and TypeScript workers and can
+  replace that path end to end.
+
+Current version and migration work lives in [`ENTERPRISE_ROADMAP.md`](./ENTERPRISE_ROADMAP.md).
+
 ---
 
 ## Current architecture (verified — unchanged, still TS backend + Go interpreter)
@@ -156,6 +176,9 @@ destinations the product only fills our own store — not sellable. This is the 
 
 ## Phase B — Enhance on request (backlog, not committed)
 
+> **Implemented July 2026:** SFTP source/sink, safe formulas, per-record JMESPath select,
+> redacted Temporal history, cross-run dedupe, audit export, and paged execution history.
+
 Pull any item into a sprint only when an invited user actually asks. Rough order of likelihood:
 
 - **More poll-source connectors** (manifests — cheapest breadth) and **S3 / SFTP / Webhook-out** sources/sinks
@@ -168,6 +191,10 @@ Pull any item into a sprint only when an invited user actually asks. Rough order
   you open beyond the handful.
 
 ## Phase C — Funded projects (only if GTM proves the market)
+
+> **Implemented July 2026:** Debezium CDC, Kafka source/sink, Snowflake cursor/CHANGES ingestion
+> plus destination writes, and append-snapshot Iceberg REST ingestion. The Go re-platform remains
+> conditional on a measured runtime bottleneck.
 
 - **Log-based CDC (Debezium):** Kafka + Connect + schema-registry + offset/history + ingestion bridge +
   streaming-consumer trigger. Scope as its own project. Batch-fire executions for v1 of it; true streaming later.

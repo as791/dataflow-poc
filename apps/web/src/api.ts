@@ -40,6 +40,7 @@ export const api = {
   run:          (rowId: string) =>
     request(`/api/pipelines/${rowId}/run`, { method: 'POST', body: JSON.stringify({}) }).then(j),
   listPipelines: () => request('/api/pipelines').then(j),
+  getPipeline: (rowId: string) => request(`/api/pipelines/${rowId}`).then(j),
   planBackfill: (rowId: string, body: { from: string; to: string; partitionDays: number; maxConcurrency: number }) =>
     request(`/api/pipelines/${rowId}/backfills/plan`, { method: 'POST', body: JSON.stringify(body) }).then(j),
   startBackfill: (rowId: string, body: { from: string; to: string; partitionDays: number; maxConcurrency: number }) =>
@@ -93,6 +94,7 @@ export const api = {
   resolveAlert: (id: string) => request(`/api/alerts/${id}/resolve`, { method: 'POST' }).then(j),
   retryAlertNotification: (id: string) => request(`/api/alerts/${id}/retry-notification`, { method: 'POST' }).then(j),
   getExecution: (id: string) => request(`/api/executions/${id}`).then(j),
+  getExecutionTrace: (id: string) => request(`/api/executions/${id}/trace`).then(j),
   executionStatus: (id: string) => request(`/api/executions/${id}/status`).then(j),
   signal: (id: string, action: string) => request(`/api/executions/${id}/${action}`, { method: 'POST' }).then(j),
   retryExecution: (id: string) => request(`/api/executions/${id}/retry`, { method: 'POST' }).then(j),
@@ -117,4 +119,15 @@ export const api = {
   createOrder: (units: number) =>
     request('/api/billing/orders', { method: 'POST', body: JSON.stringify({ units }) }).then(j),
   getBillingHistory: () => request('/api/billing/history').then(j),
+
+  // Workspace paid-feature entitlements (owner-managed).
+  getEdition: () => request('/api/edition').then(j),
+  setPaidFeature: (feature: string, enabled: boolean) =>
+    request(`/api/edition/features/${encodeURIComponent(feature)}`, {
+      method: 'PUT', body: JSON.stringify({ enabled }),
+    }).then(j),
+  downloadAuditExport: () => request('/api/edition/audit-export').then(async response => {
+    if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+    return response.blob();
+  }),
 };
