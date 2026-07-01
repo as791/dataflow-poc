@@ -1,0 +1,56 @@
+#cloud-config
+# Provisions a fresh Ubuntu 24.04 DigitalOcean Droplet into a running DataFlow
+# stack. Rendered by deploy/droplet/deploy.sh, which substitutes:
+#   __DATAFLOW_DOMAIN__   public hostname (A record must point at the droplet)
+#   __REPO_URL__          git clone URL
+#   __GIT_REF__           branch or tag to deploy
+#
+# First boot takes ~10 minutes (image builds). Follow along with:
+#   ssh root@<ip> tail -f /var/log/cloud-init-output.log
+
+package_update: true
+
+# nodejs: scripts/bootstrap.sh uses `node` to generate secrets and the worker
+# keypair. The Ubuntu archive build is fine for that.
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - ufw
+  - nodejs
+
+# The default stack needs ~3 GB plus image builds; swap keeps a 4 GB droplet
+# from OOM-killing the Go build.
+swap:
+  filename: /swapfile
+  size: 4G
+  maxsize: 4G
+
+write_files:
+  - path: /etc/apt/sources.list.d/docker.list.tmpl
+    content: |
+      deb [arch=ARCH signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu CODENAME stable
+
+runcmd:
+  # Docker Engine + Compose v2 from Docker's apt repo (the archive's compose
+  # plugin is too old for `ports: !override` in the droplet compose file).
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - sed -e "s/ARCH/$(dpkg --print-architecture)/" -e "s/CODENAME/$(. /etc/os-release && echo "$VERSION_CODENAME")/" /etc/apt/sources.list.d/docker.list.tmpl > /etc/apt/sources.list.d/docker.list
+  - rm /etc/apt/sources.list.d/docker.list.tmpl
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+  # Firewall: SSH + HTTP/HTTPS only. Published container ports are bound to
+  # loopback in the compose override, so nothing else is reachable anyway.
+  - ufw allow OpenSSH
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw --force enable
+
+  # Clone, generate secrets, record the public domain, start the stack.
+  - git clone --branch __GIT_REF__ __REPO_URL__ /opt/dataflow
+  - cd /opt/dataflow && NO_UP=1 ./scripts/bootstrap.sh
+  - cd /opt/dataflow && printf 'DATAFLOW_DOMAIN=%s\n' '__DATAFLOW_DOMAIN__' >> .env
+  - cd /opt/dataflow && docker compose -f docker-compose.yml -f deploy/droplet/docker-compose.droplet.yml up -d --build

@@ -1,0 +1,86 @@
+# DigitalOcean Droplet production override.
+#
+# Usage (always list both files explicitly — this also keeps the dev-only
+# docker-compose.override.yml out of the merge):
+#
+#   docker compose -f docker-compose.yml \
+#                  -f deploy/droplet/docker-compose.droplet.yml up -d --build
+#
+# What it changes vs. the local stack:
+#   - Adds Caddy on 80/443 with automatic Let's Encrypt TLS in front of `web`
+#     (web's nginx already proxies /api to the API container).
+#   - Rebinds every other published port to 127.0.0.1. Docker's iptables rules
+#     bypass UFW, so loopback binding — not the firewall — is what keeps
+#     Temporal UI, Mailhog, and the API off the public internet. Reach them
+#     with an SSH tunnel (see docs/DEPLOY_DROPLET.md).
+#   - `restart: unless-stopped` on all long-running services.
+#
+# Requires Docker Compose v2.24.4+ (`ports: !override`) and two .env keys:
+#   DATAFLOW_DOMAIN=dataflow.example.com
+#   ACME_EMAIL=you@example.com        # optional but recommended
+
+x-droplet-app-env: &droplet-app-env
+  APP_URL: https://${DATAFLOW_DOMAIN:?set DATAFLOW_DOMAIN in .env}
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DATAFLOW_DOMAIN: ${DATAFLOW_DOMAIN:?set DATAFLOW_DOMAIN in .env}
+    volumes:
+      - ./deploy/droplet/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on: [web]
+    mem_limit: 128m
+    networks: [dataflow]
+
+  web:
+    restart: unless-stopped
+    # Only reachable through Caddy.
+    ports: !override []
+
+  api:
+    restart: unless-stopped
+    ports: !override ["127.0.0.1:4000:4000"]
+    environment: *droplet-app-env
+
+  worker-test:
+    restart: unless-stopped
+    environment: *droplet-app-env
+  worker-prod:
+    restart: unless-stopped
+    environment: *droplet-app-env
+  workflow-test:
+    restart: unless-stopped
+    environment: *droplet-app-env
+  workflow-prod:
+    restart: unless-stopped
+    environment: *droplet-app-env
+
+  temporal-ui:
+    restart: unless-stopped
+    ports: !override ["127.0.0.1:8082:8080"]
+
+  mailhog:
+    restart: unless-stopped
+    ports: !override ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
+
+  postgres:
+    restart: unless-stopped
+  cassandra:
+    restart: unless-stopped
+  elasticsearch:
+    restart: unless-stopped
+  redis:
+    restart: unless-stopped
+  clickhouse:
+    restart: unless-stopped
+  temporal:
+    restart: unless-stopped
+
+volumes:
+  caddydata:
+  caddyconfig:

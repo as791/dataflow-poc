@@ -1,0 +1,42 @@
+# Manual deploy to the DigitalOcean droplet provisioned by
+# deploy/droplet/deploy.sh. Mirrors that script's `update` mode so a deploy
+# can be triggered from the Actions tab without a local doctl/ssh setup.
+#
+# Required repository secrets:
+#   DROPLET_HOST      droplet IP or hostname
+#   DROPLET_SSH_KEY   private key whose public half was passed to `create`
+name: Deploy to Droplet
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to deploy
+        required: true
+        default: main
+
+concurrency:
+  group: deploy-droplet
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: droplet
+    steps:
+      - name: Deploy over SSH
+        env:
+          SSH_KEY: ${{ secrets.DROPLET_SSH_KEY }}
+          HOST: ${{ secrets.DROPLET_HOST }}
+          REF: ${{ inputs.ref }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "root@$HOST" \
+            "set -euo pipefail
+             cd /opt/dataflow
+             git fetch origin \"$REF\"
+             git checkout --detach FETCH_HEAD
+             docker compose -f docker-compose.yml -f deploy/droplet/docker-compose.droplet.yml up -d --build
+             docker image prune -f"

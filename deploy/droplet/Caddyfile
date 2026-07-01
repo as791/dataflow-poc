@@ -1,0 +1,14 @@
+# TLS termination for the DataFlow droplet. Caddy provisions and renews a
+# Let's Encrypt certificate for DATAFLOW_DOMAIN automatically; port 80 serves
+# the ACME challenge and redirects everything else to HTTPS.
+#
+# To receive certificate-expiry notices, add your address as a global option:
+#   {
+#       email you@example.com
+#   }
+
+{$DATAFLOW_DOMAIN} {
+	encode zstd gzip
+	# web's nginx serves the SPA and proxies /api to the Go API.
+	reverse_proxy web:80
+}

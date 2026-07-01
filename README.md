@@ -131,6 +131,7 @@ supported configuration.
 | Backend contracts | [docs/BACKEND_CONTRACTS.md](docs/BACKEND_CONTRACTS.md) |
 | Go backend decision | [docs/ADR-002-GO-BACKEND.md](docs/ADR-002-GO-BACKEND.md) |
 | Medallion architecture | [docs/MEDALLION_ARCHITECTURE.md](docs/MEDALLION_ARCHITECTURE.md) |
+| DigitalOcean Droplet deployment | [docs/DEPLOY_DROPLET.md](docs/DEPLOY_DROPLET.md) |
 | Product roadmap | [docs/PRODUCTROADMAP.md](docs/PRODUCTROADMAP.md) |
 
 ## Project Status
