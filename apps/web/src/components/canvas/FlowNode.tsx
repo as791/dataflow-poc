@@ -6,25 +6,32 @@ import { Handle, Position } from 'reactflow';
 import { type CatalogEntry } from '../../catalog';
 import { useCatalog } from '../../context/CatalogContext';
 
-const EXACT_ICON: Record<string, typeof Braces> = {
+type LucideIcon = typeof Braces;
+const EXACT_ICON: Record<string, LucideIcon> = {
   'sink.postgres': Database, 'sink.webhook': Webhook,
   'sink.records': HardDrive, 'transform.filter': Filter,
 };
-const PREFIX_ICON: Array<[string, typeof Braces]> = [
+const PREFIX_ICON: Array<[string, LucideIcon]> = [
   ['zendesk.', BadgeHelp], ['gsheets.', Sheet], ['gdrive.', Triangle],
   ['excel.', FileSpreadsheet], ['http.', Globe2], ['transform.parse', FileJson],
 ];
-const NODE_TYPE_ICON: Record<string, typeof Braces> = {
+const NODE_TYPE_ICON: Record<string, LucideIcon> = {
   source: Database, sink: ArrowDownToLine, fork: GitFork, merge: Merge,
 };
+
+function resolveIcon(activityType?: string, nodeType?: string): LucideIcon {
+  if (activityType) {
+    if (EXACT_ICON[activityType]) return EXACT_ICON[activityType];
+    const match = PREFIX_ICON.find(([p]) => activityType.startsWith(p));
+    if (match) return match[1];
+  }
+  return (nodeType && NODE_TYPE_ICON[nodeType]) || Braces;
+}
 
 export function ActivityIcon({ activityType, nodeType, size = 16 }: {
   activityType?: string; nodeType?: string; size?: number;
 }) {
-  const Icon = (activityType && (
-    EXACT_ICON[activityType] ??
-    PREFIX_ICON.find(([p]) => activityType.startsWith(p))?.[1]
-  )) ?? (nodeType && NODE_TYPE_ICON[nodeType]) ?? Braces;
+  const Icon = resolveIcon(activityType, nodeType);
   return <Icon size={size} strokeWidth={1.8} />;
 }
 
