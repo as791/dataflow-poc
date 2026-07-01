@@ -16,10 +16,27 @@
 type Token =
   | { kind: 'value'; value: unknown }
   | { kind: 'path'; value: string }
+  | { kind: 'func'; value: keyof typeof FUNCTIONS }
   | { kind: 'op'; value: string }
-  | { kind: 'paren'; value: '(' | ')' };
+  | { kind: 'paren'; value: '(' | ')' }
+  | { kind: 'comma'; value: ',' };
 
-const OPERATORS = ['===', '!==', '>=', '<=', '&&', '||', '==', '!=', '>', '<', '!'];
+const OPERATORS = ['===', '!==', '>=', '<=', '&&', '||', '==', '!=', '>', '<', '!', '+', '-', '*', '/', '%'];
+const FUNCTIONS = {
+  abs: (value: unknown) => Math.abs(Number(value)),
+  round: (value: unknown, digits: unknown = 0) => {
+    const factor = 10 ** Math.max(0, Math.min(10, Number(digits) || 0));
+    return Math.round(Number(value) * factor) / factor;
+  },
+  lower: (value: unknown) => String(value ?? '').toLowerCase(),
+  upper: (value: unknown) => String(value ?? '').toUpperCase(),
+  string: (value: unknown) => String(value ?? ''),
+  number: (value: unknown) => Number(value),
+  length: (value: unknown) => Array.isArray(value) || typeof value === 'string'
+    ? value.length : value && typeof value === 'object' ? Object.keys(value).length : 0,
+  coalesce: (...values: unknown[]) => values.find(value => value !== null && value !== undefined),
+  concat: (...values: unknown[]) => values.map(value => String(value ?? '')).join(''),
+};
 
 function tokenize(expression: string): Token[] {
   const tokens: Token[] = [];
@@ -30,6 +47,7 @@ function tokenize(expression: string): Token[] {
     if (ch === '(' || ch === ')') {
       tokens.push({ kind: 'paren', value: ch }); i++; continue;
     }
+    if (ch === ',') { tokens.push({ kind: 'comma', value: ',' }); i++; continue; }
     const op = OPERATORS.find(candidate => expression.startsWith(candidate, i));
     if (op) {
       tokens.push({ kind: 'op', value: op }); i += op.length; continue;
@@ -54,7 +72,7 @@ function tokenize(expression: string): Token[] {
       tokens.push({ kind: 'value', value });
       continue;
     }
-    const number = expression.slice(i).match(/^-?(?:\d+\.?\d*|\.\d+)/)?.[0];
+    const number = expression.slice(i).match(/^(?:\d+\.?\d*|\.\d+)/)?.[0];
     if (number) {
       tokens.push({ kind: 'value', value: Number(number) });
       i += number.length;
@@ -66,6 +84,9 @@ function tokenize(expression: string): Token[] {
       else if (identifier === 'false') tokens.push({ kind: 'value', value: false });
       else if (identifier === 'null') tokens.push({ kind: 'value', value: null });
       else if (identifier === 'undefined') tokens.push({ kind: 'value', value: undefined });
+      else if (Object.prototype.hasOwnProperty.call(FUNCTIONS, identifier) && expression.slice(i + identifier.length).trimStart().startsWith('(')) {
+        tokens.push({ kind: 'func', value: identifier as keyof typeof FUNCTIONS });
+      }
       else {
         if (!identifier.startsWith('r.') && identifier !== 'r' &&
             !identifier.startsWith('records.') && identifier !== 'records') {
@@ -99,6 +120,21 @@ function evaluateTokens(tokens: Token[], context: Record<string, unknown>): unkn
     if (!token) throw new Error('expected value');
     if (token.kind === 'value') return token.value;
     if (token.kind === 'path') return resolvePath(token.value, context);
+    if (token.kind === 'func') {
+      const open = tokens[index++];
+      if (open?.kind !== 'paren' || open.value !== '(') throw new Error('expected function arguments');
+      const args: unknown[] = [];
+      if (!(tokens[index]?.kind === 'paren' && tokens[index].value === ')')) {
+        while (true) {
+          args.push(logicalOr());
+          if (tokens[index]?.kind !== 'comma') break;
+          index++;
+        }
+      }
+      const close = tokens[index++];
+      if (close?.kind !== 'paren' || close.value !== ')') throw new Error('missing closing parenthesis');
+      return (FUNCTIONS[token.value] as (...values: unknown[]) => unknown)(...args);
+    }
     if (token.kind === 'paren' && token.value === '(') {
       const value = logicalOr();
       const close = tokens[index++];
@@ -113,17 +149,41 @@ function evaluateTokens(tokens: Token[], context: Record<string, unknown>): unkn
       index++;
       return !unary();
     }
+    if (tokens[index]?.kind === 'op' && tokens[index].value === '-') {
+      index++;
+      return -Number(unary());
+    }
     return primary();
   };
 
+  const multiplicative = (): unknown => {
+    let value = unary();
+    while (tokens[index]?.kind === 'op' && ['*', '/', '%'].includes(String(tokens[index].value))) {
+      const operator = String(tokens[index++].value);
+      const right = Number(unary());
+      value = operator === '*' ? Number(value) * right : operator === '/' ? Number(value) / right : Number(value) % right;
+    }
+    return value;
+  };
+
+  const additive = (): unknown => {
+    let value = multiplicative();
+    while (tokens[index]?.kind === 'op' && ['+', '-'].includes(String(tokens[index].value))) {
+      const operator = String(tokens[index++].value);
+      const right = multiplicative();
+      value = operator === '+' ? Number(value) + Number(right) : Number(value) - Number(right);
+    }
+    return value;
+  };
+
   const comparison = (): unknown => {
-    let left = unary();
+    let left = additive();
     const token = tokens[index];
     if (token?.kind !== 'op' || !['===', '!==', '==', '!=', '>', '<', '>=', '<='].includes(token.value)) {
       return left;
     }
     index++;
-    const right = unary();
+    const right = additive();
     switch (token.value) {
       case '===': return left === right;
       case '!==': return left !== right;
@@ -173,13 +233,16 @@ function splitProjectionFields(body: string): string[] {
   const fields: string[] = [];
   let start = 0;
   let quote = '';
+  let depth = 0;
   for (let i = 0; i < body.length; i++) {
     const ch = body[i];
     if (quote) {
       if (ch === '\\') i++;
       else if (ch === quote) quote = '';
     } else if (ch === "'" || ch === '"') quote = ch;
-    else if (ch === ',') {
+    else if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    else if (ch === ',' && depth === 0) {
       fields.push(body.slice(start, i).trim());
       start = i + 1;
     }
@@ -207,6 +270,11 @@ export function evaluateMapExpression(expression: string, record: unknown): unkn
   return output;
 }
 
+export function evaluateFormulaExpression(expression: string, record: unknown): unknown {
+  if (!expression?.trim()) throw new Error('formula is empty');
+  return evaluateTokens(tokenize(expression), { r: record });
+}
+
 export interface MapFieldLineage { outputField: string; inputFields: string[] }
 
 export function deriveMapFieldLineage(expression: string): MapFieldLineage[] {
@@ -223,9 +291,13 @@ export function deriveMapFieldLineage(expression: string): MapFieldLineage[] {
   });
 }
 
-export function validateSafeExpression(expression: string, mode: 'predicate' | 'map'): void {
+export function validateSafeExpression(expression: string, mode: 'predicate' | 'map' | 'formula'): void {
   if (mode === 'predicate') {
     tokenize(expression);
+    return;
+  }
+  if (mode === 'formula') {
+    evaluateFormulaExpression(expression, {});
     return;
   }
   evaluateMapExpression(expression, {});

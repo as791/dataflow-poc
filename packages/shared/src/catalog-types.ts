@@ -16,7 +16,7 @@ export interface FieldSpec {
   picker?: 'gsheets' | 'gdrive' | 'excel' | 'zendesk';
   // 'instance-picker' lists connector instances of this provider (A3/A6) and
   // writes the chosen instance id into config.connectionId.
-  provider?: 'google' | 'microsoft' | 'zendesk' | 'postgres' | 'mysql' | 'mongodb' | 'clickhouse' | 's3' | 'kafka' | 'http';
+  provider?: 'google' | 'microsoft' | 'zendesk' | 'postgres' | 'mysql' | 'mongodb' | 'clickhouse' | 's3' | 'sftp' | 'snowflake' | 'iceberg' | 'kafka' | 'http';
   // Keys that this picker writes into config (e.g. picker 'gsheets' writes
   // connectionId + spreadsheetId + range + sheetName). Documented for clarity;
   // the picker components do the writes themselves.
@@ -32,4 +32,5 @@ export interface CatalogEntry {
   color: string;
   fields: FieldSpec[];
   supportsIngestion?: boolean; // shows incremental/backfill controls
+  requiredFeature?: import('./features').PaidFeatureKey;
 }

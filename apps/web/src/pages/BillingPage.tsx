@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Activity, CalendarClock, CreditCard, Gauge, Plus } from 'lucide-react';
 import { api } from '../api';
+import { useAuth } from '../context/AuthContext';
+import { useFeatures } from '../context/FeatureContext';
+import type { PaidFeatureKey } from '@dataflow/shared';
 
 type Usage = {
   used: number;
@@ -28,6 +31,13 @@ declare global {
 }
 
 const RAZORPAY_SCRIPT_SRC = 'https://checkout.razorpay.com/v1/checkout.js';
+const ADD_ONS: Array<{ key: PaidFeatureKey; label: string; billing: string; description: string }> = [
+  { key: 'realtime', label: 'Realtime', billing: 'Usage metered', description: 'CDC and Kafka streaming connectors.' },
+  { key: 'statefulProcessing', label: 'Stateful processing', billing: 'Paid add-on', description: 'Cross-run deduplication and durable transform state.' },
+  { key: 'advancedConnectors', label: 'Advanced connectors', billing: 'Paid add-on', description: 'SFTP and warehouse connector pack.' },
+  { key: 'deepObservability', label: 'Deep observability', billing: 'Paid add-on', description: 'Temporal traces and extended retention.' },
+  { key: 'governance', label: 'Governance', billing: 'Enterprise', description: 'Audit export and advanced controls.' },
+];
 
 function loadRazorpay(): Promise<boolean> {
   if (typeof window === 'undefined') return Promise.resolve(false);
@@ -59,10 +69,13 @@ function fmtDate(iso: string) {
 }
 
 export function BillingPage() {
+  const { user } = useAuth();
+  const { features, availability, loading: featuresLoading, setFeature } = useFeatures();
   const [usage, setUsage] = useState<Usage | null>(null);
   const [history, setHistory] = useState<Payment[]>([]);
   const [buying, setBuying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [featureBusy, setFeatureBusy] = useState<PaidFeatureKey | null>(null);
   const pollRef = useRef<number | null>(null);
 
   async function refresh() {
@@ -136,6 +149,22 @@ export function BillingPage() {
   const limit = usage?.limit ?? 0;
   const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
 
+  async function toggleFeature(feature: PaidFeatureKey, enabled: boolean) {
+    setFeatureBusy(feature); setError(null);
+    try { await setFeature(feature, enabled); }
+    catch (e) { setError((e as Error).message); }
+    finally { setFeatureBusy(null); }
+  }
+
+  async function downloadAudit() {
+    try {
+      const blob = await api.downloadAuditExport();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a'); link.href = url; link.download = 'audit-log.csv'; link.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { setError((e as Error).message); }
+  }
+
   return (
     <div className="mx-auto max-w-4xl space-y-6 px-6 py-10">
       <div>
@@ -195,6 +224,28 @@ export function BillingPage() {
             <Plus size={15} /> {buying ? 'Opening checkout…' : 'Buy 5 executions — ₹100'}
           </button>
         </div>
+      </div>
+
+      <div className="glass-panel p-6">
+        <h2 className="text-lg font-semibold">Feature add-ons</h2>
+        <p className="mt-1 text-sm opacity-60">Workspace owners control commercial entitlements. Uninstalled capabilities cannot be enabled.</p>
+        <div className="mt-4 divide-y divide-white/5">
+          {ADD_ONS.map(addOn => {
+            const installed = availability[addOn.key];
+            const enabled = features[addOn.key];
+            return <div key={addOn.key} className="flex items-center justify-between gap-4 py-4">
+              <div>
+                <div className="flex items-center gap-2"><span className="font-medium">{addOn.label}</span><span className="glass-badge">{installed ? addOn.billing : 'Not installed'}</span></div>
+                <p className="mt-1 text-xs opacity-60">{addOn.description}</p>
+              </div>
+              <input type="checkbox" className="h-4 w-4" aria-label={`Enable ${addOn.label}`}
+                checked={enabled} disabled={featuresLoading || user?.role !== 'owner' || !installed || featureBusy === addOn.key}
+                onChange={event => toggleFeature(addOn.key, event.target.checked)} />
+            </div>;
+          })}
+        </div>
+        {user?.role !== 'owner' && <p className="mt-2 text-xs opacity-60">Only a workspace owner can change add-ons.</p>}
+        {user?.role === 'owner' && features.governance && <button className="glass-btn-ghost mt-3" onClick={downloadAudit}>Download audit CSV</button>}
       </div>
 
       <div className="glass-panel p-6">

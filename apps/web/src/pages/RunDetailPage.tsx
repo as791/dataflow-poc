@@ -7,6 +7,7 @@ import { useCatalog } from '../context/CatalogContext';
 import { buildRunGraph, type NodeRun } from './runGraph';
 import { displayEnvironment } from './LifecyclePage';
 import { useTheme } from '../context/ThemeContext';
+import { useFeatures } from '../context/FeatureContext';
 
 const TERMINAL = ['completed', 'failed', 'cancelled'];
 const STATUS_RING: Record<string, string> = {
@@ -44,9 +45,11 @@ export default function RunDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { dark } = useTheme();
+  const { features } = useFeatures();
   const [data, setData] = useState<{ execution: any; definition: any; nodeRuns: NodeRun[]; qualityResults?: any[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [trace, setTrace] = useState<any[] | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
@@ -74,6 +77,11 @@ export default function RunDetailPage() {
     catch (e: any) { setError(e.message ?? 'Retry failed'); setRetrying(false); }
   };
 
+  const loadTrace = async () => {
+    try { setTrace((await api.getExecutionTrace(id!)).events ?? []); }
+    catch (e: any) { setError(e.message ?? 'Trace failed'); }
+  };
+
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
       <div className="flex items-center gap-3 border-b border-gray-100 dark:border-white/[0.07] px-6 py-4">
@@ -89,6 +97,7 @@ export default function RunDetailPage() {
             <RotateCcw size={15} /> {retrying ? 'Retrying…' : 'Retry run'}
           </button>
         )}
+        {features.deepObservability && <button className="glass-btn-ghost ml-auto text-sm" onClick={loadTrace}>Temporal trace</button>}
       </div>
       {error && (
         <div className="mx-6 mt-4 text-xs text-red-600 dark:text-danger/90 bg-red-50 dark:bg-danger/10 border border-red-200 dark:border-danger/30 rounded-lg px-3 py-2">
@@ -101,6 +110,11 @@ export default function RunDetailPage() {
           <p className="mt-0.5 text-[10px] text-gray-500 dark:text-white/50">{Number(result.passed_count).toLocaleString()} passed · {Number(result.failed_count).toLocaleString()} rejected{result.quarantine_available ? ' · quarantined' : ''}</p>
           {result.error_samples?.[0] && <p className="mt-1 max-w-md truncate text-[10px] text-red-500">Row {Number(result.error_samples[0].rowIndex) + 1}: {result.error_samples[0].errors.join('; ')}</p>}
         </div>)}
+      </div>}
+      {trace && <div className="max-h-56 overflow-auto border-b border-gray-100 px-6 py-3 text-xs dark:border-white/[0.07]">
+        <div className="mb-2 flex items-center justify-between"><strong>Temporal history</strong><button className="glass-btn-ghost" onClick={() => setTrace(null)}>Close</button></div>
+        {trace.map(event => <details key={event.eventId} className="border-t border-gray-100 py-2 dark:border-white/[0.06]"><summary>#{event.eventId} · event {event.eventType}</summary><pre className="mt-2 overflow-auto whitespace-pre-wrap text-[10px] opacity-70">{JSON.stringify(event.attributes, null, 2)}</pre></details>)}
+        {!trace.length && <p className="opacity-60">No history events.</p>}
       </div>}
       <div className="flex-1">
         <ReactFlow nodes={graph.nodes} edges={graph.edges} nodeTypes={nodeTypes}

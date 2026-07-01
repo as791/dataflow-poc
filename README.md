@@ -75,9 +75,9 @@ produce, bounded paging, and offset resume against a real Kafka-compatible broke
 Monitoring persists deduplicated SLO incidents in `pipeline_alerts`; operators
 can acknowledge or resolve them from `/monitoring`, and a later healthy run
 auto-resolves cleared breaches. Fresh installations apply migrations through
-`db/016_backfills.sql` automatically. Existing Docker volumes must apply
-migrations 011–016 once before incidents, run retry, asset history, quality,
-external lineage, and partitioned backfills are available.
+`db/020_cross_run_dedupe.sql` automatically. Existing Docker volumes must apply
+migrations 011–020 once before incidents, run retry, asset history, quality,
+external lineage, partitioned backfills, RBAC, and paid feature controls are available.
 
 Multi-pipeline chaining uses tenant/environment-scoped Redis Stream events backed
 by `pipeline_event_outbox`. Choose **Asset materialized** for medallion consumers:

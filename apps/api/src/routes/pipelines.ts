@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import { v4 as uuid, validate as uuidValidate } from 'uuid';
 import { randomBytes } from 'crypto';
 import { withTenantTx } from '../db';
@@ -10,9 +10,30 @@ import { requireOwner, requirePipelineAccess } from '../middleware/auth';
 import { validatePipeline } from '../lib/validatePipeline';
 import { hashOpenLineageKey, ingestOpenLineageEvent } from '../lib/openlineage';
 import { planBackfill, validateBackfillSources } from '../backfills';
+import { paidFeatures, pipelineUsesAdvancedConnectors, pipelineUsesRealtime, pipelineUsesStatefulProcessing } from '../lib/edition';
 import { attachLatestMaterializations, attachLatestQuality, buildWorkspaceLineage, comparePublishedContracts, diffPipelineLineage, downstreamOutputBindings, mergeExternalLineage, type ContractCompatibilityIssue, type PipelineDefinition, type Environment } from '@dataflow/shared';
 
 export const pipelines = Router();
+
+const requirePipelineFeatures: RequestHandler = async (req, res, next) => {
+  try {
+    const row = await withTenantTx(req, client => client.query(
+      `SELECT definition FROM pipelines WHERE id=$1`, [req.params.rowId]));
+    if (row.rows[0]) {
+      const enabled = await paidFeatures(req.tenant.tenantId);
+      if (pipelineUsesRealtime(row.rows[0].definition) && !enabled.realtime) {
+        return res.status(402).json({ error: 'realtime is not enabled for this workspace', feature: 'realtime' });
+      }
+      if (pipelineUsesStatefulProcessing(row.rows[0].definition) && !enabled.statefulProcessing) {
+        return res.status(402).json({ error: 'statefulProcessing is not enabled for this workspace', feature: 'statefulProcessing' });
+      }
+      if (pipelineUsesAdvancedConnectors(row.rows[0].definition) && !enabled.advancedConnectors) {
+        return res.status(402).json({ error: 'advancedConnectors is not enabled for this workspace', feature: 'advancedConnectors' });
+      }
+    }
+    next();
+  } catch (error) { next(error); }
+};
 
 type VersionHistoryRow = {
   id: string; pipeline_key: string; version: number; name: string; status: string;
@@ -90,6 +111,13 @@ pipelines.post('/', async (req, res) => {
 
   try { validatePipeline(def); }
   catch (error: any) { return res.status(400).json({ error: error.message }); }
+  const enabled = await paidFeatures(req.tenant.tenantId);
+  if (pipelineUsesRealtime(def) && !enabled.realtime)
+    return res.status(402).json({ error: 'realtime is not enabled for this workspace', feature: 'realtime' });
+  if (pipelineUsesStatefulProcessing(def) && !enabled.statefulProcessing)
+    return res.status(402).json({ error: 'statefulProcessing is not enabled for this workspace', feature: 'statefulProcessing' });
+  if (pipelineUsesAdvancedConnectors(def) && !enabled.advancedConnectors)
+    return res.status(402).json({ error: 'advancedConnectors is not enabled for this workspace', feature: 'advancedConnectors' });
   if (def.notifications?.connectionId) {
     const valid = await withTenantTx(req, async client => {
       const { rowCount } = await client.query(
@@ -117,7 +145,7 @@ pipelines.post('/', async (req, res) => {
   res.json({ rowId: rowId.rowId, pipelineKey, version: rowId.version });
 });
 
-pipelines.post('/:rowId/activate', requirePipelineAccess('editor'), async (req, res) => {
+pipelines.post('/:rowId/activate', requirePipelineAccess('editor'), requirePipelineFeatures, async (req, res) => {
   const out = await withTenantTx(req, async client => {
     const { rows } = await client.query(`SELECT * FROM pipelines WHERE id=$1`, [req.params.rowId]);
     if (!rows.length) return null;
@@ -135,7 +163,7 @@ pipelines.post('/:rowId/activate', requirePipelineAccess('editor'), async (req, 
   res.json({ ok: true, trigger: out.def.trigger, environment: out.env });
 });
 
-pipelines.post('/:rowId/run', requirePipelineAccess('editor'), requireQuota, async (req, res) => {
+pipelines.post('/:rowId/run', requirePipelineAccess('editor'), requirePipelineFeatures, requireQuota, async (req, res) => {
   const row = await withTenantTx(req, async client => {
     const { rows } = await client.query(`SELECT * FROM pipelines WHERE id=$1`, [req.params.rowId]);
     return rows[0] as { definition: PipelineDefinition; environment?: string } | undefined;
@@ -268,7 +296,7 @@ pipelines.post('/:rowId/backfills/:jobId/retry', requirePipelineAccess('admin'),
 // Promote a tested version to production: copy its definition into a new
 // active prod version, record where it came from, and register the prod
 // schedule. Owner-gated.
-pipelines.post('/:rowId/promote', requirePipelineAccess('admin'), async (req, res) => {
+pipelines.post('/:rowId/promote', requirePipelineAccess('admin'), requirePipelineFeatures, async (req, res) => {
   const out = await withTenantTx(req, async client => {
     const { rows } = await client.query(`SELECT * FROM pipelines WHERE id=$1`, [req.params.rowId]);
     if (!rows.length) return { code: 404, error: 'not found' } as const;
@@ -305,7 +333,7 @@ export function planTransition(from: Stage, to: Stage, hasGreenTestRun: boolean)
   return { code: 409, error: `unsupported stage transition ${from} → ${to}` };
 }
 
-pipelines.post('/:rowId/stage', requirePipelineAccess('admin'), async (req, res) => {
+pipelines.post('/:rowId/stage', requirePipelineAccess('admin'), requirePipelineFeatures, async (req, res) => {
   const to = req.body?.to as Stage;
   if (!['testing', 'production'].includes(to))
     return res.status(400).json({ error: 'body.to must be "testing" or "production"' });

@@ -1,5 +1,6 @@
 import { registry, type SourceFn, type Handler } from '@dataflow/connector-sdk';
-import { evaluateMapExpression, evaluatePredicate, type CdcEvent } from '@dataflow/shared';
+import { evaluateFormulaExpression, evaluateMapExpression, evaluatePredicate, type CdcEvent } from '@dataflow/shared';
+import jmespath from 'jmespath';
 import { zendeskFetch } from './connectors/zendesk';
 import { gsheetsFetch } from './connectors/gsheets';
 import { gdriveFetch } from './connectors/gdrive';
@@ -8,11 +9,14 @@ import { httpFetch } from './connectors/http';
 import { mysqlFetch, mysqlSink } from './connectors/mysql';
 import { mongodbFetch, mongodbSink } from './connectors/mongodb';
 import { s3Fetch, s3Sink } from './connectors/s3';
+import { sftpFetch, sftpSink } from './connectors/sftp';
+import { snowflakeFetch, snowflakeSink } from './connectors/snowflake';
+import { icebergFetch } from './connectors/iceberg';
 import { kafkaFetch, kafkaSink } from './connectors/kafka';
 import { collapseCdcEvents, fetchDebeziumBatch } from './connectors/debezium';
 import { pool } from './db';
 import { writeRecords } from './clickhouse';
-import { connectClickHouse, connectPostgres } from './connectors/credentials';
+import { connectClickHouse, connectPostgres, loadCredentialInstance } from './connectors/credentials';
 import axios from 'axios';
 import crypto from 'crypto';
 
@@ -33,9 +37,20 @@ const codedSources: Record<string, SourceFn> = {
   'mysql.fetch':    mysqlFetch,
   'mongodb.fetch':  mongodbFetch,
   's3.fetch':       s3Fetch,
+  'sftp.fetch':     sftpFetch,
+  'snowflake.fetch': snowflakeFetch,
+  'iceberg.fetch':  icebergFetch,
   'kafka.fetch':    kafkaFetch,
 };
 export const sources: Record<string, SourceFn> = { ...codedSources, ...registry.getSources() };
+
+export function resolveWebhookSettings(config: Record<string, any>, instance?: Awaited<ReturnType<typeof loadCredentialInstance>>) {
+  if (instance) {
+    if (instance.provider !== 'http') throw new Error(`connector ${config.connectionId} is not HTTP`);
+    return { url: String(instance.extra.baseUrl ?? ''), secret: String(instance.secret.hmacSecret ?? '') };
+  }
+  return { url: String(config.url ?? ''), secret: String(config.secret ?? '') };
+}
 
 // ── transform.flatten / transform.parse helpers (pure; exported for the unit check) ──
 type ArrayPolicy = 'index' | 'stringify' | 'keep';
@@ -166,6 +181,11 @@ export function dedupeRecords(
   return [...byKey.values()];
 }
 
+export function dedupeKeyHash(record: any, key: string | string[]): string {
+  const keys = (Array.isArray(key) ? key : String(key ?? '').split(',')).map(k => k.trim()).filter(Boolean);
+  return crypto.createHash('sha256').update(JSON.stringify(keys.map(k => record[k]))).digest('hex');
+}
+
 // Build a multi-row INSERT … ON CONFLICT upsert. Pure + exported for the unit
 // check. Identifiers are double-quoted (quotes stripped); values are bound as
 // $1..$N in row-major order, so the caller passes records.flatMap(cols).
@@ -258,6 +278,12 @@ const codedHandlers: Record<string, Handler> = {
   'transform.filter': async (input, config) =>
     (input as any[]).filter(r => evaluatePredicate(config.predicate as string, { r })),
 
+  'transform.formula': async (input, config) =>
+    (input as any[]).map(r => ({ ...r, [String(config.outputField)]: evaluateFormulaExpression(String(config.expression), r) })),
+
+  'transform.select': async (input, config) =>
+    (input as any[]).map(r => jmespath.search(r, String(config.expression))),
+
   'transform.rename': async (input, config) => {
     const mapping = (typeof config.mapping === 'string' ? JSON.parse(config.mapping) : config.mapping) as Record<string, string>;
     if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) throw new Error('transform.rename: mapping must be a JSON object');
@@ -268,9 +294,8 @@ const codedHandlers: Record<string, Handler> = {
     });
   },
 
-  'transform.dedupe': async (input, config) =>
-    dedupeRecords(input as any[], config.key as any,
-      config.keep === 'last' ? 'last' : 'first'),
+  'transform.dedupe': async (input, config) => dedupeRecords(
+    input as any[], config.key as any, config.keep === 'last' ? 'last' : 'first'),
 
   'transform.flatten': async (input, config) =>
     (input as any[]).map(r => flattenRecord(
@@ -303,6 +328,9 @@ const codedHandlers: Record<string, Handler> = {
     await writeRecords(ctx.tenantId, collection, input as any[], dedupField);
     return null;
   },
+
+  'sink.sftp': sftpSink,
+  'sink.snowflake': snowflakeSink,
 
   // BYO Postgres destination — upsert into the user's table via a credential
   // instance (config.connectionId). config.table + optional config.conflictKey
@@ -402,12 +430,17 @@ const codedHandlers: Record<string, Handler> = {
     return null;
   },
 
-  'sink.webhook': async (input, config) => {
-    const body = JSON.stringify({ records: input });
-    const sig = config.secret
-      ? crypto.createHmac('sha256', config.secret as string).update(body).digest('hex')
+  'sink.webhook': async (input, config, ctx) => {
+    const instance = config.connectionId
+      ? await loadCredentialInstance(String(config.connectionId), ctx.tenantId)
       : undefined;
-    await axios.post(config.url as string, body, {
+    const { url, secret } = resolveWebhookSettings(config, instance);
+    if (!url) throw new Error('sink.webhook: URL or HTTP connector instance required');
+    const body = JSON.stringify({ records: input });
+    const sig = secret
+      ? crypto.createHmac('sha256', secret).update(body).digest('hex')
+      : undefined;
+    await axios.post(url, body, {
       headers: { 'Content-Type': 'application/json',
                  ...(sig ? { 'X-Signature-SHA256': sig } : {}) },
       timeout: 15_000,

@@ -1,6 +1,7 @@
 import assert from 'node:assert';
-import { applyDataContract, flattenRecord, parseRecordFields, dedupeRecords, buildPgSourceQuery, buildPgUpsert, buildPgDelete, safeClickHouseTable } from './catalog';
-import { buildAssetMaterializationEvent, mergeArrays } from './index';
+import { applyDataContract, flattenRecord, parseRecordFields, dedupeKeyHash, dedupeRecords, buildPgSourceQuery, buildPgUpsert, buildPgDelete, resolveWebhookSettings, safeClickHouseTable } from './catalog';
+import { buildAssetMaterializationEvent, mergeArrays, usesAdvancedConnector, usesRealtimeNode, usesStatefulNode } from './index';
+import jmespath from 'jmespath';
 import { buildMysqlDelete, buildMysqlSourceQuery, buildMysqlUpsert } from './connectors/mysql';
 import { buildMongoCursorFilter } from './connectors/mongodb';
 import { decodeKafkaRecord, validKafkaTopic } from './connectors/kafka';
@@ -43,6 +44,17 @@ assert.strictEqual(mergeArrays('union', [[{ id: 1 }, { id: 2 }], [{ id: 2 }, { i
 const tagged = mergeArrays('appendWithSourceTag', [left, right]);
 assert.strictEqual(tagged[0]._source, 0); assert.strictEqual(tagged[3]._source, 1);
 assert.throws(() => mergeArrays('innerJoin', [left, right]), /joinKey/);
+assert.deepStrictEqual(resolveWebhookSettings(
+  { connectionId: 'http', url: 'https://override.invalid', secret: 'inline' },
+  { provider: 'http', kind: 'credential', extra: { baseUrl: 'https://hooks.example.com' }, secret: { apiKey: 'bearer', hmacSecret: 'signing' } },
+), { url: 'https://hooks.example.com', secret: 'signing' });
+assert.equal(usesRealtimeNode('postgres.fetch', { syncMode: 'cdc' }), true);
+assert.equal(usesRealtimeNode('postgres.fetch', { syncMode: 'cursor' }), false);
+assert.equal(usesRealtimeNode('sink.kafka', {}), true);
+assert.equal(usesStatefulNode('transform.dedupe', { scope: 'pipeline' }), true);
+assert.equal(usesAdvancedConnector('iceberg.fetch'), true);
+assert.equal(dedupeKeyHash({ id: 1 }, 'id'), dedupeKeyHash({ id: 1 }, ['id']));
+assert.deepStrictEqual(jmespath.search({ customer: { id: 7 } }, '{id: customer.id}'), { id: 7 });
 
 // ── A5: compound-key dedupe + keep ──
 const dupes = [

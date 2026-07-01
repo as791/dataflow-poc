@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BadgeHelp, Blocks, RefreshCw, Sheet, ShieldCheck, Plug } from 'lucide-react';
 import { api } from '../api';
+import { useFeatures } from '../context/FeatureContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -149,8 +150,8 @@ function ZendeskModal({ onClose, onConnect }: {
 
 // ─── Credential instance modal (A3 — non-OAuth creds) ──────────────────────────
 
-function CredentialModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const [provider, setProvider] = useState<'postgres' | 'mysql' | 'mongodb' | 'clickhouse' | 's3' | 'kafka' | 'http'>('postgres');
+function CredentialModal({ onClose, onSaved, realtime, advanced }: { onClose: () => void; onSaved: () => void; realtime: boolean; advanced: boolean }) {
+  const [provider, setProvider] = useState<'postgres' | 'mysql' | 'mongodb' | 'clickhouse' | 's3' | 'sftp' | 'snowflake' | 'iceberg' | 'kafka' | 'http'>('postgres');
   const [name, setName] = useState('');
   const [f, setF] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -169,10 +170,16 @@ function CredentialModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
         body = { provider, name, config: { url: f.url, database: f.database || 'default', username: f.username || 'default' }, secret: { password: f.password } };
       } else if (provider === 's3') {
         body = { provider, name, config: { region: f.region || 'us-east-1', endpoint: f.endpoint, forcePathStyle: f.forcePathStyle === 'true' }, secret: { accessKeyId: f.accessKeyId, secretAccessKey: f.secretAccessKey } };
+      } else if (provider === 'sftp') {
+        body = { provider, name, config: { host: f.host, port: f.port ? +f.port : 22, user: f.user, testPath: f.testPath }, secret: { password: f.password, privateKey: f.privateKey } };
+      } else if (provider === 'snowflake') {
+        body = { provider, name, config: { account: f.account, user: f.user, warehouse: f.warehouse, database: f.database, schema: f.schema }, secret: { password: f.password } };
+      } else if (provider === 'iceberg') {
+        body = { provider, name, config: { url: f.url, warehouse: f.warehouse, region: f.region, endpoint: f.endpoint, forcePathStyle: f.forcePathStyle === 'true' }, secret: { token: f.token, accessKeyId: f.accessKeyId, secretAccessKey: f.secretAccessKey } };
       } else if (provider === 'kafka') {
         body = { provider, name, config: { brokers: f.brokers, clientId: f.clientId || 'dataflow', tls: f.tls === 'true', saslMechanism: f.saslMechanism || 'none' }, secret: { username: f.username, password: f.password } };
       } else {
-        body = { provider, name, config: { baseUrl: f.baseUrl }, secret: { apiKey: f.apiKey } };
+        body = { provider, name, config: { baseUrl: f.baseUrl }, secret: { apiKey: f.apiKey, hmacSecret: f.hmacSecret } };
       }
       await api.createConnector(body);
       onSaved(); onClose();
@@ -194,7 +201,10 @@ function CredentialModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
               <option value="mongodb">MongoDB</option>
               <option value="clickhouse">ClickHouse</option>
               <option value="s3">Amazon S3</option>
-              <option value="kafka">Kafka / Redpanda</option>
+              {advanced && <option value="sftp">SFTP</option>}
+              {advanced && <option value="snowflake">Snowflake</option>}
+              {advanced && <option value="iceberg">Apache Iceberg</option>}
+              {realtime && <option value="kafka">Kafka / Redpanda</option>}
               <option value="http">HTTP API</option>
             </select>
           </label>
@@ -253,10 +263,37 @@ function CredentialModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
               </>}
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.tls === 'true'} onChange={e => setF(s => ({ ...s, tls: String(e.target.checked) }))} /> TLS</label>
             </>
+          ) : provider === 'sftp' ? (
+            <>
+              <input className="glass-input" placeholder="host" value={f.host ?? ''} onChange={set('host')} required />
+              <input className="glass-input" placeholder="port (22)" value={f.port ?? ''} onChange={set('port')} />
+              <input className="glass-input" placeholder="username" value={f.user ?? ''} onChange={set('user')} required />
+              <input className="glass-input" type="password" placeholder="password" value={f.password ?? ''} onChange={set('password')} />
+              <textarea className="glass-input" placeholder="private key (optional)" value={f.privateKey ?? ''} onChange={e => setF(s => ({ ...s, privateKey: e.target.value }))} />
+            </>
+          ) : provider === 'snowflake' ? (
+            <>
+              <input className="glass-input" placeholder="account identifier" value={f.account ?? ''} onChange={set('account')} required />
+              <input className="glass-input" placeholder="username" value={f.user ?? ''} onChange={set('user')} required />
+              <input className="glass-input" type="password" placeholder="password" value={f.password ?? ''} onChange={set('password')} required />
+              <input className="glass-input" placeholder="warehouse" value={f.warehouse ?? ''} onChange={set('warehouse')} required />
+              <input className="glass-input" placeholder="database" value={f.database ?? ''} onChange={set('database')} required />
+              <input className="glass-input" placeholder="schema (optional)" value={f.schema ?? ''} onChange={set('schema')} />
+            </>
+          ) : provider === 'iceberg' ? (
+            <>
+              <input className="glass-input" type="url" placeholder="REST catalog URL" value={f.url ?? ''} onChange={set('url')} required />
+              <input className="glass-input" placeholder="warehouse (optional)" value={f.warehouse ?? ''} onChange={set('warehouse')} />
+              <input className="glass-input" type="password" placeholder="catalog bearer token (optional)" value={f.token ?? ''} onChange={set('token')} />
+              <input className="glass-input" placeholder="S3 access key (optional)" value={f.accessKeyId ?? ''} onChange={set('accessKeyId')} />
+              <input className="glass-input" type="password" placeholder="S3 secret key (optional)" value={f.secretAccessKey ?? ''} onChange={set('secretAccessKey')} />
+              <input className="glass-input" placeholder="S3 region (us-east-1)" value={f.region ?? ''} onChange={set('region')} />
+            </>
           ) : (
             <>
               <input className="glass-input" placeholder="base URL" value={f.baseUrl ?? ''} onChange={set('baseUrl')} />
-              <input className="glass-input" type="password" placeholder="API key (optional)" value={f.apiKey ?? ''} onChange={set('apiKey')} />
+              <input className="glass-input" type="password" placeholder="Bearer API key (optional)" value={f.apiKey ?? ''} onChange={set('apiKey')} />
+              <input className="glass-input" type="password" placeholder="Webhook HMAC secret (optional)" value={f.hmacSecret ?? ''} onChange={set('hmacSecret')} />
             </>
           )}
           {err && <p className="text-xs text-danger/90 bg-danger/10 border border-danger/30 rounded-lg px-3 py-2">{err}</p>}
@@ -373,6 +410,7 @@ function ConnectorCard({ provider, label, connections, onDisconnect, onConnect }
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function ConnectorsPage() {
+  const { features } = useFeatures();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -545,7 +583,7 @@ export function ConnectorsPage() {
                       <button className="glass-btn-danger px-2.5 py-1 text-xs" onClick={() => removeCred(c.id)} aria-label={`Delete ${c.name ?? c.provider} credential`}>✕</button>
                     </div>
                   </div>
-                  {supportsCdc && (
+                  {supportsCdc && (features.realtime || status.enabled) && (
                     <div className="mt-2 rounded-lg border border-gray-200 p-2 dark:border-white/10">
                       <label className="glass-label">CDC tables / collections
                         <input className="glass-input" value={cdcResources[c.id] ?? ''}
@@ -597,7 +635,7 @@ export function ConnectorsPage() {
 
       {/* Credential modal */}
       {credModalOpen && (
-        <CredentialModal onClose={() => setCredModalOpen(false)} onSaved={refresh} />
+        <CredentialModal realtime={features.realtime} advanced={features.advancedConnectors} onClose={() => setCredModalOpen(false)} onSaved={refresh} />
       )}
     </div>
   );
