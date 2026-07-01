@@ -1,0 +1,50 @@
+# Backend Compatibility Contracts
+
+This inventory is the frozen frontend/POC contract for the Go cutover. Unless a
+route explicitly returns a redirect, successful responses are JSON with
+`Content-Type: application/json; charset=utf-8`. Errors are
+`{"error":"message"}`. JSON request bodies are limited to 5 MiB. Authenticated
+routes accept `Authorization: Bearer <JWT-or-API-token>`; browser refresh auth
+uses the existing HttpOnly refresh cookie. CORS permits the configured
+`APP_URL`, credentials, `Authorization`, and `Content-Type`. OAuth callbacks
+validate signed state and redirect to the existing frontend connector routes.
+The Razorpay webhook consumes the unmodified request bytes and validates
+`X-Razorpay-Signature` before decoding JSON.
+
+Public/operational routes:
+
+- `GET /health`, `GET /metrics`
+- `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`
+- `GET /api/auth/google`, `GET /api/auth/google/callback`, `GET /api/auth/oidc`, `GET /api/auth/oidc/callback`, `GET /api/auth/accept-invite`
+- `POST /api/billing/webhook`, `POST /api/hooks/{path}`, `POST /api/openlineage`
+- `GET /api/analytics/shared/{token}`
+
+Authenticated control-plane routes:
+
+- `GET /api/auth/me`
+- `GET /api/edition`, `PUT /api/edition/features/{feature}`, `GET /api/edition/audit-export`
+- `GET /api/alerts`, `POST /api/alerts/{id}/acknowledge`, `POST /api/alerts/{id}/resolve`, `POST /api/alerts/{id}/retry-notification`
+- `GET|POST /api/team/invitations`, `DELETE /api/team/invitations/{email}`, `GET /api/team/members`, `GET|POST /api/team/tokens`, `DELETE /api/team/tokens/{id}`
+- `GET|POST /api/pipelines`, `GET /api/pipelines/{rowId}`, `POST /api/pipelines/{rowId}/activate`, `POST /api/pipelines/{rowId}/run`, `POST /api/pipelines/{rowId}/promote`, `POST /api/pipelines/{rowId}/stage`
+- `POST /api/pipelines/{rowId}/backfills/plan`, `GET|POST /api/pipelines/{rowId}/backfills`, `DELETE /api/pipelines/{rowId}/backfills/{jobId}`, `POST /api/pipelines/{rowId}/backfills/{jobId}/retry`
+- `GET|POST /api/pipelines/{rowId}/access`, `DELETE /api/pipelines/{rowId}/access/{userId}`
+- `POST /api/pipelines/lineage/openlineage`, `POST|DELETE /api/pipelines/lineage/openlineage-key`, `GET /api/pipelines/lineage/changes`, `GET /api/pipelines/lineage/workspace`
+- `GET /api/executions`, `GET /api/executions/logs`, `GET /api/executions/monitoring/overview`, `GET /api/executions/{id}`, `GET /api/executions/{id}/status`, `GET /api/executions/{id}/trace`, `POST /api/executions/{id}/retry`, `POST /api/executions/{id}/{pause|resume|cancel}`
+- `GET /api/connectors/catalog`, `GET|POST /api/connectors`, `DELETE /api/connectors/{connectionId}`, `POST /api/connectors/{connectionId}/refresh`, `POST /api/connectors/{connectionId}/test`, `GET|PUT|DELETE /api/connectors/{connectionId}/cdc`
+- `GET /api/connectors/google/auth`, `GET /api/connectors/google/callback`, `GET /api/connectors/google/spreadsheets`, `GET /api/connectors/google/spreadsheets/{id}/sheets`, `GET /api/connectors/google/spreadsheets/{id}/sheets/{name}/preview`, `GET /api/connectors/google/drive/folders`, `GET /api/connectors/google/drive/files/{id}/preview`
+- `GET /api/connectors/microsoft/auth`, `GET /api/connectors/microsoft/callback`, `GET /api/connectors/microsoft/drives`, `GET /api/connectors/microsoft/drives/{driveId}/items`, `GET /api/connectors/microsoft/workbooks/{itemId}/sheets`, `GET /api/connectors/microsoft/workbooks/{itemId}/sheets/{name}/preview`
+- `POST /api/connectors/zendesk/auth`, `GET /api/connectors/zendesk/callback`, `GET /api/connectors/zendesk/resources`
+- `GET /api/analytics/datasets`, `GET /api/analytics/datasets/{name}/schema`, `POST /api/analytics/query`, `GET|POST /api/analytics/dashboards`, `GET|PUT|DELETE /api/analytics/dashboards/{id}`, `POST /api/analytics/dashboards/{id}/share`
+- `POST /api/ai/generate`, `POST /api/ai/refine`
+- `GET /api/billing/usage`, `POST /api/billing/orders`, `GET /api/billing/history`
+
+Temporal activity names are exactly `prepareScheduledExecution`,
+`fetchSourcePage`, `commitSourceCursors`, `commitDedupeKeys`, `dispatchNode`,
+`mergeRefs`, `evalEdgeCondition`, and `markExecution`. Workflow name remains
+`DynamicDAGWorkflow`; workflow queues remain `dynamic-dag-{test,prod}` and
+activity queues remain `dynamic-activities-{test,prod}`. Signals remain
+`pause`, `resume`, and `cancel`; query name remains `status`.
+
+Canonical JSON examples, including `PipelineDefinition`, activity inputs,
+`DataRef`, `NodeResult`, connector manifest, and AES-GCM bytes, live in
+`tests/contracts/backend-wire.json`.

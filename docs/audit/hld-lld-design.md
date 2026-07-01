@@ -1,5 +1,7 @@
 # HLD/LLD — Backlog Items #1–6 (P0/P1)
 
+> Archived pre-ADR-002 design; backend path references are historical.
+
 Scope: `docs/audit/reconciled-feedback.md` section 4, items 1–6 only. Items 7–14 are out of
 scope (see Non-goals). This doc assumes the reader has read the three audit docs; it does not
 re-derive findings, only designs the fix.

@@ -1,5 +1,9 @@
 # Product Roadmap — First GTM (handful of users), then enhance on request
 
+> Backend ownership changed on 2026-07-01: API, activities, connectors, and
+> object storage now live in `apps/workflow-go`. Legacy TypeScript paths below
+> describe the pre-ADR-002 baseline.
+
 > **Historical plan:** implementation has moved beyond this GTM snapshot (CDC,
 > durable events/incidents, pagination, retries, and workspace lineage now ship).
 > Use [`ENTERPRISE_ROADMAP.md`](./ENTERPRISE_ROADMAP.md) for current priorities.

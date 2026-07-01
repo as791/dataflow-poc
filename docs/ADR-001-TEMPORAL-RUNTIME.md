@@ -1,7 +1,8 @@
 # ADR-001: Cassandra Persistence, Elasticsearch Visibility, and Go Workflows
 
-**Status:** Accepted
+**Status:** Superseded by ADR-002
 **Date:** 2026-06-25
+**Superseded:** 2026-07-01
 
 ## Context
 

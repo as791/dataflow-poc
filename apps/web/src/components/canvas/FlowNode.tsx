@@ -6,24 +6,25 @@ import { Handle, Position } from 'reactflow';
 import { type CatalogEntry } from '../../catalog';
 import { useCatalog } from '../../context/CatalogContext';
 
+const EXACT_ICON: Record<string, typeof Braces> = {
+  'sink.postgres': Database, 'sink.webhook': Webhook,
+  'sink.records': HardDrive, 'transform.filter': Filter,
+};
+const PREFIX_ICON: Array<[string, typeof Braces]> = [
+  ['zendesk.', BadgeHelp], ['gsheets.', Sheet], ['gdrive.', Triangle],
+  ['excel.', FileSpreadsheet], ['http.', Globe2], ['transform.parse', FileJson],
+];
+const NODE_TYPE_ICON: Record<string, typeof Braces> = {
+  source: Database, sink: ArrowDownToLine, fork: GitFork, merge: Merge,
+};
+
 export function ActivityIcon({ activityType, nodeType, size = 16 }: {
   activityType?: string; nodeType?: string; size?: number;
 }) {
-  const Icon = activityType?.startsWith('zendesk.') ? BadgeHelp
-    : activityType?.startsWith('gsheets.') ? Sheet
-    : activityType?.startsWith('gdrive.') ? Triangle
-    : activityType?.startsWith('excel.') ? FileSpreadsheet
-    : activityType?.startsWith('http.') ? Globe2
-    : activityType === 'sink.postgres' ? Database
-    : activityType === 'sink.webhook' ? Webhook
-    : activityType === 'sink.records' ? HardDrive
-    : activityType === 'transform.filter' ? Filter
-    : activityType?.startsWith('transform.parse') ? FileJson
-    : nodeType === 'source' ? Database
-    : nodeType === 'sink' ? ArrowDownToLine
-    : nodeType === 'fork' ? GitFork
-    : nodeType === 'merge' ? Merge
-    : Braces;
+  const Icon = (activityType && (
+    EXACT_ICON[activityType] ??
+    PREFIX_ICON.find(([p]) => activityType.startsWith(p))?.[1]
+  )) ?? (nodeType && NODE_TYPE_ICON[nodeType]) ?? Braces;
   return <Icon size={size} strokeWidth={1.8} />;
 }
 

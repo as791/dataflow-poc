@@ -1,0 +1,563 @@
+package connectors
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/snowflakedb/gosnowflake"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+)
+
+var identifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func quoteIdentifier(value string) (string, error) {
+	if !identifier.MatchString(value) {
+		return "", fmt.Errorf("invalid identifier %q", value)
+	}
+	return `"` + value + `"`, nil
+}
+func quotePath(value string) (string, error) {
+	parts := strings.Split(value, ".")
+	out := make([]string, len(parts))
+	for i, part := range parts {
+		quoted, err := quoteIdentifier(part)
+		if err != nil {
+			return "", err
+		}
+		out[i] = quoted
+	}
+	return strings.Join(out, "."), nil
+}
+func recordsMaps(input interface{}) ([]map[string]interface{}, error) {
+	raw, err := records(input)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]interface{}, len(raw))
+	for i, value := range raw {
+		row, ok := value.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("records must be objects")
+		}
+		out[i] = row
+	}
+	return out, nil
+}
+
+func (r *Runtime) registerDatabases() {
+	r.Sources["postgres.fetch"] = r.postgresFetch
+	r.Handlers["sink.postgres"] = r.postgresSink
+	r.Sources["mysql.fetch"] = r.mysqlFetch
+	r.Handlers["sink.mysql"] = r.mysqlSink
+	r.Sources["mongodb.fetch"] = r.mongoFetch
+	r.Handlers["sink.mongodb"] = r.mongoSink
+	r.Sources["snowflake.fetch"] = r.snowflakeFetch
+	r.Handlers["sink.snowflake"] = r.snowflakeSink
+	r.Handlers["sink.clickhouse"] = r.clickhouseSink
+}
+func (r *Runtime) postgresConnection(ctx context.Context, id string) (*pgxpool.Pool, error) {
+	row, err := r.credential(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	cfg, _ := row["extra"].(map[string]interface{})
+	secret, _ := row["secret_value"].(map[string]interface{})
+	dsn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s", url.QueryEscape(stringValue(cfg["user"])), url.QueryEscape(stringValue(secret["password"])), stringValue(cfg["host"]), int(firstNumber(cfg["port"], 5432)), url.PathEscape(stringValue(cfg["database"])), firstString(cfg["sslMode"], "disable"))
+	return pgxpool.New(ctx, dsn)
+}
+func (r *Runtime) postgresFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
+	table, err := quotePath(stringValue(p.Config["table"]))
+	if err != nil {
+		return SourceResult{}, err
+	}
+	cursorColumn, err := quoteIdentifier(stringValue(p.Config["cursorColumn"]))
+	if err != nil {
+		return SourceResult{}, fmt.Errorf("postgres.fetch: cursorColumn required")
+	}
+	page := int(firstNumber(func() interface{} {
+		if p.Ingestion != nil {
+			return p.Ingestion.PageSize
+		}
+		return nil
+	}(), p.Config["pageSize"], 1000))
+	if page > 10000 {
+		page = 10000
+	}
+	columns := "*"
+	if value := stringValue(p.Config["columns"]); value != "" && value != "*" {
+		items := []string{}
+		for _, item := range strings.Split(value, ",") {
+			quoted, err := quoteIdentifier(strings.TrimSpace(item))
+			if err != nil {
+				return SourceResult{}, err
+			}
+			items = append(items, quoted)
+		}
+		columns = strings.Join(items, ",")
+	}
+	args := []interface{}{}
+	where := []string{}
+	if p.Cursor["value"] != nil {
+		args = append(args, p.Cursor["value"])
+		where = append(where, fmt.Sprintf("%s>$%d", cursorColumn, len(args)))
+	} else if p.Ingestion != nil && p.Ingestion.Mode == "backfill" {
+		args = append(args, p.Ingestion.BackfillStart)
+		where = append(where, fmt.Sprintf("%s>=$%d", cursorColumn, len(args)))
+	}
+	if p.Ingestion != nil && p.Ingestion.BackfillEnd != "" {
+		args = append(args, p.Ingestion.BackfillEnd)
+		where = append(where, fmt.Sprintf("%s<$%d", cursorColumn, len(args)))
+	}
+	query := fmt.Sprintf("SELECT %s FROM %s", columns, table)
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	args = append(args, page+1)
+	query += fmt.Sprintf(" ORDER BY %s ASC LIMIT $%d", cursorColumn, len(args))
+	pool, err := r.postgresConnection(ctx, stringValue(p.Config["connectionId"]))
+	if err != nil {
+		return SourceResult{}, err
+	}
+	defer pool.Close()
+	rows, err := pool.Query(ctx, query, args...)
+	if err != nil {
+		return SourceResult{}, err
+	}
+	values, err := pgRows(rows)
+	if err != nil {
+		return SourceResult{}, err
+	}
+	hasMore := len(values) > page
+	if hasMore {
+		values = values[:page]
+	}
+	next := cloneMap(p.Cursor)
+	if len(values) > 0 {
+		next["value"] = values[len(values)-1].(map[string]interface{})[strings.Trim(cursorColumn, `"`)]
+	}
+	return SourceResult{Records: values, NextCursor: next, HasMore: hasMore}, nil
+}
+func pgRows(rows pgx.Rows) ([]interface{}, error) {
+	defer rows.Close()
+	fields := rows.FieldDescriptions()
+	out := []interface{}{}
+	for rows.Next() {
+		values, err := rows.Values()
+		if err != nil {
+			return nil, err
+		}
+		row := map[string]interface{}{}
+		for i, value := range values {
+			row[string(fields[i].Name)] = value
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+func (r *Runtime) postgresSink(ctx context.Context, input interface{}, cfg map[string]interface{}, _ HandlerContext) (interface{}, map[string]interface{}, error) {
+	rows, err := recordsMaps(input)
+	if err != nil || len(rows) == 0 {
+		return nil, nil, err
+	}
+	table, err := quotePath(stringValue(cfg["table"]))
+	if err != nil {
+		return nil, nil, err
+	}
+	columns := allColumns(rows)
+	quoted := []string{}
+	for _, column := range columns {
+		value, err := quoteIdentifier(column)
+		if err != nil {
+			return nil, nil, err
+		}
+		quoted = append(quoted, value)
+	}
+	conflict := keyFields(cfg["conflictKey"])
+	pool, err := r.postgresConnection(ctx, stringValue(cfg["connectionId"]))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer pool.Close()
+	for _, row := range rows {
+		placeholders := make([]string, len(columns))
+		args := make([]interface{}, len(columns))
+		for i, column := range columns {
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
+			args[i] = row[column]
+		}
+		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", table, strings.Join(quoted, ","), strings.Join(placeholders, ","))
+		if len(conflict) > 0 {
+			keys := []string{}
+			updates := []string{}
+			for _, key := range conflict {
+				quotedKey, _ := quoteIdentifier(key)
+				keys = append(keys, quotedKey)
+			}
+			for _, column := range columns {
+				if contains(conflict, column) {
+					continue
+				}
+				quotedColumn, _ := quoteIdentifier(column)
+				updates = append(updates, quotedColumn+"=EXCLUDED."+quotedColumn)
+			}
+			query += " ON CONFLICT (" + strings.Join(keys, ",") + ") DO "
+			if len(updates) > 0 {
+				query += "UPDATE SET " + strings.Join(updates, ",")
+			} else {
+				query += "NOTHING"
+			}
+		}
+		if _, err = pool.Exec(ctx, query, args...); err != nil {
+			return nil, nil, err
+		}
+	}
+	return nil, nil, nil
+}
+func allColumns(rows []map[string]interface{}) []string {
+	set := map[string]bool{}
+	for _, row := range rows {
+		for key := range row {
+			set[key] = true
+		}
+	}
+	out := []string{}
+	for key := range set {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (r *Runtime) mysqlDB(ctx context.Context, id string) (*sql.DB, error) {
+	row, err := r.credential(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	cfg, _ := row["extra"].(map[string]interface{})
+	secret, _ := row["secret_value"].(map[string]interface{})
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true", stringValue(cfg["user"]), stringValue(secret["password"]), stringValue(cfg["host"]), int(firstNumber(cfg["port"], 3306)), stringValue(cfg["database"]))
+	db, err := sql.Open("mysql", dsn)
+	if err == nil {
+		err = db.PingContext(ctx)
+	}
+	return db, err
+}
+func (r *Runtime) mysqlFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
+	table := stringValue(p.Config["table"])
+	column := stringValue(p.Config["cursorColumn"])
+	if !identifier.MatchString(table) || !identifier.MatchString(column) {
+		return SourceResult{}, fmt.Errorf("mysql.fetch: invalid table or cursor column")
+	}
+	page := int(firstNumber(p.Config["pageSize"], 1000))
+	query := fmt.Sprintf("SELECT * FROM `%s`", table)
+	args := []interface{}{}
+	if p.Cursor["value"] != nil {
+		query += fmt.Sprintf(" WHERE `%s`>?", column)
+		args = append(args, p.Cursor["value"])
+	}
+	query += fmt.Sprintf(" ORDER BY `%s` ASC LIMIT ?", column)
+	args = append(args, page+1)
+	db, err := r.mysqlDB(ctx, stringValue(p.Config["connectionId"]))
+	if err != nil {
+		return SourceResult{}, err
+	}
+	defer db.Close()
+	result, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return SourceResult{}, err
+	}
+	values, err := sqlRows(result)
+	if err != nil {
+		return SourceResult{}, err
+	}
+	hasMore := len(values) > page
+	if hasMore {
+		values = values[:page]
+	}
+	next := cloneMap(p.Cursor)
+	if len(values) > 0 {
+		next["value"] = values[len(values)-1].(map[string]interface{})[column]
+	}
+	return SourceResult{Records: values, NextCursor: next, HasMore: hasMore}, nil
+}
+func sqlRows(rows *sql.Rows) ([]interface{}, error) {
+	defer rows.Close()
+	columns, _ := rows.Columns()
+	out := []interface{}{}
+	for rows.Next() {
+		values := make([]interface{}, len(columns))
+		pointers := make([]interface{}, len(columns))
+		for i := range values {
+			pointers[i] = &values[i]
+		}
+		if err := rows.Scan(pointers...); err != nil {
+			return nil, err
+		}
+		row := map[string]interface{}{}
+		for i, value := range values {
+			if b, ok := value.([]byte); ok {
+				value = string(b)
+			}
+			row[columns[i]] = value
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+func (r *Runtime) mysqlSink(ctx context.Context, input interface{}, cfg map[string]interface{}, _ HandlerContext) (interface{}, map[string]interface{}, error) {
+	rows, err := recordsMaps(input)
+	if err != nil || len(rows) == 0 {
+		return nil, nil, err
+	}
+	table := stringValue(cfg["table"])
+	if !identifier.MatchString(table) {
+		return nil, nil, fmt.Errorf("sink.mysql: invalid table")
+	}
+	columns := allColumns(rows)
+	db, err := r.mysqlDB(ctx, stringValue(cfg["connectionId"]))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer db.Close()
+	quoted := []string{}
+	for _, column := range columns {
+		if !identifier.MatchString(column) {
+			return nil, nil, fmt.Errorf("invalid column")
+		}
+		quoted = append(quoted, "`"+column+"`")
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(columns)), ",")
+	keys := keyFields(cfg["primaryKey"])
+	updates := []string{}
+	for _, column := range columns {
+		if !contains(keys, column) {
+			updates = append(updates, "`"+column+"`=VALUES(`"+column+"`)")
+		}
+	}
+	query := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s)", table, strings.Join(quoted, ","), placeholders)
+	if len(updates) > 0 {
+		query += " ON DUPLICATE KEY UPDATE " + strings.Join(updates, ",")
+	}
+	for _, row := range rows {
+		args := []interface{}{}
+		for _, column := range columns {
+			args = append(args, row[column])
+		}
+		if _, err = db.ExecContext(ctx, query, args...); err != nil {
+			return nil, nil, err
+		}
+	}
+	return nil, nil, nil
+}
+
+func (r *Runtime) mongoClient(ctx context.Context, id string) (*mongo.Client, string, error) {
+	row, err := r.credential(ctx, id)
+	if err != nil {
+		return nil, "", err
+	}
+	cfg, _ := row["extra"].(map[string]interface{})
+	secret, _ := row["secret_value"].(map[string]interface{})
+	auth := ""
+	if cfg["user"] != nil {
+		auth = url.QueryEscape(stringValue(cfg["user"])) + ":" + url.QueryEscape(stringValue(secret["password"])) + "@"
+	}
+	uri := fmt.Sprintf("mongodb://%s%s:%d/?authSource=%s", auth, stringValue(cfg["host"]), int(firstNumber(cfg["port"], 27017)), url.QueryEscape(firstString(cfg["authSource"], "admin")))
+	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetServerSelectionTimeout(10 * time.Second))
+	if err == nil {
+		err = client.Ping(ctx, nil)
+	}
+	return client, stringValue(cfg["database"]), err
+}
+func (r *Runtime) mongoFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
+	client, database, err := r.mongoClient(ctx, stringValue(p.Config["connectionId"]))
+	if err != nil {
+		return SourceResult{}, err
+	}
+	defer client.Disconnect(ctx)
+	collection := client.Database(database).Collection(stringValue(p.Config["collection"]))
+	field := firstString(p.Config["cursorField"], "_id")
+	filter := bson.M{}
+	if p.Cursor["value"] != nil {
+		filter[field] = bson.M{"$gt": p.Cursor["value"]}
+	}
+	page := int(firstNumber(p.Config["pageSize"], 1000))
+	cursor, err := collection.Find(ctx, filter, options.Find().SetSort(bson.D{{Key: field, Value: 1}}).SetLimit(int64(page+1)))
+	if err != nil {
+		return SourceResult{}, err
+	}
+	var docs []bson.M
+	if err = cursor.All(ctx, &docs); err != nil {
+		return SourceResult{}, err
+	}
+	hasMore := len(docs) > page
+	if hasMore {
+		docs = docs[:page]
+	}
+	values := make([]interface{}, len(docs))
+	for i, doc := range docs {
+		body, _ := json.Marshal(doc)
+		var value map[string]interface{}
+		_ = json.Unmarshal(body, &value)
+		values[i] = value
+	}
+	next := cloneMap(p.Cursor)
+	if len(values) > 0 {
+		next["value"] = values[len(values)-1].(map[string]interface{})[field]
+	}
+	return SourceResult{Records: values, NextCursor: next, HasMore: hasMore}, nil
+}
+func (r *Runtime) mongoSink(ctx context.Context, input interface{}, cfg map[string]interface{}, _ HandlerContext) (interface{}, map[string]interface{}, error) {
+	rows, err := recordsMaps(input)
+	if err != nil || len(rows) == 0 {
+		return nil, nil, err
+	}
+	client, database, err := r.mongoClient(ctx, stringValue(cfg["connectionId"]))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer client.Disconnect(ctx)
+	collection := client.Database(database).Collection(stringValue(cfg["collection"]))
+	key := firstString(cfg["keyField"], "_id")
+	for _, row := range rows {
+		if _, err = collection.ReplaceOne(ctx, bson.M{key: row[key]}, row, options.Replace().SetUpsert(true)); err != nil {
+			return nil, nil, err
+		}
+	}
+	return nil, nil, nil
+}
+
+func (r *Runtime) snowflakeDB(ctx context.Context, id string) (*sql.DB, error) {
+	row, err := r.credential(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	cfg, _ := row["extra"].(map[string]interface{})
+	secret, _ := row["secret_value"].(map[string]interface{})
+	sf := &gosnowflake.Config{Account: stringValue(cfg["account"]), User: stringValue(cfg["user"]), Password: stringValue(secret["password"]), Database: stringValue(cfg["database"]), Schema: firstString(cfg["schema"], "PUBLIC"), Warehouse: stringValue(cfg["warehouse"]), Role: stringValue(cfg["role"])}
+	dsn, err := gosnowflake.DSN(sf)
+	if err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("snowflake", dsn)
+	if err == nil {
+		err = db.PingContext(ctx)
+	}
+	return db, err
+}
+func (r *Runtime) snowflakeFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
+	table := stringValue(p.Config["table"])
+	if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*$`).MatchString(table) {
+		return SourceResult{}, fmt.Errorf("snowflake.fetch: invalid table")
+	}
+	page := int(firstNumber(p.Config["pageSize"], 1000))
+	query := "SELECT * FROM " + table
+	args := []interface{}{}
+	column := stringValue(p.Config["cursorColumn"])
+	if column != "" && p.Cursor["value"] != nil {
+		query += " WHERE " + column + ">?"
+		args = append(args, p.Cursor["value"])
+	}
+	if column != "" {
+		query += " ORDER BY " + column
+	}
+	query += " LIMIT " + strconv.Itoa(page+1)
+	db, err := r.snowflakeDB(ctx, stringValue(p.Config["connectionId"]))
+	if err != nil {
+		return SourceResult{}, err
+	}
+	defer db.Close()
+	result, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return SourceResult{}, err
+	}
+	values, err := sqlRows(result)
+	if err != nil {
+		return SourceResult{}, err
+	}
+	hasMore := len(values) > page
+	if hasMore {
+		values = values[:page]
+	}
+	next := cloneMap(p.Cursor)
+	if len(values) > 0 && column != "" {
+		next["value"] = values[len(values)-1].(map[string]interface{})[column]
+	}
+	return SourceResult{Records: values, NextCursor: next, HasMore: hasMore}, nil
+}
+func (r *Runtime) snowflakeSink(ctx context.Context, input interface{}, cfg map[string]interface{}, _ HandlerContext) (interface{}, map[string]interface{}, error) {
+	rows, err := recordsMaps(input)
+	if err != nil || len(rows) == 0 {
+		return nil, nil, err
+	}
+	table := stringValue(cfg["table"])
+	if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*$`).MatchString(table) {
+		return nil, nil, fmt.Errorf("sink.snowflake: invalid table")
+	}
+	columns := allColumns(rows)
+	db, err := r.snowflakeDB(ctx, stringValue(cfg["connectionId"]))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer db.Close()
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(columns)), ",")
+	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", table, strings.Join(columns, ","), placeholders)
+	for _, row := range rows {
+		args := []interface{}{}
+		for _, column := range columns {
+			args = append(args, row[column])
+		}
+		if _, err = db.ExecContext(ctx, query, args...); err != nil {
+			return nil, nil, err
+		}
+	}
+	return nil, nil, nil
+}
+
+func (r *Runtime) clickhouseSink(ctx context.Context, input interface{}, cfg map[string]interface{}, _ HandlerContext) (interface{}, map[string]interface{}, error) {
+	rows, err := recordsMaps(input)
+	if err != nil || len(rows) == 0 {
+		return nil, nil, err
+	}
+	instance, err := r.credential(ctx, stringValue(cfg["connectionId"]))
+	if err != nil {
+		return nil, nil, err
+	}
+	extra, _ := instance["extra"].(map[string]interface{})
+	secret, _ := instance["secret_value"].(map[string]interface{})
+	table := stringValue(cfg["table"])
+	if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$`).MatchString(table) {
+		return nil, nil, fmt.Errorf("sink.clickhouse: invalid table")
+	}
+	endpoint := strings.TrimSuffix(stringValue(extra["url"]), "/") + "/?query=" + url.QueryEscape("INSERT INTO "+table+" FORMAT JSONEachRow")
+	var body bytes.Buffer
+	encoder := json.NewEncoder(&body)
+	for _, row := range rows {
+		_ = encoder.Encode(row)
+	}
+	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &body)
+	request.SetBasicAuth(stringValue(extra["user"]), stringValue(secret["password"]))
+	response, err := r.HTTP.Do(request)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 400 {
+		return nil, nil, fmt.Errorf("clickhouse returned %d", response.StatusCode)
+	}
+	return nil, nil, nil
+}

@@ -1,0 +1,102 @@
+package config
+
+import (
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type Config struct {
+	APIPort                      string
+	AppURL                       string
+	DatabaseURL                  string
+	AppDatabaseURL               string
+	RedisURL                     string
+	TemporalAddress              string
+	TemporalNamespace            string
+	TaskQueue                    string
+	JWTAccessSecret              string
+	SMTPHost                     string
+	SMTPPort                     string
+	SMTPFrom                     string
+	SMTPUser                     string
+	SMTPPass                     string
+	ClickHouseURL                string
+	ClickHouseUser               string
+	ClickHousePassword           string
+	ClickHouseDB                 string
+	ConnectorsDir                string
+	PayloadBucket                string
+	PayloadRegion                string
+	PayloadEndpoint              string
+	PayloadForcePathStyle        bool
+	PayloadAccessKeyID           string
+	PayloadSecretAccessKey       string
+	TemporalPayloadEncryptionKey string
+	OAuthTokenEncryptionKey      string
+	WorkerPrivateKeyPath         string
+	OpenLineageURL               string
+	OpenLineageAPIKey            string
+	Edition                      string
+	AuditRetentionDays           int
+	BackfillDispatchInterval     time.Duration
+}
+
+func Load() Config {
+	return Config{
+		APIPort:                      env("API_PORT", "4000"),
+		AppURL:                       env("APP_URL", "http://localhost:3000"),
+		DatabaseURL:                  env("DATABASE_URL", "postgres://dataflow:dataflow@localhost:5432/dataflow"),
+		AppDatabaseURL:               env("APP_DATABASE_URL", env("DATABASE_URL", "postgres://dataflow:dataflow@localhost:5432/dataflow")),
+		RedisURL:                     env("REDIS_URL", "redis://localhost:6379"),
+		TemporalAddress:              env("TEMPORAL_ADDRESS", "localhost:7233"),
+		TemporalNamespace:            env("TEMPORAL_NAMESPACE", "default"),
+		TaskQueue:                    env("TASK_QUEUE", "dynamic-activities-test"),
+		JWTAccessSecret:              env("JWT_ACCESS_SECRET", "dev-access-secret-change-me"),
+		SMTPHost:                     env("SMTP_HOST", "localhost"),
+		SMTPPort:                     env("SMTP_PORT", "1025"),
+		SMTPFrom:                     env("SMTP_FROM", "noreply@dataflow.local"),
+		SMTPUser:                     os.Getenv("SMTP_USER"),
+		SMTPPass:                     os.Getenv("SMTP_PASS"),
+		ClickHouseURL:                env("CLICKHOUSE_URL", "http://localhost:8123"),
+		ClickHouseUser:               env("CLICKHOUSE_USER", "dataflow"),
+		ClickHousePassword:           env("CLICKHOUSE_PASSWORD", "dataflow"),
+		ClickHouseDB:                 env("CLICKHOUSE_DB", "dataflow"),
+		ConnectorsDir:                env("CONNECTORS_DIR", "/app/connectors/manifests"),
+		PayloadBucket:                os.Getenv("PAYLOAD_S3_BUCKET"),
+		PayloadRegion:                env("PAYLOAD_S3_REGION", "us-east-1"),
+		PayloadEndpoint:              os.Getenv("PAYLOAD_S3_ENDPOINT"),
+		PayloadForcePathStyle:        boolEnv("PAYLOAD_S3_FORCE_PATH_STYLE"),
+		PayloadAccessKeyID:           os.Getenv("PAYLOAD_S3_ACCESS_KEY_ID"),
+		PayloadSecretAccessKey:       os.Getenv("PAYLOAD_S3_SECRET_ACCESS_KEY"),
+		TemporalPayloadEncryptionKey: os.Getenv("TEMPORAL_PAYLOAD_ENCRYPTION_KEY"),
+		OAuthTokenEncryptionKey:      os.Getenv("OAUTH_TOKEN_ENCRYPTION_KEY"),
+		WorkerPrivateKeyPath:         os.Getenv("WORKER_PRIVATE_KEY_PATH"),
+		OpenLineageURL:               os.Getenv("OPENLINEAGE_URL"),
+		OpenLineageAPIKey:            os.Getenv("OPENLINEAGE_API_KEY"),
+		Edition:                      env("EDITION", "community"),
+		AuditRetentionDays:           intEnv("AUDIT_RETENTION_DAYS", 90),
+		BackfillDispatchInterval:     time.Duration(intEnv("BACKFILL_DISPATCH_INTERVAL_MS", 5000)) * time.Millisecond,
+	}
+}
+
+func env(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func boolEnv(name string) bool {
+	value, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv(name)))
+	return value
+}
+
+func intEnv(name string, fallback int) int {
+	value, err := strconv.Atoi(os.Getenv(name))
+	if err != nil {
+		return fallback
+	}
+	return value
+}

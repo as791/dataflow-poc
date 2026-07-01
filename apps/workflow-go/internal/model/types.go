@@ -1,16 +1,26 @@
 package model
 
+import "encoding/json"
+
 type Environment string
 
+const (
+	EnvironmentTest Environment = "test"
+	EnvironmentProd Environment = "prod"
+)
+
 type PipelineDefinition struct {
-	ID          string       `json:"id"`
-	Version     int          `json:"version"`
-	Name        string       `json:"name"`
-	TenantID    string       `json:"tenantId"`
-	Trigger     Trigger      `json:"trigger"`
-	Nodes       []Node       `json:"nodes"`
-	Edges       []Edge       `json:"edges"`
-	Concurrency *Concurrency `json:"concurrency,omitempty"`
+	ID            string                      `json:"id"`
+	Version       int                         `json:"version"`
+	Name          string                      `json:"name"`
+	TenantID      string                      `json:"tenantId"`
+	Trigger       Trigger                     `json:"trigger"`
+	Nodes         []Node                      `json:"nodes"`
+	Edges         []Edge                      `json:"edges"`
+	Concurrency   *Concurrency                `json:"concurrency,omitempty"`
+	Metadata      *PipelineMetadata           `json:"metadata,omitempty"`
+	SLO           *PipelineSLO                `json:"slo,omitempty"`
+	Notifications *PipelineNotificationPolicy `json:"notifications,omitempty"`
 }
 
 type Trigger struct {
@@ -19,10 +29,28 @@ type Trigger struct {
 	Path     string `json:"path,omitempty"`
 	Secret   string `json:"secret,omitempty"`
 	Topic    string `json:"topic,omitempty"`
+	AssetURN string `json:"assetUrn,omitempty"`
 }
 
 type Concurrency struct {
 	MaxParallelNodes int `json:"maxParallelNodes,omitempty"`
+}
+
+type PipelineMetadata struct {
+	Owner  string   `json:"owner,omitempty"`
+	Domain string   `json:"domain,omitempty"`
+	Tags   []string `json:"tags,omitempty"`
+}
+
+type PipelineSLO struct {
+	FreshnessMinutes      *float64 `json:"freshnessMinutes,omitempty"`
+	MaxFailureRatePercent *float64 `json:"maxFailureRatePercent,omitempty"`
+	MaxDurationMS         *float64 `json:"maxDurationMs,omitempty"`
+}
+
+type PipelineNotificationPolicy struct {
+	ConnectionID    string `json:"connectionId,omitempty"`
+	MinimumSeverity string `json:"minimumSeverity,omitempty"`
 }
 
 type Node struct {
@@ -36,6 +64,20 @@ type Node struct {
 	Retry         *RetryConfig           `json:"retry,omitempty"`
 	MergeStrategy string                 `json:"mergeStrategy,omitempty"`
 	JoinKey       string                 `json:"joinKey,omitempty"`
+	InputAssets   []DataAssetRef         `json:"inputAssets,omitempty"`
+	OutputAssets  []DataAssetRef         `json:"outputAssets,omitempty"`
+}
+
+type DataAssetRef struct {
+	URN       string                 `json:"urn"`
+	Platform  string                 `json:"platform"`
+	Namespace string                 `json:"namespace"`
+	Name      string                 `json:"name"`
+	Type      string                 `json:"type"`
+	Layer     string                 `json:"layer,omitempty"`
+	Schema    map[string]interface{} `json:"schema,omitempty"`
+	Owner     string                 `json:"owner,omitempty"`
+	Tags      []string               `json:"tags,omitempty"`
 }
 
 type IngestionConfig struct {
@@ -100,4 +142,60 @@ type WorkflowInput struct {
 	Trigger           TriggerInput       `json:"trigger"`
 	EncryptedDEK      string             `json:"encryptedDek,omitempty"`
 	DEKIV             string             `json:"dekIv,omitempty"`
+}
+
+type TenantContext struct {
+	TenantID      string `json:"tenantId"`
+	UserID        string `json:"userId"`
+	Email         string `json:"email"`
+	Role          string `json:"role"`
+	EmailVerified bool   `json:"emailVerified"`
+}
+
+type CatalogField struct {
+	Key         string        `json:"key"`
+	Label       string        `json:"label"`
+	Type        string        `json:"type"`
+	Required    bool          `json:"required,omitempty"`
+	Placeholder string        `json:"placeholder,omitempty"`
+	Options     []interface{} `json:"options,omitempty"`
+}
+
+type CatalogEntry struct {
+	ActivityType      string         `json:"activityType"`
+	NodeType          string         `json:"nodeType"`
+	Label             string         `json:"label"`
+	Color             string         `json:"color"`
+	SupportsIngestion bool           `json:"supportsIngestion,omitempty"`
+	Fields            []CatalogField `json:"fields,omitempty"`
+}
+
+type ConnectorManifest struct {
+	ActivityType      string                 `json:"activityType"`
+	Label             string                 `json:"label"`
+	Kind              string                 `json:"kind"`
+	Color             string                 `json:"color,omitempty"`
+	SupportsIngestion *bool                  `json:"supportsIngestion,omitempty"`
+	URL               string                 `json:"url"`
+	Method            string                 `json:"method,omitempty"`
+	RecordsPath       string                 `json:"recordsPath,omitempty"`
+	Headers           map[string]string      `json:"headers,omitempty"`
+	Auth              map[string]interface{} `json:"auth,omitempty"`
+	Pagination        map[string]interface{} `json:"pagination,omitempty"`
+	Incremental       map[string]interface{} `json:"incremental,omitempty"`
+	Fields            []CatalogField         `json:"fields,omitempty"`
+}
+
+// JSONMap preserves the loose JSON contracts used by connectors without
+// inventing a second schema language.
+type JSONMap map[string]interface{}
+
+func CloneJSON[T any](value T) (T, error) {
+	var cloned T
+	b, err := json.Marshal(value)
+	if err != nil {
+		return cloned, err
+	}
+	err = json.Unmarshal(b, &cloned)
+	return cloned, err
 }

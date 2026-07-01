@@ -1,5 +1,8 @@
 # Enterprise data platform roadmap
 
+> Temporal SDK split references are historical. ADR-002 moved both workflow and
+> activity workers to Go.
+
 ## Product model
 
 Keep pipelines small and assets global. A pipeline materializes one or a few

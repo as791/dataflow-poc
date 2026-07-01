@@ -1,13 +1,13 @@
 # Connectors
 
-DataFlow connectors come in two flavors, both served by one registry
-(`@dataflow/connector-sdk`) that feeds the worker dispatch, the API catalog
+DataFlow connectors come in two flavors, both served by the Go connector
+registry that feeds worker dispatch, the API catalog
 endpoint (`GET /api/connectors/catalog`), the canvas palette, and the AI
 builder:
 
 1. **Manifest connectors** — a single JSON file. No code. For REST/HTTP sources
    with cursor/page/offset pagination and optional incremental watermarking.
-2. **Coded plugins** — hand-written TypeScript for anything a manifest can't
+2. **Coded connectors** — hand-written Go for anything a manifest can't
    express (OAuth, changes-feeds, GraphQL, SDK auth). The existing Google
    Sheets / Drive / Excel / Zendesk connectors are coded.
 
@@ -15,8 +15,7 @@ builder:
 
 Drop a `*.manifest.json` file into a directory the registry loads:
 
-- **Bundled examples:** `packages/connector-sdk/src/manifests/` (shipped in the
-  image).
+- **Bundled examples:** `connectors/manifests/` (mounted into the image).
 - **Your own, no rebuild:** set `CONNECTORS_DIR` to a mounted directory and
   restart the worker + API.
 
@@ -57,28 +56,22 @@ worker can run it — no code changes.
 | `incremental` | no | `{ "sinceParam": "updated_after", "recordTimestampPath": "updated_at" }`. |
 | `fields` | no | Extra config inputs rendered on the node (same `FieldSpec` shape as the catalog). |
 
-Pagination + incremental are driven by the generic executor
-(`packages/connector-sdk/src/executor.ts`) — the same engine the legacy
-`http.fetch` connector runs through.
+Pagination and incremental state are driven by
+`apps/workflow-go/internal/connectors/http.go`.
 
 ## Adding a coded plugin
 
-When a manifest isn't enough, implement a `ConnectorPlugin`:
+When a manifest is not enough, add a source or handler to the Go runtime:
 
-```ts
-import type { ConnectorPlugin } from '@dataflow/connector-sdk';
+```go
+func (r *Runtime) registerAcme() {
+    r.Sources["acme.fetch"] = r.acmeFetch
+}
 
-export const myPlugin: ConnectorPlugin = {
-  manifest: { activityType: 'acme.fetch', label: 'Acme', kind: 'source', url: 'unused' },
-  source: async ({ config, cursor, ingestion, tenantId }) => {
-    // bespoke fetch logic → { records, nextCursor, hasMore }
-    return { records: [], nextCursor: cursor, hasMore: false };
-  },
-};
-
-// register it once at worker startup
-registry.registerPlugin(myPlugin);
+func (r *Runtime) acmeFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
+    return SourceResult{Records: []interface{}{}, NextCursor: p.Cursor}, nil
+}
 ```
 
-The plugin's `manifest` supplies the catalog metadata; `source`/`handler`
-supply the runtime behavior.
+Add catalog metadata to the frontend catalog when the connector needs canvas
+configuration fields.

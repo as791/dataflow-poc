@@ -1,5 +1,5 @@
 # Fully isolated environment — everything runs in containers on one private
-# network. No host Node processes needed for the core stack.
+# network. Node.js is used only to build the React frontend.
 #
 # Default profile starts: postgres, redis, clickhouse, mailhog, temporal,
 # temporal-ui, api, worker, web  (~3 GB RAM total).
@@ -24,6 +24,7 @@ x-app-env: &app-env
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
   APP_URL: http://localhost:3000
   JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-access-secret-change-me}
+  AUTH_PASSWORD_ENABLED: ${AUTH_PASSWORD_ENABLED:-true}
   SMTP_HOST: ${SMTP_HOST:-mailhog}
   SMTP_PORT: ${SMTP_PORT:-1025}
   SMTP_FROM: ${SMTP_FROM:-noreply@dataflow.local}
@@ -70,8 +71,7 @@ x-app-env: &app-env
 # TEMPORAL_NAMESPACE + TASK_QUEUE for its environment.
 x-worker-build: &worker-build
   context: .
-  dockerfile: apps/worker/Dockerfile
-  args: { BUILD_ID: "${BUILD_ID:-dev-local}" }
+  dockerfile: apps/workflow-go/Dockerfile
 
 x-worker-volumes: &worker-volumes
   - ./secrets/worker-keypair.pem:/secrets/worker-keypair.pem:ro
@@ -79,8 +79,6 @@ x-worker-volumes: &worker-volumes
 
 x-worker-env: &worker-env
   <<: *app-env
-  BUILD_ID: ${BUILD_ID:-dev-local}
-  USE_VERSIONING: "false"
   ZENDESK_SUBDOMAIN: ${ZENDESK_SUBDOMAIN:-}
   ZENDESK_EMAIL: ${ZENDESK_EMAIL:-}
   ZENDESK_API_TOKEN: ${ZENDESK_API_TOKEN:-}
@@ -297,7 +295,8 @@ services:
   # ───────── application ────────────────────────────────────────────────────
 
   api:
-    build: { context: ., dockerfile: apps/api/Dockerfile }
+    build: { context: ., dockerfile: apps/workflow-go/Dockerfile }
+    entrypoint: ["api"]
     volumes:
       # User-supplied connector manifests (zero-code REST connectors).
       - ./connectors/manifests:/app/connectors/manifests:ro
@@ -323,6 +322,7 @@ services:
   # namespace + task queue they poll (M3). Both wait for the namespaces to exist.
   worker-test:
     build: *worker-build
+    entrypoint: ["activity-worker"]
     volumes: *worker-volumes
     environment:
       <<: *worker-env
@@ -331,12 +331,12 @@ services:
     depends_on:
       postgres:            { condition: service_healthy }
       temporal-namespaces: { condition: service_completed_successfully }
-    # Temporal bundles workflow code with webpack at process start — needs headroom.
-    mem_limit: 1536m
+    mem_limit: 768m
     networks: [dataflow]
 
   worker-prod:
     build: *worker-build
+    entrypoint: ["activity-worker"]
     volumes: *worker-volumes
     environment:
       <<: *worker-env
@@ -345,7 +345,7 @@ services:
     depends_on:
       postgres:            { condition: service_healthy }
       temporal-namespaces: { condition: service_completed_successfully }
-    mem_limit: 1536m
+    mem_limit: 768m
     networks: [dataflow]
 
   workflow-test:
