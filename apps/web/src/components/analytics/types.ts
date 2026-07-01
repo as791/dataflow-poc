@@ -9,9 +9,11 @@ export interface SchemaField {
 }
 
 export interface QuerySpec {
-  x_column: string;
-  y_column: string;
-  agg: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'none';
+  select?: string[];
+  where?: Array<{ field: string; op: '=' | '!=' | '>' | '<' | '>=' | '<=' | 'LIKE' | 'IN'; value: unknown }>;
+  groupBy?: string[];
+  aggregate?: { field: string; fn: 'count' | 'sum' | 'avg' | 'min' | 'max' };
+  orderBy?: { field: string; dir: 'ASC' | 'DESC' };
   limit?: number;
 }
 

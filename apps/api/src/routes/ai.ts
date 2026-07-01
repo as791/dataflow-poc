@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { chatJSON, OllamaUnavailableError } from '../lib/ollama';
 import { getCatalog } from '../lib/serverCatalog';
 import { validatePipeline } from '../lib/validatePipeline';
+import { paidFeatures } from '../lib/edition';
 import { definitionToMermaid } from '@dataflow/shared';
 import type { PipelineDefinition, PipelineNode, PipelineEdge, CatalogEntry } from '@dataflow/shared';
 
@@ -29,6 +30,8 @@ function systemPrompt(catalog: CatalogEntry[]): string {
     '- A pipeline starts with one or more source nodes and ends in a sink.',
     '- transform.filter uses a constrained predicate on `r`, e.g. "r.status === \'open\'". No function calls.',
     '- transform.map uses an object projection, e.g. "({ id: r.id, status: r.status })". No function calls.',
+    '- transform.formula writes config.outputField using config.expression, e.g. round(r.price * r.quantity, 2).',
+    '- transform.select applies a JMESPath config.expression to each record.',
     '- transform.dedupe uses config.key (comma-separated for a compound key) + optional config.keep ("first"|"last").',
     '- transform.flatten flattens nested objects (config.delimiter, config.maxDepth, config.arrayPolicy).',
     '- transform.parse parses stringified-JSON fields (config.fields comma-separated, config.onError "skip"|"fail"|"null").',
@@ -78,8 +81,7 @@ function toDefinition(out: AiOutput, catalog: CatalogEntry[]) {
 }
 
 // Builds, validates, and (on failure) repairs the model output once.
-async function build(userMessage: string): Promise<{ mermaid: string; definition: any }> {
-  const catalog = getCatalog();
+async function build(userMessage: string, catalog: CatalogEntry[]): Promise<{ mermaid: string; definition: any }> {
   const sys = systemPrompt(catalog);
 
   let out = (await chatJSON(sys, userMessage)) as AiOutput;
@@ -121,7 +123,8 @@ ai.post('/generate', async (req, res) => {
   const prompt = String(req.body?.prompt ?? '').trim();
   if (!prompt) return res.status(400).json({ error: 'prompt required' });
   try {
-    res.json(await build(prompt));
+    const enabled = await paidFeatures(req.tenant.tenantId);
+    res.json(await build(prompt, getCatalog(enabled)));
   } catch (e: any) {
     if (e instanceof OllamaUnavailableError) return res.status(503).json({ error: e.message });
     res.status(422).json({ error: `could not generate a valid pipeline: ${e.message}` });
@@ -136,7 +139,8 @@ ai.post('/refine', async (req, res) => {
     ? `Current pipeline JSON:\n${JSON.stringify({ nodes: definition.nodes, edges: definition.edges, trigger: definition.trigger }, null, 2)}\n\nApply this change: ${prompt}`
     : prompt;
   try {
-    res.json(await build(seed));
+    const enabled = await paidFeatures(req.tenant.tenantId);
+    res.json(await build(seed, getCatalog(enabled)));
   } catch (e: any) {
     if (e instanceof OllamaUnavailableError) return res.status(503).json({ error: e.message });
     res.status(422).json({ error: `could not refine pipeline: ${e.message}` });

@@ -5,7 +5,7 @@
       "name": "web",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:web"],
-      "cwd": "/Users/aryaman.sinha/Downloads/dataflow-poc",
+      "cwd": ".",
       "port": 3000
     }
   ]

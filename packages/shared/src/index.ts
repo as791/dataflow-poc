@@ -1,6 +1,7 @@
 export * from './types';
 export * from './catalog-types';
-export { CATALOG, catalogByType } from './catalog';
+export { CATALOG, catalogByType, catalogForFeatures } from './catalog';
+export * from './features';
 export * from './lineage';
 export * from './monitoring';
 export * from './openlineage';

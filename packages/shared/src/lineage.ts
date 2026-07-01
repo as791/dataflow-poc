@@ -274,6 +274,23 @@ function infer(node: PipelineNode): DataAssetRef | null {
       const key = value(node, 'key');
       return bucket && key ? asset(`s3://${bucket}/${key}`, 's3', bucket, key, 'file', l) : null;
     }
+    case 'sftp.fetch':
+    case 'sink.sftp': {
+      const connection = value(node, 'connectionId') ?? 'default';
+      const path = value(node, 'path');
+      return path ? asset(`sftp://${connection}${path.startsWith('/') ? '' : '/'}${path}`, 'sftp', connection, path, 'file', l) : null;
+    }
+    case 'snowflake.fetch':
+    case 'sink.snowflake': {
+      const connection = value(node, 'connectionId') ?? 'default';
+      const table = value(node, 'table');
+      return table ? asset(`snowflake://${connection}/${table}`, 'snowflake', connection, table, 'table', l) : null;
+    }
+    case 'iceberg.fetch': {
+      const connection = value(node, 'connectionId') ?? 'default';
+      const name = [value(node, 'namespace'), value(node, 'table')].filter(Boolean).join('.');
+      return name ? asset(`iceberg://${connection}/${name}`, 'iceberg', connection, name, 'table', l) : null;
+    }
     case 'kafka.fetch':
     case 'sink.kafka': {
       const cluster = value(node, 'cluster') ?? value(node, 'connectionId') ?? 'default';

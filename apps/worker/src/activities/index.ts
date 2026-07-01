@@ -1,7 +1,7 @@
 import { ApplicationFailure, Context } from '@temporalio/activity';
 import type { DataAssetRef, DataRef, IngestionConfig, NodeResult, PipelineDefinition } from '@dataflow/shared';
 import { assetMaterializationTopic, dataflowOpenLineageRunEvent, evaluatePipelineHealth, evaluatePredicate, successfulOutputBindings } from '@dataflow/shared';
-import { evaluateDataContract, sources, handlers } from './catalog';
+import { dedupeKeyHash, dedupeRecords, evaluateDataContract, sources, handlers } from './catalog';
 import { writePayload, readPayload, loadCursor, recordDataQualityResult, recordNodeRun, pool } from './db';
 import { writeExecutionMetric } from './clickhouse';
 import { decryptDekFromWorkflowInput } from './crypto';
@@ -129,6 +129,30 @@ async function emitMetric(
   }
 }
 
+export function usesRealtimeNode(activityType: string, config: Record<string, unknown>): boolean {
+  return activityType === 'kafka.fetch' || activityType === 'sink.kafka'
+    || config.syncMode === 'cdc' || config.writeMode === 'apply-cdc';
+}
+
+export function usesStatefulNode(activityType: string, config: Record<string, unknown>): boolean {
+  return activityType === 'transform.dedupe' && config.scope === 'pipeline';
+}
+
+export function usesAdvancedConnector(activityType: string): boolean {
+  return ['sftp.fetch', 'sink.sftp', 'snowflake.fetch', 'sink.snowflake', 'iceberg.fetch'].includes(activityType);
+}
+
+async function requireNodeEntitlement(activityType: string, config: Record<string, unknown>, tenantId: string) {
+  const feature = usesRealtimeNode(activityType, config) ? 'realtime'
+    : usesStatefulNode(activityType, config) ? 'statefulProcessing'
+    : usesAdvancedConnector(activityType) ? 'advancedConnectors' : undefined;
+  if (!feature) return;
+  const { rows } = await pool.query(
+    `SELECT enabled FROM tenant_feature_entitlements
+      WHERE tenant_id=$1 AND feature=$2`, [tenantId, feature]);
+  if (!rows[0]?.enabled) throw new Error(`${feature} is not enabled for this workspace`);
+}
+
 // ─── Source activity: one page per call; the workflow loops while hasMore ───
 export async function fetchSourcePage(params: {
   activityType: string; config: Record<string, unknown>;
@@ -143,6 +167,7 @@ export async function fetchSourcePage(params: {
   } = params;
   const fetcher = sources[activityType];
   if (!fetcher) throw new Error(`Unknown source: ${activityType}`);
+  await requireNodeEntitlement(activityType, config, tenantId);
 
   Context.current().heartbeat();
   const cursor = params.cursor ?? await loadCursor(tenantId, connectionId);
@@ -202,6 +227,40 @@ export async function commitSourceCursors(params: {
   } finally { client.release(); }
 }
 
+export async function commitDedupeKeys(params: {
+  tenantId: string;
+  checkpoints: Array<{ pipelineId: string; nodeId: string; hashes: string[] }>;
+}): Promise<void> {
+  for (const checkpoint of params.checkpoints) {
+    if (!checkpoint.hashes.length) continue;
+    await pool.query(
+      `INSERT INTO dedupe_keys (tenant_id,pipeline_id,node_id,key_hash)
+       SELECT $1,$2,$3,hash FROM unnest($4::text[]) hash ON CONFLICT DO NOTHING`,
+      [params.tenantId, checkpoint.pipelineId, checkpoint.nodeId, checkpoint.hashes],
+    );
+  }
+}
+
+async function filterCrossRunDedupe(rows: any[], key: any, keep: 'first' | 'last', params: { tenantId: string; executionId: string; nodeId: string }) {
+  // ponytail: keys commit after full DAG success; concurrent runs can both pass an unseen key.
+  // Serialize runs per pipeline if customers require cross-run exactly-once effects.
+  const unique = dedupeRecords(rows, key, keep);
+  if (!unique.length) return { records: unique, checkpoint: { pipelineId: '', nodeId: params.nodeId, hashes: [] } };
+  const execution = await pool.query(`SELECT pipeline_id FROM executions WHERE id=$1 AND tenant_id=$2`, [params.executionId, params.tenantId]);
+  const pipelineId = execution.rows[0]?.pipeline_id;
+  if (!pipelineId) throw new Error('transform.dedupe: execution pipeline not found');
+  const hashes = unique.map(row => dedupeKeyHash(row, key));
+  const existing = await pool.query(
+    `SELECT key_hash FROM dedupe_keys WHERE tenant_id=$1 AND pipeline_id=$2 AND node_id=$3 AND key_hash=ANY($4::text[])`,
+    [params.tenantId, pipelineId, params.nodeId, hashes],
+  );
+  const seen = new Set(existing.rows.map(row => row.key_hash));
+  return {
+    records: unique.filter((_, index) => !seen.has(hashes[index])),
+    checkpoint: { pipelineId, nodeId: params.nodeId, hashes: hashes.filter(hash => !seen.has(hash)) },
+  };
+}
+
 // ─── Generic dispatch for transforms & sinks ───
 export async function dispatchNode(params: {
   activityType: string; config: Record<string, unknown>;
@@ -213,6 +272,7 @@ export async function dispatchNode(params: {
   } = params;
   const handler = handlers[activityType];
   if (!handler) throw new Error(`Unknown activity: ${activityType}`);
+  await requireNodeEntitlement(activityType, config, tenantId);
 
   const start = Date.now();
   const hb = setInterval(() => Context.current().heartbeat(), 10_000);
@@ -220,6 +280,7 @@ export async function dispatchNode(params: {
     const dek = resolveDek(encryptedDek);
     const input = inputRef ? await readPayload(inputRef, dek) : undefined;
     let output: unknown;
+    let dedupeCheckpoint: { pipelineId: string; nodeId: string; hashes: string[] } | undefined;
     if (activityType === 'transform.contract') {
       if (!Array.isArray(input)) throw new Error('transform.contract: input must be an array');
       const evaluated = evaluateDataContract(input, config.schemaJson, config.allowExtra !== false);
@@ -240,6 +301,11 @@ export async function dispatchNode(params: {
         throw new Error(`transform.contract: row ${first.rowIndex + 1}: ${first.errors.join('; ')}`);
       }
       output = evaluated.valid;
+    } else if (usesStatefulNode(activityType, config)) {
+      if (!Array.isArray(input)) throw new Error('transform.dedupe: input must be an array');
+      const filtered = await filterCrossRunDedupe(input, config.key, config.keep === 'last' ? 'last' : 'first', { tenantId, executionId, nodeId });
+      output = filtered.records;
+      dedupeCheckpoint = filtered.checkpoint;
     } else {
       output = await handler(input, config, { tenantId, executionId, nodeId });
     }
@@ -251,7 +317,7 @@ export async function dispatchNode(params: {
     await recordNodeRun(executionId, nodeId, tenantId, 'success', durationMs, recordCount);
     await emitMetric(tenantId, executionId, nodeId, activityType, 'success', durationMs, recordCount);
     return { nodeId, status: 'success', outputRef,
-             meta: { durationMs, recordCount } };
+             meta: { durationMs, recordCount, ...(dedupeCheckpoint ? { dedupeCheckpoint } : {}) } };
   } catch (err: any) {
     M.nodeFailures.add(1, { activity: activityType });
     const durationMs = Date.now() - start;

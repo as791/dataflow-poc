@@ -55,7 +55,7 @@ analytics.get(
         format: 'JSONEachRow',
       });
       const rows = await result.json<{ collection: string; row_count: string }>();
-      res.json(rows.map((r) => ({ name: r.collection, rowCount: Number(r.row_count) })));
+      res.json(rows.map((r) => ({ collection: r.collection, row_count: Number(r.row_count) })));
     } catch (e) {
       console.error('analytics/datasets error', (e as Error).message);
       res.status(502).json({ error: 'clickhouse error' });
