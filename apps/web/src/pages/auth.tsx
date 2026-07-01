@@ -63,6 +63,53 @@ const OAUTH_ERRORS: Record<string, string> = {
 // Show SSO button only when the API is configured with an OIDC provider.
 // We detect this by checking if VITE_OIDC_ENABLED=true is set at build time.
 const OIDC_ENABLED = import.meta.env.VITE_OIDC_ENABLED === 'true';
+const PASSWORD_AUTH_ENABLED = import.meta.env.VITE_PASSWORD_AUTH_ENABLED === 'true';
+
+function PasswordForm() {
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [tenantName, setTenantName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault(); setBusy(true); setErr(null);
+    try {
+      if (mode === 'register') {
+        await api.registerWithPassword({ email, password, tenantName: tenantName || undefined });
+      } else {
+        await api.loginWithPassword({ email, password });
+      }
+      window.location.href = '/';
+    } catch (ex: any) {
+      const raw: string = ex.message ?? 'Failed';
+      const spaceIdx = raw.indexOf(' ');
+      const body = spaceIdx >= 0 ? raw.slice(spaceIdx + 1) : '';
+      try { const p = JSON.parse(body); if (p?.error) { setErr(p.error); setBusy(false); return; } } catch { /* not JSON */ }
+      setErr(raw);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="mt-5 space-y-3 border-t border-white/[0.07] pt-5">
+      <p className="text-xs text-white/40">Or sign in with email</p>
+      <input className="glass-input w-full text-sm" type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} required />
+      <input className="glass-input w-full text-sm" type="password" placeholder="Password (8+ chars)" value={password} onChange={e => setPassword(e.target.value)} required minLength={8} />
+      {mode === 'register' && (
+        <input className="glass-input w-full text-sm" placeholder="Workspace name (optional)" value={tenantName} onChange={e => setTenantName(e.target.value)} />
+      )}
+      {err && <div className="text-xs text-rose-300">{err}</div>}
+      <button type="submit" className="glass-btn-primary w-full" disabled={busy}>
+        {busy ? '…' : mode === 'login' ? 'Sign in' : 'Create account'}
+      </button>
+      <button type="button" className="text-xs text-white/40 hover:text-white/70 w-full text-center" onClick={() => { setMode(m => m === 'login' ? 'register' : 'login'); setErr(null); }}>
+        {mode === 'login' ? 'Need an account? Register' : 'Already have an account? Sign in'}
+      </button>
+    </form>
+  );
+}
 
 export function LoginPage() {
   const { user } = useAuth();
@@ -83,10 +130,13 @@ export function LoginPage() {
           Continue with SSO
         </a>
       )}
+      {PASSWORD_AUTH_ENABLED && <PasswordForm />}
       <ErrorLine msg={errorCode ? (OAUTH_ERRORS[errorCode] ?? 'Sign-in failed.') : null} />
-      <p className="text-xs mt-5 opacity-60">
-        New here? Signing in creates your workspace automatically.
-      </p>
+      {!PASSWORD_AUTH_ENABLED && (
+        <p className="text-xs mt-5 opacity-60">
+          New here? Signing in creates your workspace automatically.
+        </p>
+      )}
     </AuthShell>
   );
 }
