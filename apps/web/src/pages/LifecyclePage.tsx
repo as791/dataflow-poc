@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { History, Rocket, RefreshCw } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
+import { History, Milestone, RefreshCw } from 'lucide-react';
 import { api } from '../api';
+import { ApiError } from '../components/ApiError';
+import { DateTimePicker } from '../components/DateTimePicker';
 
 export type Stage = 'draft' | 'testing' | 'production' | 'archived';
 const STAGE_LABEL: Record<Stage, string> = {
@@ -73,11 +76,13 @@ function BackfillPanel({ pipeline, close }: { pipeline: Pipeline; close: () => v
 
   const body = () => ({
     ...form,
-    from: new Date(`${form.from}T00:00:00.000Z`).toISOString(),
-    to: new Date(`${form.to}T00:00:00.000Z`).toISOString(),
+    from: new Date(form.from).toISOString(),
+    to: new Date(form.to).toISOString(),
   });
   const submitPlan = async (e: React.FormEvent) => {
-    e.preventDefault(); setBusy('plan'); setError(null); setPlan(null);
+    e.preventDefault();
+    if (!form.from || !form.to) { setError('Please select both From and To dates.'); return; }
+    setBusy('plan'); setError(null); setPlan(null);
     try { setPlan(await api.planBackfill(pipeline.id, body())); }
     catch (err: any) { setError(err.message ?? 'Backfill plan failed'); }
     finally { setBusy(null); }
@@ -100,12 +105,12 @@ function BackfillPanel({ pipeline, close }: { pipeline: Pipeline; close: () => v
       </div>
       <form className="flex flex-wrap items-end gap-2" onSubmit={submitPlan}>
         <label className="text-xs text-gray-500 dark:text-white/50">From
-          <input required type="date" className="glass-input mt-1 block" value={form.from}
-            onChange={e => { setForm(f => ({ ...f, from: e.target.value })); setPlan(null); }} />
+          <DateTimePicker value={form.from} onChange={v => { setForm(f => ({ ...f, from: v })); setPlan(null); }}
+            placeholder="Start date & time" className="mt-1" />
         </label>
         <label className="text-xs text-gray-500 dark:text-white/50">To (exclusive)
-          <input required type="date" className="glass-input mt-1 block" min={form.from} value={form.to}
-            onChange={e => { setForm(f => ({ ...f, to: e.target.value })); setPlan(null); }} />
+          <DateTimePicker value={form.to} onChange={v => { setForm(f => ({ ...f, to: v })); setPlan(null); }}
+            placeholder="End date & time" className="mt-1" />
         </label>
         <label className="text-xs text-gray-500 dark:text-white/50">Days / partition
           <input required type="number" min="1" max="31" className="glass-input mt-1 block w-28" value={form.partitionDays}
@@ -148,11 +153,14 @@ function BackfillPanel({ pipeline, close }: { pipeline: Pipeline; close: () => v
 }
 
 export default function LifecyclePage() {
+  const location = useLocation();
   const [rows, setRows] = useState<Pipeline[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [backfillPipeline, setBackfillPipeline] = useState<string | null>(null);
+  const [backfillPipeline, setBackfillPipeline] = useState<string | null>(
+    (location.state as any)?.openBackfillId ?? null,
+  );
 
   const refresh = useCallback(async () => {
     setLoading(true); setError(null);
@@ -179,7 +187,7 @@ export default function LifecyclePage() {
     <div className="mx-auto max-w-5xl space-y-6 px-6 py-10">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="page-heading flex items-center gap-2"><Rocket size={20} /> Lifecycle</h1>
+          <h1 className="page-heading flex items-center gap-2"><Milestone size={20} /> Lifecycle</h1>
           <p className="page-subtitle mt-1">
             Promote pipelines draft → Integration → production. Production requires a green run and compatible published contracts.
           </p>
@@ -189,11 +197,7 @@ export default function LifecyclePage() {
         </button>
       </div>
 
-      {error && (
-        <div className="text-xs text-red-600 dark:text-danger/90 bg-red-50 dark:bg-danger/10 border border-red-200 dark:border-danger/30 rounded-lg px-3 py-2">
-          {error}
-        </div>
-      )}
+      {error && <ApiError message={error} onRetry={refresh} />}
 
       <div className="glass-card divide-y divide-gray-100 dark:divide-white/5">
         {rows.length === 0 && !loading && (
