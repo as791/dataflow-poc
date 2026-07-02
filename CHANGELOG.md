@@ -10,7 +10,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - AI pipeline builder — natural-language-to-Mermaid via local Ollama or cloud
 - React Flow canvas with live Mermaid sync
-- Go backend: unified binary builds API, Temporal workflow worker, and activity worker
+- Go backend: one module builds separate API, Temporal workflow-worker, and activity-worker binaries
 - Pipeline lifecycle management (draft → integration → production) with stage gates
 - Durable execution via Temporal: retries, pause/resume/cancel, crash-safe backfills
 - Pluggable connector system with manifest-driven HTTP connectors
@@ -26,5 +26,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - ClickHouse hot-tier analytics sidecar
 - Multi-tenant PostgreSQL with row-level tenant isolation
 - Docker Compose stack: one command brings up the full local environment
+- Public project policies for security reporting, governance, conduct, and contributions
 
-[Unreleased]: https://github.com/aryaman-sinha/dataflow-poc/compare/HEAD...HEAD
+[Unreleased]: https://github.com/as791/dataflow-poc/commits/main
