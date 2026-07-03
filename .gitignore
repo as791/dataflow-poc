@@ -17,3 +17,8 @@ dist/
 
 # Generated graphify output
 graphify-out/
+
+# Terraform
+.terraform/
+*.tfstate*
+.terraform.lock.hcl
