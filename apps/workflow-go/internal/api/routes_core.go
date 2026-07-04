@@ -252,7 +252,7 @@ func (s *Server) inviteCreate(w http.ResponseWriter, r *http.Request) error {
 		role = "owner"
 	}
 	tenant := tenantFrom(r)
-	token := randomToken()
+	token := tenant.TenantID + "." + randomToken()
 	if err := s.DB.TenantTx(r.Context(), tenant.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(r.Context(), `INSERT INTO user_invitations (token_hash,tenant_id,invited_by,email,role,expires_at)
       VALUES ($1,$2,$3,$4,$5,now()+interval '24 hours')`, sha256Hex(token), tenant.TenantID, tenant.UserID, body.Email, role)

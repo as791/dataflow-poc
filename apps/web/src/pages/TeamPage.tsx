@@ -35,8 +35,9 @@ export function TeamPage() {
   };
 
   const revoke = async (email: string) => {
-    setBusy(true);
-    try { await api.revokeInvite(email); refresh(); }
+    setMsg(''); setBusy(true);
+    try { await api.revokeInvite(email); await refresh(); }
+    catch (e: any) { setMsg(e.message ?? 'Failed to revoke invitation'); }
     finally { setBusy(false); }
   };
 
@@ -48,6 +49,7 @@ export function TeamPage() {
         <h1 className="page-heading">Workspace team</h1>
         <p className="page-subtitle mt-1">Manage members and pending invitations.</p>
       </div>
+      {msg && <div className="mb-4 text-xs opacity-70">{msg}</div>}
 
       {isOwner && (
         <section className="glass-panel p-5 mb-6">
@@ -66,7 +68,6 @@ export function TeamPage() {
             </label>
             <button className="glass-btn-primary" disabled={busy} type="submit"><UserPlus size={15} /> Send invite</button>
           </form>
-          {msg && <div className="text-xs opacity-70 mt-3">{msg}</div>}
         </section>
       )}
 

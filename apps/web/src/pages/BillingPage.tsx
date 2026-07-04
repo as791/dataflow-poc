@@ -215,7 +215,7 @@ export function BillingPage() {
           </div>
         </dl>
 
-        <div className="mt-6">
+        {user?.role === 'owner' && <div className="mt-6">
           <button
             className="glass-btn-primary"
             disabled={buying}
@@ -223,7 +223,7 @@ export function BillingPage() {
           >
             <Plus size={15} /> {buying ? 'Opening checkout…' : 'Buy 5 executions — ₹100'}
           </button>
-        </div>
+        </div>}
       </div>
 
       <div className="glass-panel p-6">

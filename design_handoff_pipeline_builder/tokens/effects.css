@@ -1,0 +1,42 @@
+/* ── DataFlow effects: radius, shadow, blur ─────────────────────────────── */
+
+:root {
+  /* Corner radii — literal px values used across glass-* classes, never
+     snapped to a 4/8 grid. Buttons/inputs/icon-buttons share 10px;
+     cards 14px; panels/modals 20px; canvas panels 12–14px. */
+  --radius-sm: 6px;     /* small chips, mini icon tiles (drawer topology) */
+  --radius-md: 10px;    /* glass-input, glass-btn, icon-button, cv-input */
+  --radius-lg: 14px;    /* glass-card, FlowNode, canvas cv-panel-lg */
+  --radius-xl: 20px;    /* glass-panel, glass-modal */
+  --radius-pill: 999px; /* glass-badge, stage pill, filter pill */
+
+  /* Blur */
+  --blur-glass: 16px;
+  --blur-glass-heavy: 28px;
+
+  /* Shadows — light */
+  --shadow-card-light: 0 1px 4px rgba(0,0,0,.06);
+  --shadow-panel-light: 0 2px 12px rgba(0,0,0,.06);
+  --shadow-modal-light: 0 8px 32px rgba(0,0,0,.12);
+  --shadow-node-light: 0 1px 2px rgba(0,0,0,.05);
+
+  /* Shadows — dark (deeper, softer, occasionally brand-tinted) */
+  --shadow-card-dark: 0 12px 32px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.035);
+  --shadow-panel-dark: 0 18px 50px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.045);
+  --shadow-modal-dark: 0 12px 40px rgba(124,108,242,.22), inset 0 1px 0 rgba(255,255,255,.08);
+  --shadow-node-dark: 0 16px 35px rgba(0,0,0,.28);
+  --shadow-btn-primary: 0 8px 20px rgba(124,108,242,.2);
+  --shadow-btn-success: 0 8px 20px rgba(16,185,129,.15);
+
+  /* Focus ring */
+  --ring-focus: 2px solid rgba(82,214,232,.72); /* @kind other */
+  --ring-offset: 2px;
+
+  /* Selection */
+  --selection-bg: rgba(124,108,242,.4);
+
+  /* Transitions — the app uses one speed almost everywhere */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1); /* @kind other */
+  --duration-fast: 150ms; /* @kind other */
+  --duration-standard: 200ms; /* @kind other */
+}

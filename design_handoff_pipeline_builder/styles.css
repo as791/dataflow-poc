@@ -1,0 +1,6 @@
+/* DataFlow design system — global stylesheet entry point.
+   List of @import only; consumers link this single file. */
+@import './tokens/colors.css';
+@import './tokens/typography.css';
+@import './tokens/effects.css';
+@import './tokens/spacing.css';

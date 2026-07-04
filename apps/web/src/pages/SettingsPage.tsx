@@ -1,5 +1,4 @@
 import { Monitor, Moon, Settings, Sun } from 'lucide-react';
-import { useSettings } from '../context/SettingsContext';
 import { useTheme, type ThemeMode } from '../context/ThemeContext';
 
 const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -16,30 +15,8 @@ function Row({ label, sublabel, children }: { label: string; sublabel?: string; 
   );
 }
 
-function PillGroup<T extends string>({ options, value, onChange }: {
-  options: { value: T; label: string }[];
-  value: T;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <div className="flex rounded-xl overflow-hidden border border-gray-200 dark:border-white/[0.09]">
-      {options.map(({ value: v, label }) => (
-        <button key={v} onClick={() => onChange(v)}
-          className={`px-3 py-1.5 text-[12px] font-medium transition-colors ${
-            value === v
-              ? 'bg-gray-900 text-white dark:bg-white/[0.15] dark:text-white'
-              : 'bg-white text-gray-500 hover:bg-gray-50 dark:bg-transparent dark:text-white/45 dark:hover:bg-white/[0.05] dark:hover:text-white/75'
-          }`}>
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 export default function SettingsPage() {
   const { mode, setMode } = useTheme();
-  const { settings, set } = useSettings();
 
   const themeOptions: { value: ThemeMode; label: string; icon: React.ReactNode }[] = [
     { value: 'light',  label: 'Light',  icon: <Sun size={12} /> },
@@ -85,33 +62,6 @@ export default function SettingsPage() {
             <span className="rounded-lg bg-gray-100 dark:bg-white/[0.07] px-2.5 py-1 text-[12px] font-medium text-gray-700 dark:text-white/70">
               {tz}
             </span>
-          </Row>
-          <Row label="Clock format" sublabel="How times are displayed across the app">
-            <PillGroup
-              options={[{ value: '12h', label: '12h' }, { value: '24h', label: '24h' }]}
-              value={settings.timeFormat}
-              onChange={v => set('timeFormat', v)}
-            />
-          </Row>
-        </div>
-      </section>
-
-      {/* Filters */}
-      <section>
-        <p className="mb-2 text-[10px] font-semibold uppercase tracking-[.12em] text-gray-400 dark:text-white/35 px-1">Filters</p>
-        <div className="glass-card divide-y divide-gray-100 dark:divide-white/[0.06] overflow-hidden">
-          <Row
-            label="Default environment"
-            sublabel="Pre-selected environment filter on Pipelines, Runs, and Lineage pages">
-            <PillGroup
-              options={[
-                { value: '',     label: 'All' },
-                { value: 'test', label: 'Integration' },
-                { value: 'prod', label: 'Production' },
-              ]}
-              value={settings.defaultEnv}
-              onChange={v => set('defaultEnv', v)}
-            />
           </Row>
         </div>
       </section>

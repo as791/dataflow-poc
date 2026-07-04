@@ -3,7 +3,7 @@ import {
   Filter, GitFork, Globe2, HardDrive, Merge, Sheet, Triangle, Webhook,
 } from 'lucide-react';
 import { Handle, Position } from 'reactflow';
-import { type CatalogEntry } from '../../catalog';
+import type { CatalogEntry } from '@dataflow/shared';
 import { useCatalog } from '../../context/CatalogContext';
 
 type LucideIcon = typeof Braces;

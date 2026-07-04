@@ -1,0 +1,75 @@
+import React from 'react';
+
+const BASE = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 8,
+  padding: '8px 14px',
+  borderRadius: 'var(--radius-md)',
+  fontSize: 'var(--text-body)',
+  fontFamily: 'var(--font-sans)',
+  fontWeight: 'var(--weight-medium)',
+  cursor: 'pointer',
+  border: '1px solid transparent',
+  transition: 'all .2s ease',
+  lineHeight: 1,
+};
+
+const VARIANTS = {
+  primary: {
+    background: 'linear-gradient(180deg, var(--brand-400), var(--brand-600))',
+    color: '#fff',
+    borderColor: 'rgba(168,157,248,0.3)',
+    boxShadow: 'var(--shadow-btn-primary)',
+  },
+  ghost: {
+    background: 'rgba(148,163,184,0.14)',
+    color: 'inherit',
+    borderColor: 'rgba(148,163,184,0.32)',
+  },
+  danger: {
+    background: 'rgba(248,113,113,0.14)',
+    color: '#ef4444',
+    borderColor: 'rgba(248,113,113,0.38)',
+  },
+  success: {
+    background: 'linear-gradient(180deg, #34d399, #059669)',
+    color: '#fff',
+    borderColor: 'rgba(110,231,183,0.3)',
+    boxShadow: '0 8px 20px rgba(16,185,129,.15)',
+  },
+};
+
+const SIZES = {
+  sm: { padding: '5px 10px', fontSize: '12px', borderRadius: 'var(--radius-md)' },
+  md: {},
+  lg: { padding: '10px 18px', fontSize: '14px' },
+};
+
+/** DataFlow primary UI action — mirrors .glass-btn-* from apps/web/src/index.css. */
+export function Button({ variant = 'primary', size = 'md', disabled, children, icon, style, ...rest }) {
+  const [hover, setHover] = React.useState(false);
+  const v = VARIANTS[variant] || VARIANTS.primary;
+  return (
+    <button
+      disabled={disabled}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        ...BASE,
+        ...v,
+        ...SIZES[size],
+        opacity: disabled ? 0.5 : hover ? 0.92 : 1,
+        filter: hover && !disabled ? 'brightness(1.08)' : 'none',
+        transform: hover && !disabled ? 'scale(0.98)' : 'none',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        ...style,
+      }}
+      {...rest}
+    >
+      {icon}
+      {children}
+    </button>
+  );
+}

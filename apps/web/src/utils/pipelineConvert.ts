@@ -1,5 +1,5 @@
 import type { Node } from 'reactflow';
-import type { CatalogEntry } from '../catalog';
+import type { CatalogEntry } from '@dataflow/shared';
 
 export function definitionToFlow(def: any, byType: Record<string, CatalogEntry>): { nodes: Node[]; edges: any[] } {
   const nodes: Node[] = (def.nodes ?? []).map((pn: any, i: number) => ({

@@ -8,7 +8,16 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/testsuite"
+	"go.temporal.io/sdk/worker"
 )
+
+func TestReplayV128History(t *testing.T) {
+	replayer := worker.NewWorkflowReplayer()
+	replayer.RegisterWorkflow(DynamicDAGWorkflow)
+	if err := replayer.ReplayWorkflowHistoryFromJSONFile(nil, "testdata/dynamic_dag_v1_28.json"); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestSourcePagesAreMergedBeforeDownstream(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite

@@ -3,7 +3,6 @@ import { AuthProvider } from './context/AuthContext';
 import { CatalogProvider } from './context/CatalogContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { FeatureProvider } from './context/FeatureContext';
-import { SettingsProvider } from './context/SettingsContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AppShell } from './components/AppShell';
 import PipelineCanvasPage from './pages/PipelineCanvasPage';
@@ -25,7 +24,6 @@ import SettingsPage from './pages/SettingsPage';
 export default function App() {
   return (
     <ThemeProvider>
-      <SettingsProvider>
       <BrowserRouter>
         <AuthProvider>
           <Routes>
@@ -55,7 +53,6 @@ export default function App() {
           </Routes>
         </AuthProvider>
       </BrowserRouter>
-      </SettingsProvider>
     </ThemeProvider>
   );
 }

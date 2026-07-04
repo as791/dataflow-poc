@@ -4,6 +4,7 @@ import { ExternalLink, RefreshCw, Search, X } from 'lucide-react';
 import { api } from '../api';
 import { displayEnvironment } from './LifecyclePage';
 import { DateTimePicker } from '../components/DateTimePicker';
+import { ApiError } from '../components/ApiError';
 
 interface Execution {
   id: string; name: string; pipeline_id: string; environment?: string;
@@ -108,6 +109,7 @@ export default function RunsPage() {
   const [rows, setRows] = useState<Execution[]>([]);
   const [pipelines, setPipelines] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [selected, setSelected] = useState<Execution | null>(null);
   const [search, setSearch] = useState('');
@@ -115,11 +117,12 @@ export default function RunsPage() {
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const page = await api.listExecutionsPage({ ...filters, limit: '50' });
       setRows(page.items ?? []); setNextCursor(page.nextCursor ?? null);
     }
-    catch { setRows([]); setNextCursor(null); }
+    catch (e: any) { setError(e.message ?? 'Failed to load runs'); setNextCursor(null); }
     finally { setLoading(false); }
   }, [filters]);
 
@@ -129,7 +132,8 @@ export default function RunsPage() {
     try {
       const page = await api.listExecutionsPage({ ...filters, limit: '50', cursor: nextCursor });
       setRows(r => [...r, ...page.items]); setNextCursor(page.nextCursor);
-    } finally { setLoading(false); }
+    } catch (e: any) { setError(e.message ?? 'Failed to load more runs'); }
+    finally { setLoading(false); }
   };
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -179,6 +183,7 @@ export default function RunsPage() {
                 placeholder="Search…" className="glass-input pl-7 py-1.5 text-[12px] w-36" />
             </div>
             <button onClick={refresh} disabled={loading}
+              aria-label="Refresh runs" title="Refresh runs"
               className="icon-button w-8 h-8 border-transparent bg-transparent">
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             </button>
@@ -187,8 +192,9 @@ export default function RunsPage() {
 
         {/* list */}
         <div className="flex-1 overflow-y-auto">
+          {error && <div className="p-4"><ApiError message={error} onRetry={refresh} /></div>}
           {loading && <div className="flex items-center justify-center h-32 text-[12px] text-gray-400 dark:text-white/25">Loading…</div>}
-          {!loading && visible.length === 0 && (
+          {!loading && !error && visible.length === 0 && (
             <div className="flex items-center justify-center h-32 text-[12px] text-gray-400 dark:text-white/40">No runs match</div>
           )}
           {visible.map(r => {

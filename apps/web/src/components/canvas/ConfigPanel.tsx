@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Settings2, Trash2 } from 'lucide-react';
 import type { Node } from 'reactflow';
-import { type CatalogEntry, type FieldSpec } from '../../catalog';
+import type { CatalogEntry, FieldSpec } from '@dataflow/shared';
 import { useCatalog } from '../../context/CatalogContext';
 import { api } from '../../api';
 import { SheetPicker } from '../connectors/SheetPicker';

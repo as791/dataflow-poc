@@ -1,0 +1,26 @@
+import React from 'react';
+
+const STAGES = {
+  draft:      { label: 'Draft',       bg: '#fffbeb', border: '#fde68a', text: '#b45309' },
+  testing:    { label: 'Integration', bg: '#eff6ff', border: '#bfdbfe', text: '#1d4ed8' },
+  production: { label: 'Production',  bg: '#ecfdf5', border: '#a7f3d0', text: '#047857' },
+  archived:   { label: 'Archived',    bg: '#f9fafb', border: '#e5e7eb', text: '#9ca3af' },
+};
+
+/** Lifecycle-stage pill — draft / testing / production / archived (LifecyclePage, PipelinesPage). `size="md"` for prominent placements like a detail-drawer header. */
+export function StageBadge({ stage = 'draft', size = 'sm' }) {
+  const s = STAGES[stage] || STAGES.draft;
+  const dims = size === 'md'
+    ? { padding: '5px 14px', fontSize: 13 }
+    : { padding: '2px 8px', fontSize: 10 };
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', borderRadius: 'var(--radius-pill)',
+      fontWeight: 'var(--weight-semibold)', fontFamily: 'var(--font-sans)',
+      background: s.bg, border: `1px solid ${s.border}`, color: s.text,
+      ...dims,
+    }}>
+      {s.label}
+    </span>
+  );
+}

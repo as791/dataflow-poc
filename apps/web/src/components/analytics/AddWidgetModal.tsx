@@ -3,14 +3,15 @@ import type { Dataset, SchemaField, QuerySpec, ChartType, WidgetDef } from './ty
 
 interface Props {
   datasets: Dataset[];
+  initialDataset?: string;
   onClose: () => void;
   onAdd: (widget: Omit<WidgetDef, 'data'>) => void;
   schema: (name: string) => Promise<SchemaField[]>;
 }
 
-export function AddWidgetModal({ datasets, onClose, onAdd, schema }: Props) {
+export function AddWidgetModal({ datasets, initialDataset, onClose, onAdd, schema }: Props) {
   const [title, setTitle] = useState('New Widget');
-  const [dataset, setDataset] = useState(datasets[0]?.collection ?? '');
+  const [dataset, setDataset] = useState(initialDataset ?? datasets[0]?.collection ?? '');
   const [chartType, setChartType] = useState<ChartType>('bar');
   const [fields, setFields] = useState<SchemaField[]>([]);
   const [xCol, setXCol] = useState('');

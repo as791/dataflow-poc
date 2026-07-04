@@ -212,7 +212,8 @@ func (s *Server) connectorTest(w http.ResponseWriter, r *http.Request) error {
 			return nil
 		}
 		response.Body.Close()
-		jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "message": fmt.Sprintf("HTTP %d", response.StatusCode)})
+		ok := response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusMultipleChoices
+		jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": ok, "message": fmt.Sprintf("HTTP %d", response.StatusCode)})
 		return nil
 	}
 	jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "message": "credentials validated"})
