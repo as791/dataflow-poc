@@ -10,24 +10,21 @@
 
 **Please do not file public GitHub issues for security vulnerabilities.**
 
-Report vulnerabilities privately via one of:
-
-- **GitHub private advisory**: [Security → Report a vulnerability](../../security/advisories/new) on this repo
-- **Email**: security@dataflow.dev (PGP key available on request)
+Report vulnerabilities through GitHub's private
+[security advisory form](https://github.com/as791/dataflow-poc/security/advisories/new).
+If that form is unavailable, contact [@as791](https://github.com/as791) and ask
+for a private reporting channel without including vulnerability details.
 
 Include:
 - Description of the vulnerability and its potential impact
 - Reproduction steps or proof-of-concept (if safe to share)
 - Any mitigations you are aware of
 
-## Response SLA
+## Response Expectations
 
-| Step | Target |
-| ---- | ------ |
-| Acknowledgement | 48 hours |
-| Triage and severity assignment | 5 business days |
-| Fix or workaround for critical/high | 14 days |
-| Public disclosure (coordinated) | After fix is released |
+This project is maintained on a best-effort basis and does not currently offer
+a guaranteed response SLA. The maintainer will acknowledge, triage, and
+coordinate a fix and disclosure as availability permits.
 
 We follow coordinated disclosure. We will credit reporters in the release notes
 unless you prefer to remain anonymous.
