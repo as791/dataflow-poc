@@ -6,7 +6,7 @@
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"></a>
     <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"></a>
     <a href="CODE_OF_CONDUCT.md"><img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg" alt="Contributor Covenant"></a>
-    <img src="https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white" alt="Go 1.22+">
+    <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+">
     <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black" alt="React 18">
     <img src="https://img.shields.io/badge/Temporal-Durable_Workflows-141414" alt="Temporal">
   </p>
@@ -132,6 +132,7 @@ supported configuration.
 | Go backend decision | [docs/ADR-002-GO-BACKEND.md](docs/ADR-002-GO-BACKEND.md) |
 | Medallion architecture | [docs/MEDALLION_ARCHITECTURE.md](docs/MEDALLION_ARCHITECTURE.md) |
 | Product roadmap | [docs/PRODUCTROADMAP.md](docs/PRODUCTROADMAP.md) |
+| Governance | [GOVERNANCE.md](GOVERNANCE.md) |
 
 ## Project Status
 
@@ -146,6 +147,7 @@ Contributions are welcome — bug reports, connector manifests, docs, and code.
 
 - Read [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, commit format, and PR process.
 - Check [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before participating.
+- Read [GOVERNANCE.md](GOVERNANCE.md) for project roles and decision-making.
 - Report security vulnerabilities privately via [SECURITY.md](SECURITY.md).
 
 All contributions are made under the Apache 2.0 license and require a
@@ -164,5 +166,6 @@ Copyright 2025 DataFlow Contributors. See [NOTICE](NOTICE) for details.
   <a href="docs/CONNECTORS.md">Connectors</a> ·
   <a href="docs/BACKEND_CONTRACTS.md">Backend Contracts</a> ·
   <a href="docs/PRODUCTROADMAP.md">Roadmap</a> ·
-  <a href="CHANGELOG.md">Changelog</a>
+  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href="GOVERNANCE.md">Governance</a>
 </div>

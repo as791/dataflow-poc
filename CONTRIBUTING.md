@@ -31,38 +31,36 @@ Please read it before contributing.
 
 ## Dev setup
 
-Prerequisites: Docker + Compose v2, Go ≥ 1.22, Node ≥ 20, `npm`.
+Prerequisites: Docker + Compose v2, Go ≥ 1.25, Node ≥ 20, `npm`.
 
 ```bash
 # Clone and install JS deps
-git clone https://github.com/aryaman-sinha/dataflow-poc.git
+git clone https://github.com/as791/dataflow-poc.git
 cd dataflow-poc
-npm install          # builds @dataflow/shared and connector-sdk
+npm install
 
 # Run the full stack locally
-docker compose up    # Postgres, Temporal, API, worker, web on :3000
+./scripts/bootstrap.sh
 ```
 
-Or start services individually:
+For frontend hot reload while the stack remains containerized:
 
 ```bash
-npm run dev:api              # Go API on :4000
-npm run dev:activity-worker  # Temporal activity worker
-npm run dev:workflow-worker  # Temporal workflow worker
 npm run dev:web              # Vite dev server on :3000
 ```
 
 Run tests before opening a PR:
 
 ```bash
-go test ./...                            # Go unit tests
-npm -w @dataflow/shared test             # Mermaid round-trip tests
-npm -w @dataflow/connector-sdk test      # Executor + registry tests
-npx tsc --noEmit -p apps/web/tsconfig.json  # TypeScript check
+cd apps/workflow-go && go test -race ./...
+cd ../.. && npm -w @dataflow/shared test
+npm -w @dataflow/web test
+npm run build
+docker compose config --quiet
 ```
 
-CI (`.github/workflows/ci.yml`) runs all of the above plus a Docker Compose
-validation. Make sure they pass locally first.
+CI (`.github/workflows/ci.yml`) also runs `go vet`, `npm audit`, and
+`govulncheck`. Make sure it passes before requesting review.
 
 ## Making a change
 
@@ -104,7 +102,7 @@ Breaking changes: add `!` after the type/scope or a `BREAKING CHANGE:` footer.
 ## Pull request process
 
 1. Fill in the PR template — summary, changes, test plan.
-2. A maintainer will review within a few days. Small, focused PRs land faster.
+2. A maintainer reviews the change. Small, focused PRs are easier to evaluate.
 3. Address review feedback with new commits (do not force-push during review).
 4. Once approved and CI is green, a maintainer will merge (squash or merge commit).
 5. The branch is deleted after merge.
@@ -115,27 +113,27 @@ before doing a lot of work.
 ## Contributing a connector
 
 The fastest path — **no Go** — is a manifest. Add a `*.manifest.json` to
-`packages/connector-sdk/src/manifests/` (bundled) or point `CONNECTORS_DIR` at
-a directory of manifests (loaded on restart). Full schema and a worked example
-are in [docs/CONNECTORS.md](docs/CONNECTORS.md).
+`connectors/manifests/` or point `CONNECTORS_DIR` at a directory of manifests
+(loaded on restart). Full schema and a worked example are in
+[docs/CONNECTORS.md](docs/CONNECTORS.md).
 
-For connectors a manifest can't express (OAuth, change-feeds, GraphQL, SDK auth),
-implement a `ConnectorPlugin` — see the same doc.
+For connectors a manifest cannot express (OAuth, change feeds, GraphQL, SDK
+authentication), add it to `apps/workflow-go/internal/connectors`; see the same
+doc.
 
 A good connector PR includes:
-- The manifest or plugin + any new config `fields`
+- The manifest or Go implementation plus any new config `fields`
 - A note on auth, pagination, and incremental/cursor behavior
-- A small unit test if it's a plugin (`executor.test.ts` alongside)
+- A focused Go test for coded connector behavior
 
 ## Repository layout
 
 | Path | What |
 |------|------|
 | `apps/web/` | React + Vite frontend (canvas, AI builder, monitoring) |
-| `apps/workflow-go/` | Go monobinary: API, Temporal workflow worker, activity worker |
+| `apps/workflow-go/` | Go API, Temporal workflow worker, activity worker, and connectors |
 | `packages/shared/` | Pipeline types, Mermaid mapping |
-| `packages/connector-sdk/` | Manifest schema, executor, registry, plugin API |
-| `connectors/` | Built-in connector manifests and plugins |
+| `connectors/manifests/` | User-defined HTTP connector manifests |
 | `db/` | Postgres migrations (numbered, run in order) |
 | `docs/` | Architecture decision records and design docs |
 | `scripts/` | Dev bootstrap and utility scripts |
@@ -149,8 +147,8 @@ A good connector PR includes:
   `db/003_rls.sql`.
 - **No `dist/` in source**: `@dataflow/*` packages build to `dist/`; don't
   commit compiled output.
-- **Security-sensitive paths** (`crypto/`, auth middleware, credential storage)
-  require review from a CODEOWNER.
+- **Security-sensitive paths** (codec, auth, credential and payload storage)
+  require focused maintainer review.
 
 ## Developer Certificate of Origin
 
@@ -161,14 +159,11 @@ the right to submit it under the Apache 2.0 license. Add this to every commit:
 Signed-off-by: Your Name <you@example.com>
 ```
 
-The easiest way:
+Use Git's sign-off flag:
 
 ```bash
 git commit -s -m "feat: my change"
 ```
-
-Or configure Git globally: `git config --global commit.gpgsign true` (GPG sign)
-plus `git config --global user.signingkey <key-id>`.
 
 Full DCO text: <https://developercertificate.org/>
 
