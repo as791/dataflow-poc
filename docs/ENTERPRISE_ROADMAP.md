@@ -35,23 +35,22 @@ proprietary event format.
 - Date-partitioned database backfills with dry-run plans, isolated cursors, and bounded concurrency.
 - Workspace execution activity search with API-boundary and write-time secret redaction.
 - Immutable pipeline-version lineage history with breaking/warning/info architecture diffs.
+- Temporal Server, CLI/admin tooling, and Web UI aligned on Server `1.31.1`, with explicit Cassandra/Elasticsearch schema bootstrap and a Go workflow replay fixture from `1.28.1`.
 
 ## Next priorities
 
 ### P0 — safe production operation
 
-1. Upgrade Temporal Server `1.28.1` → `1.31.1`, including required core and visibility schema upgrades;
-   align Temporal UI and CLI/admin tooling, then run workflow replay and cross-SDK codec tests.
-2. Replace deprecated Build-ID compatibility calls with GA Worker Deployment and Worker Deployment
+1. Replace deprecated Build-ID compatibility calls with GA Worker Deployment and Worker Deployment
    Version APIs. Remove `updateBuildIdCompatibility` before Server `1.32`, where the old APIs disappear.
-3. Pin all TypeScript Temporal packages to `1.18.1`; keep Go SDK `1.45.0`. All TypeScript Temporal
+2. Pin all TypeScript Temporal packages to `1.18.1`; keep Go SDK `1.45.0`. All TypeScript Temporal
    packages in the monorepo must use the same exact version.
-4. Make object storage mandatory in production and add retention/orphan cleanup controls.
-5. Add backup/restore drills, retention controls, HA deployment manifests, and upgrade tests.
-6. Add pipeline-scoped RBAC and API/service accounts; owner/member is insufficient.
-7. Add centralized process-log ingestion and retention policy; durable node activity search and redaction are shipped.
+3. Make object storage mandatory in production and add retention/orphan cleanup controls.
+4. Add backup/restore drills, retention controls, HA deployment manifests, and upgrade tests.
+5. Add pipeline-scoped RBAC and API/service accounts; owner/member is insufficient.
+6. Add centralized process-log ingestion and retention policy; durable node activity search and redaction are shipped.
 
-Temporal upgrade acceptance:
+Temporal `1.31.1` acceptance:
 
 - Existing histories replay without nondeterminism under Go SDK `1.45.0`.
 - Go Workflow and TypeScript Activity payload encryption remains cross-SDK compatible.

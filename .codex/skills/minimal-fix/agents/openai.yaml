@@ -1,0 +1,4 @@
+interface:
+  display_name: "Minimal Fix"
+  short_description: "Apply one small root-cause code fix"
+  default_prompt: "Use $minimal-fix to make and verify the smallest defensible fix for this concrete issue."

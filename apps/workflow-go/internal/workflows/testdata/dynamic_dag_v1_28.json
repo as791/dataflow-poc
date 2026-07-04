@@ -1,0 +1,105 @@
+{
+ "events": [
+  {
+   "eventId": "1",
+   "eventTime": "2026-07-04T07:26:43.203726049Z",
+   "eventType": "WorkflowExecutionStarted",
+   "taskId": "30414317",
+   "workflowExecutionStartedEventAttributes": {
+    "workflowType": {
+     "name": "DynamicDAGWorkflow"
+    },
+    "taskQueue": {
+     "name": "dynamic-dag-test",
+     "kind": "Normal"
+    },
+    "input": {
+     "payloads": [
+      {
+       "metadata": {
+        "encoding": "anNvbi9wbGFpbg=="
+       },
+       "data": "eyJkZWZpbml0aW9uIjp7ImVkZ2VzIjpbeyJzb3VyY2UiOiJhIiwidGFyZ2V0IjoiYiJ9LHsic291cmNlIjoiYiIsInRhcmdldCI6ImEifV0sImlkIjoicmVwbGF5Iiwibm9kZXMiOlt7ImFjdGl2aXR5VHlwZSI6Im5vb3AiLCJjb25maWciOnt9LCJpZCI6ImEiLCJ0eXBlIjoidHJhbnNmb3JtIn0seyJhY3Rpdml0eVR5cGUiOiJub29wIiwiY29uZmlnIjp7fSwiaWQiOiJiIiwidHlwZSI6InRyYW5zZm9ybSJ9XSwidGVuYW50SWQiOiJyZXBsYXkifSwiZW52aXJvbm1lbnQiOiJ0ZXN0IiwiZXhlY3V0aW9uSWQiOiJyZXBsYXkiLCJ0ZW5hbnRJZCI6InJlcGxheSIsInRyaWdnZXIiOnsidHlwZSI6Im1hbnVhbCJ9fQ=="
+      }
+     ]
+    },
+    "workflowExecutionTimeout": "0s",
+    "workflowRunTimeout": "0s",
+    "workflowTaskTimeout": "10s",
+    "originalExecutionRunId": "019f2c05-c403-7aec-a2e6-3d965dc4b60a",
+    "identity": "replay-fixture",
+    "firstExecutionRunId": "019f2c05-c403-7aec-a2e6-3d965dc4b60a",
+    "attempt": 1,
+    "firstWorkflowTaskBackoff": "0s",
+    "header": {
+
+    }
+   }
+  },
+  {
+   "eventId": "2",
+   "eventTime": "2026-07-04T07:26:43.204593883Z",
+   "eventType": "WorkflowTaskScheduled",
+   "taskId": "30414318",
+   "workflowTaskScheduledEventAttributes": {
+    "taskQueue": {
+     "name": "dynamic-dag-test",
+     "kind": "Normal"
+    },
+    "startToCloseTimeout": "10s",
+    "attempt": 1
+   }
+  },
+  {
+   "eventId": "3",
+   "eventTime": "2026-07-04T07:26:43.276592966Z",
+   "eventType": "WorkflowTaskStarted",
+   "taskId": "30414323",
+   "workflowTaskStartedEventAttributes": {
+    "scheduledEventId": "2",
+    "identity": "1@7529e731480b@",
+    "requestId": "d77c11ff-75e6-4ec3-9bc0-21f721f434ef",
+    "historySizeBytes": "645"
+   }
+  },
+  {
+   "eventId": "4",
+   "eventTime": "2026-07-04T07:26:43.370331550Z",
+   "eventType": "WorkflowTaskCompleted",
+   "taskId": "30414327",
+   "workflowTaskCompletedEventAttributes": {
+    "scheduledEventId": "2",
+    "startedEventId": "3",
+    "identity": "1@7529e731480b@",
+    "workerVersioningId": {
+     "workerBuildId": "0ab5ec38ab41bfa9d6b7516da3e46e49"
+    },
+    "sdkMetadata": {
+     "langUsedFlags": [
+      3
+     ]
+    },
+    "meteringMetadata": {
+
+    }
+   }
+  },
+  {
+   "eventId": "5",
+   "eventTime": "2026-07-04T07:26:43.370534008Z",
+   "eventType": "WorkflowExecutionFailed",
+   "taskId": "30414328",
+   "workflowExecutionFailedEventAttributes": {
+    "failure": {
+     "message": "pipeline contains a cycle",
+     "source": "GoSDK",
+     "applicationFailureInfo": {
+
+     }
+    },
+    "retryState": "RetryPolicyNotSet",
+    "workflowTaskCompletedEventId": "4"
+   }
+  }
+ ]
+}

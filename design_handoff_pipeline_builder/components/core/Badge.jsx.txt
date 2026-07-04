@@ -1,0 +1,32 @@
+import React from 'react';
+
+const TONES = {
+  neutral: { bgLight: '#f3f4f6', textLight: '#4b5563', borderLight: '#e5e7eb', dot: '#9ca3af' },
+  success: { bgLight: 'var(--success-bg-light)', textLight: 'var(--success-text-light)', borderLight: 'var(--success-border-light)', dot: 'var(--success)' },
+  warning: { bgLight: 'var(--warning-bg-light)', textLight: 'var(--warning-text-light)', borderLight: 'var(--warning-border-light)', dot: 'var(--warning)' },
+  danger:  { bgLight: 'var(--danger-bg-light)',  textLight: 'var(--danger-text-light)',  borderLight: 'var(--danger-border-light)',  dot: 'var(--danger)' },
+};
+
+/** Small pill status label — mirrors .glass-badge* and lifecycle-stage badges. */
+export function Badge({ tone = 'neutral', dot = false, children }) {
+  const t = TONES[tone] || TONES.neutral;
+  return (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
+      padding: '3px 9px',
+      borderRadius: 'var(--radius-pill)',
+      fontSize: '11px',
+      fontWeight: 'var(--weight-medium)',
+      fontFamily: 'var(--font-sans)',
+      background: t.bgLight,
+      color: t.textLight,
+      border: `1px solid ${t.borderLight}`,
+      lineHeight: 1,
+    }}>
+      {dot && <span style={{ width: 6, height: 6, borderRadius: '50%', background: t.dot }} />}
+      {children}
+    </span>
+  );
+}

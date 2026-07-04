@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loop Engineering"
+  short_description: "Run bounded, verifiable engineering loops"
+  default_prompt: "Use $loop-engineering to run this engineering goal as a bounded discover, act, verify, and remember loop."

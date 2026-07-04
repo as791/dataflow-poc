@@ -22,7 +22,7 @@ x-app-env: &app-env
   # OTel endpoint — only reachable when observability profile is active;
   # the SDK silently drops spans if the collector is unreachable.
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
-  APP_URL: http://localhost:3000
+  APP_URL: http://localhost:3002
   JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-access-secret-change-me}
   AUTH_PASSWORD_ENABLED: ${AUTH_PASSWORD_ENABLED:-true}
   SMTP_HOST: ${SMTP_HOST:-mailhog}
@@ -36,7 +36,7 @@ x-app-env: &app-env
   CLICKHOUSE_DB: dataflow
   GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
   GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-  GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/api/auth/google/callback}
+  GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3002/api/auth/google/callback}
   AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
   AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
   AZURE_TENANT_ID: ${AZURE_TENANT_ID:-common}
@@ -247,46 +247,78 @@ services:
 
   # Temporal workflow history is stored only in Cassandra. Elasticsearch is
   # the advanced visibility store queried by Temporal UI.
-  temporal:
-    image: temporalio/auto-setup:1.28.1
+  temporal-schema:
+    image: temporalio/admin-tools:1.31.1
     environment:
-      - DB=cassandra
       - CASSANDRA_SEEDS=cassandra
-      - CASSANDRA_PORT=9042
+      - ES_SCHEME=http
+      - ES_HOST=elasticsearch
+      - ES_PORT=9200
+      - ES_VERSION=v7
+      - ES_VISIBILITY_INDEX=temporal_visibility_v1_dev
+    depends_on:
+      cassandra: { condition: service_healthy }
+      elasticsearch: { condition: service_healthy }
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        temporal-cassandra-tool --ep cassandra create -k temporal --rf 1
+        temporal-cassandra-tool --ep cassandra -k temporal setup-schema -v 0.0
+        temporal-cassandra-tool --ep cassandra -k temporal update-schema -d /etc/temporal/schema/cassandra/temporal/versioned
+        temporal-elasticsearch-tool --ep http://elasticsearch:9200 setup-schema
+        temporal-elasticsearch-tool --ep http://elasticsearch:9200 create-index --index temporal_visibility_v1_dev
+    restart: "no"
+    networks: [dataflow]
+
+  temporal:
+    image: temporalio/server:1.31.1
+    environment:
+      - CASSANDRA_SEEDS=cassandra
       - ENABLE_ES=true
       - ES_SEEDS=elasticsearch
       - ES_VERSION=v7
       - ES_VIS_INDEX=temporal_visibility_v1_dev
+      - BIND_ON_IP=0.0.0.0
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/dataflow.yaml
     depends_on:
-      cassandra: { condition: service_healthy }
-      elasticsearch: { condition: service_healthy }
+      temporal-schema: { condition: service_completed_successfully }
+    volumes:
+      - ./config/temporal-dynamicconfig.yaml:/etc/temporal/config/dynamicconfig/dataflow.yaml:ro
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7233"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
     mem_limit: 512m
     networks: [dataflow]
 
   temporal-ui:
-    image: temporalio/ui:2.26.2
+    image: temporalio/ui:2.49.1
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
     ports: ["8082:8080"]
-    depends_on: [temporal]
+    depends_on:
+      temporal: { condition: service_healthy }
     mem_limit: 128m
     networks: [dataflow]
 
   # One-shot: register the test + prod namespaces the worker pools and API
-  # client use. Idempotent (ignores "already exists"); the worker pools wait for
-  # this to complete. Tries both tctl retention flag styles for version safety.
+  # client use. Idempotent; the worker pools wait for this to complete.
   temporal-namespaces:
-    image: temporalio/admin-tools:1.22.7
-    depends_on: [temporal]
+    image: temporalio/admin-tools:1.31.1
+    depends_on:
+      temporal: { condition: service_healthy }
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        until tctl --address temporal:7233 namespace list >/dev/null 2>&1; do
+        set -eu
+        until temporal operator cluster health --address temporal:7233 >/dev/null 2>&1; do
           echo "waiting for temporal frontend…"; sleep 2; done
         for ns in test prod; do
-          tctl --address temporal:7233 --namespace "$$ns" namespace register --retention 72h 2>/dev/null \
-            || tctl --address temporal:7233 --namespace "$$ns" namespace register --rd 3 2>/dev/null \
-            || echo "namespace $$ns already exists or registered"
+          temporal operator namespace describe --address temporal:7233 --namespace "$$ns" >/dev/null 2>&1 \
+            || temporal operator namespace create --address temporal:7233 --namespace "$$ns" --retention 3d
         done
         echo "namespaces test + prod ready"
     restart: "no"

@@ -1,0 +1,16 @@
+import * as React from 'react';
+
+/**
+ * @startingPoint section="Components" subtitle="Text input — glass-input, optional leading icon" viewport="400x90"
+ */
+export interface InputProps {
+  value?: string;
+  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  placeholder?: string;
+  type?: string;
+  /** Small leading glyph (svg/icon element) */
+  icon?: React.ReactNode;
+  disabled?: boolean;
+  style?: React.CSSProperties;
+}
+export declare function Input(props: InputProps): JSX.Element;

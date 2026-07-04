@@ -133,7 +133,7 @@ export const api = {
     request('/api/connectors/zendesk/auth', { method: 'POST', body: JSON.stringify({ subdomain }) }).then(j),
 
   // Auth — password login/register
-  registerWithPassword: (body: { email: string; password: string; tenantName?: string }) =>
+  registerWithPassword: (body: { email: string; password: string; tenantName?: string; inviteToken?: string }) =>
     request('/api/auth/register', { method: 'POST', body: JSON.stringify(body) }).then(j),
   loginWithPassword: (body: { email: string; password: string }) =>
     request('/api/auth/login', { method: 'POST', body: JSON.stringify(body) }).then(j),
