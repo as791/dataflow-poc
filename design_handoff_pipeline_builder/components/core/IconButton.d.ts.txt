@@ -1,0 +1,13 @@
+import * as React from 'react';
+
+/** Square icon-only button — mirrors .icon-button in index.css. Pass any small ReactNode (svg/icon element) as children. */
+export interface IconButtonProps {
+  children?: React.ReactNode;
+  active?: boolean;
+  title?: string;
+}
+
+/**
+ * @startingPoint section="Core" subtitle="Icon-only square button — nav rail, toolbar actions" viewport="500x100"
+ */
+export declare function IconButton(props: IconButtonProps): JSX.Element;

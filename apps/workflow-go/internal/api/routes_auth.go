@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/dataflow-poc/workflow-go/internal/model"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 func (s *Server) registerAuth(mux *http.ServeMux) {
@@ -29,7 +31,7 @@ func (s *Server) registerPassword(w http.ResponseWriter, r *http.Request) error 
 	if os.Getenv("AUTH_PASSWORD_ENABLED") != "true" {
 		return notFound("not found")
 	}
-	var body struct{ Email, Password, TenantName string }
+	var body struct{ Email, Password, TenantName, InviteToken string }
 	if !decodeJSON(w, r, &body) {
 		return nil
 	}
@@ -50,16 +52,33 @@ func (s *Server) registerPassword(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	defer tx.Rollback(r.Context()) //nolint:errcheck
-	name := strings.TrimSpace(body.TenantName)
-	if name == "" {
-		name = strings.Split(body.Email, "@")[0]
-	}
 	var tenantID, userID string
-	if err := tx.QueryRow(r.Context(), `INSERT INTO tenants (name) VALUES ($1) RETURNING id`, name).Scan(&tenantID); err != nil {
-		return err
+	role := "owner"
+	if body.InviteToken != "" {
+		inviteTenantID, ok := inviteTenant(body.InviteToken)
+		if !ok {
+			return badRequest("invalid or expired invite")
+		}
+		if _, err := tx.Exec(r.Context(), `SELECT set_config('app.tenant_id',$1,true)`, inviteTenantID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(r.Context(), `SELECT tenant_id,role FROM user_invitations WHERE token_hash=$1 AND email=$2 AND accepted_at IS NULL AND expires_at>now()`, sha256Hex(body.InviteToken), body.Email).Scan(&tenantID, &role); err != nil {
+			return badRequest("invalid or expired invite")
+		}
+		if _, err := tx.Exec(r.Context(), `UPDATE user_invitations SET accepted_at=now() WHERE token_hash=$1 AND accepted_at IS NULL`, sha256Hex(body.InviteToken)); err != nil {
+			return err
+		}
+	} else {
+		name := strings.TrimSpace(body.TenantName)
+		if name == "" {
+			name = strings.Split(body.Email, "@")[0]
+		}
+		if err := tx.QueryRow(r.Context(), `INSERT INTO tenants (name) VALUES ($1) RETURNING id`, name).Scan(&tenantID); err != nil {
+			return err
+		}
 	}
 	if err := tx.QueryRow(r.Context(), `INSERT INTO users (tenant_id,email,password_hash,role,email_verified)
-    VALUES ($1,$2,$3,'owner',true) RETURNING id`, tenantID, body.Email, hash).Scan(&userID); err != nil {
+    VALUES ($1,$2,$3,$4,true) RETURNING id`, tenantID, body.Email, hash, role).Scan(&userID); err != nil {
 		return err
 	}
 	if err := tx.Commit(r.Context()); err != nil {
@@ -171,22 +190,31 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) error {
 	if token == "" {
 		return badRequest("token required")
 	}
-	rows, err := s.DB.Pool.Query(r.Context(), `SELECT i.email,i.role,i.expires_at,t.name AS tenant_name
-    FROM user_invitations i JOIN tenants t ON t.id=i.tenant_id WHERE i.token_hash=$1 AND i.accepted_at IS NULL`, sha256Hex(token))
-	if err != nil {
-		return err
-	}
-	invite, err := oneMap(rows)
-	if err != nil || invite == nil {
+	tenantID, ok := inviteTenant(token)
+	if !ok {
 		return badRequest("invalid or used token")
 	}
-	if expires, ok := invite["expires_at"].(time.Time); ok && expires.Before(time.Now()) {
+	var email, role, tenantName string
+	var expires time.Time
+	err := s.DB.TenantTx(r.Context(), tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(r.Context(), `SELECT i.email,i.role,i.expires_at,t.name FROM user_invitations i JOIN tenants t ON t.id=i.tenant_id WHERE i.token_hash=$1 AND i.accepted_at IS NULL`, sha256Hex(token)).Scan(&email, &role, &expires, &tenantName)
+	})
+	if err != nil {
+		return badRequest("invalid or used token")
+	}
+	if expires.Before(time.Now()) {
 		return badRequest("token expired")
 	}
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"email": invite["email"], "role": invite["role"], "tenantName": invite["tenant_name"],
+		"email": email, "role": role, "tenantName": tenantName,
 	})
 	return nil
+}
+
+func inviteTenant(token string) (string, bool) {
+	tenantID, _, ok := strings.Cut(token, ".")
+	_, err := uuid.Parse(tenantID)
+	return tenantID, ok && err == nil
 }
 
 func (s *Server) googleStart(w http.ResponseWriter, r *http.Request) error {

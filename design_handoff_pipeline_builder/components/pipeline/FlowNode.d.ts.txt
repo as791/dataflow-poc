@@ -1,0 +1,15 @@
+import * as React from 'react';
+
+/**
+ * @startingPoint section="Pipeline" subtitle="ReactFlow canvas node — connector icon, color accent, status dot" viewport="500x150"
+ */
+export interface FlowNodeProps {
+  label: string;
+  sublabel?: string;
+  icon?: React.ReactNode;
+  /** Connector/transform accent — see the Colors → Connector Family Colors card */
+  color?: string;
+  status?: 'idle' | 'running' | 'success' | 'failed';
+  recordCount?: number;
+}
+export declare function FlowNode(props: FlowNodeProps): JSX.Element;

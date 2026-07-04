@@ -4,8 +4,9 @@ import {
   Activity, ArrowDownToLine, Braces, Cable, ChevronDown, ChevronUp,
   Clock, Code2, CreditCard, Database, GitFork, History, LayoutList, Layers3,
   Maximize2, Minimize2, Moon, Play, Plus, Rocket, Save, Search,
-  Settings, Sparkles, Sun, Terminal, User, Users, X, Zap,
+  Settings, Sparkles, Sun, Terminal, User, Users, X,
 } from 'lucide-react';
+import { AtomMark } from '../components/AtomMark';
 import ReactFlow, {
   Background, BackgroundVariant, Controls, MiniMap,
   addEdge, useNodesState, useEdgesState,
@@ -450,11 +451,11 @@ export default function PipelineCanvasPage() {
         <Background variant={BackgroundVariant.Dots} gap={24} size={1}
           color={dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'} />
         <Controls position="bottom-left" style={{ left: 72, bottom: drawerOpen ? drawerOffset : 12 }} />
-        <MiniMap position="bottom-left" pannable zoomable
+        {nodes.length > 0 && <MiniMap position="bottom-left" pannable zoomable
           style={{ left: 126, bottom: drawerOpen ? drawerOffset : 12, width: 190, height: 112 }}
           nodeColor={n => byType[n.data.activityType]?.color ?? '#6965db'}
           nodeStrokeColor={dark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.25)'} nodeStrokeWidth={2}
-          maskColor={dark ? 'rgba(8,10,18,0.78)' : 'rgba(235,237,245,0.78)'} />
+          maskColor={dark ? 'rgba(8,10,18,0.78)' : 'rgba(235,237,245,0.78)'} />}
       </ReactFlow>
 
       {contextAdd && (
@@ -491,7 +492,7 @@ export default function PipelineCanvasPage() {
         border border-gray-200 dark:border-white/[0.08]
         bg-white/95 dark:bg-[#0d0f17]/95 backdrop-blur-lg py-3 shadow-sm dark:shadow-glass">
         <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-[10px] bg-gradient-to-br from-brand-400 to-brand-600 shadow-md shadow-brand-500/20">
-          <Zap size={16} className="text-white" strokeWidth={2.5} />
+          <AtomMark size={20} />
         </div>
         <button title="All pipelines" onClick={() => navigate('/pipelines')}
           className="group relative flex h-9 w-9 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
@@ -571,7 +572,7 @@ export default function PipelineCanvasPage() {
 
       {/* Category flyout panel */}
       {activeCat && (
-        <div data-canvas-sidebar className="absolute left-[68px] top-3 bottom-3 z-10 w-[440px] flex flex-col overflow-hidden rounded-r-2xl
+        <div data-canvas-sidebar className="absolute left-[68px] top-3 bottom-3 z-10 w-[300px] flex flex-col overflow-hidden rounded-r-2xl
           border border-gray-200 dark:border-white/[0.08]
           bg-white/97 dark:bg-[#0d0f17]/97 backdrop-blur-lg shadow-xl">
           <div className="border-b border-gray-100 dark:border-white/[0.07] p-3">
@@ -700,8 +701,8 @@ export default function PipelineCanvasPage() {
       )}
 
       {/* Top floating: name pill + lifecycle */}
-      <div className="absolute top-4 z-10 flex -translate-x-1/2 items-center gap-2 pointer-events-none transition-[left] duration-200"
-        style={{ left: workspacePanel ? 'calc(50% + 194px)' : activeCat ? 'calc(50% + 254px)' : 'calc(50% + 34px)' }}>
+      <div className="absolute top-4 z-10 flex items-center gap-2 pointer-events-none transition-[left] duration-200"
+        style={{ left: workspacePanel || activeCat ? 400 : 90 }}>
         <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-gray-200 dark:border-white/[0.09]
           bg-white/95 dark:bg-[#0d1018]/90 px-3 py-2 shadow-sm dark:shadow-glass backdrop-blur-xl">
           <input

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loop Budget"
+  short_description: "Guard recurring loop token and run budgets"
+  default_prompt: "Use $loop-budget to check whether this engineering loop should run, throttle, or stop."

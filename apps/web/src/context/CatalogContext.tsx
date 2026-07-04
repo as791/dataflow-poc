@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { CATALOG, type CatalogEntry } from '../catalog';
+import { CATALOG, type CatalogEntry } from '@dataflow/shared';
 import { api } from '../api';
 import { catalogForFeatures } from '@dataflow/shared';
 import { useFeatures } from './FeatureContext';

@@ -22,6 +22,7 @@ export function AnalyticsPage() {
   const [loadingData, setLoadingData] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [initialDataset, setInitialDataset] = useState<string>();
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [dirty, setDirty] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -41,9 +42,10 @@ export function AnalyticsPage() {
     (async () => {
       setLoadingDatasets(true);
       try {
+        setError(null);
         const [ds, dbs] = await Promise.all([
-          api.getAnalyticsDatasets().catch(() => [] as Dataset[]),
-          api.listDashboards().catch(() => [] as Dashboard[]),
+          api.getAnalyticsDatasets(),
+          api.listDashboards(),
         ]);
         setDatasets(ds);
         setDashboards(dbs);
@@ -71,7 +73,9 @@ export function AnalyticsPage() {
     try {
       const { rows } = await api.queryAnalytics({ dataset: widget.dataset, spec: widget.spec });
       setWidgets(prev => prev.map(w => w.id === widget.id ? { ...w, data: rows } : w));
-    } catch { /* chart shows "No data" */ }
+    } catch (e: any) {
+      setError(`Could not load “${widget.title}”: ${e.message ?? 'Query failed'}`);
+    }
     finally {
       setLoadingData(prev => ({ ...prev, [widget.id]: false }));
     }
@@ -121,6 +125,10 @@ export function AnalyticsPage() {
     return <div className="flex items-center justify-center h-full text-gray-400 dark:text-white/40 text-sm">Loading analytics…</div>;
   }
 
+  if (error && datasets.length === 0) {
+    return <div className="mx-auto mt-16 max-w-2xl px-6"><ApiError message={error} onRetry={() => window.location.reload()} /></div>;
+  }
+
   if (datasets.length === 0) {
     return (
       <div className="max-w-2xl mx-auto mt-16 px-6">
@@ -146,7 +154,10 @@ export function AnalyticsPage() {
         <ul className="flex-1 overflow-y-auto py-2">
           {datasets.map(d => (
             <li key={d.collection}>
-              <button className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/5 transition" title={`${d.row_count.toLocaleString()} rows`}>
+              <button
+                className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/5 transition"
+                title={`Create a widget from ${d.collection}`}
+                onClick={() => { setInitialDataset(d.collection); setShowAddModal(true); }}>
                 <p className="truncate text-gray-800 dark:text-white/80">{d.collection}</p>
                 <p className="text-xs text-gray-400 dark:text-white/40">{d.row_count.toLocaleString()} rows</p>
               </button>
@@ -186,7 +197,7 @@ export function AnalyticsPage() {
           </div>
           <div className="flex items-center gap-2">
             {error && <ApiError message={error} />}
-            <button className="glass-btn-ghost text-sm" onClick={() => setShowAddModal(true)}><Plus size={15} /> Add widget</button>
+            <button className="glass-btn-ghost text-sm" onClick={() => { setInitialDataset(undefined); setShowAddModal(true); }}><Plus size={15} /> Add widget</button>
             <button
               className={`glass-btn-primary text-sm ${!dirty ? 'opacity-50' : ''}`}
               onClick={() => setShowSaveModal(true)}
@@ -201,7 +212,7 @@ export function AnalyticsPage() {
             <div className="flex flex-col items-center justify-center h-full text-center space-y-3">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-gray-200 dark:border-white/[0.08] bg-gray-100 dark:bg-white/[0.04] text-gray-400 dark:text-white/30"><BarChart3 size={24} /></div>
               <p className="text-gray-400 dark:text-white/40 text-sm">No widgets yet.</p>
-              <button className="glass-btn-primary text-sm" onClick={() => setShowAddModal(true)}>
+              <button className="glass-btn-primary text-sm" onClick={() => { setInitialDataset(undefined); setShowAddModal(true); }}>
                 <Plus size={15} /> Add first widget
               </button>
             </div>
@@ -245,6 +256,7 @@ export function AnalyticsPage() {
       {showAddModal && (
         <AddWidgetModal
           datasets={datasets}
+          initialDataset={initialDataset}
           schema={async (name: string): Promise<SchemaField[]> => { const r = await api.getAnalyticsSchema(name); return r.schema; }}
           onClose={() => setShowAddModal(false)}
           onAdd={addWidget}

@@ -56,6 +56,8 @@ function duration(started: string, completed: string | null): string {
 
 function stageOf(p: Pipeline): Stage { return deriveStage(p.status, p.environment); }
 
+function pipelineName(p: Pipeline): string { return p.name?.trim() || p.pipeline_key || 'Untitled pipeline'; }
+
 function triggerLabel(def: any): string {
   const t = def?.trigger;
   if (!t || t.type === 'manual') return 'Manual';
@@ -80,28 +82,17 @@ const STAGE_CFG: Record<Stage, { bar: string; badge: string; label: string }> = 
 
 // ── sub-components ────────────────────────────────────────────────────────────
 
-function ConnChain({ definition }: { definition: any }) {
+function PipelineIcon({ definition }: { definition: any }) {
   const { byType } = useCatalog();
-  const nodes = pipelineNodes(definition);
-  if (!nodes.length) return <span className="text-[11px] text-gray-300 dark:text-white/20 italic">No nodes</span>;
+  const node = pipelineNodes(definition)[0];
+  if (!node) return null;
+  const entry = byType[node.activityType];
   return (
-    <div className="flex items-center gap-1 shrink-0">
-      {nodes.map((n, i) => {
-        const entry = byType[n.activityType];
-        return (
-          <div key={i} className="flex items-center gap-1">
-            <span
-              className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] border
-                border-gray-200 bg-gray-50 dark:border-white/[0.1] dark:bg-white/[0.05]"
-              style={{ color: entry?.color ?? '#7c6cf2' }}
-              title={entry?.label ?? n.activityType}>
-              <ActivityIcon activityType={n.activityType} nodeType={n.nodeType} size={13} />
-            </span>
-            {i < nodes.length - 1 && <span className="text-[10px] text-gray-300 dark:text-white/20">→</span>}
-          </div>
-        );
-      })}
-    </div>
+    <span className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] border
+      border-gray-200 bg-gray-50 dark:border-white/[0.1] dark:bg-white/[0.05]"
+      style={{ color: entry?.color ?? '#7c6cf2' }} title={entry?.label ?? node.activityType}>
+      <ActivityIcon activityType={node.activityType} nodeType={node.nodeType} size={13} />
+    </span>
   );
 }
 
@@ -147,17 +138,17 @@ function PipelineDrawer({ pipeline, onClose }: { pipeline: Pipeline; onClose: ()
 
       {/* header */}
       <div className="px-5 pt-4 pb-3.5 border-b border-gray-100 dark:border-white/[0.07] shrink-0">
-        <div className="flex items-center gap-2 mb-2.5">
-          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${cfg.badge}`}>{cfg.label}</span>
-          <button onClick={onClose}
-            className="ml-auto flex h-[22px] w-[22px] items-center justify-center rounded-[6px]
+        <div className="flex items-center gap-2 mb-1 min-w-0">
+          <span className="text-[13px] font-semibold tracking-tight text-gray-900 dark:text-white/90 min-w-0 truncate">{pipelineName(pipeline)}</span>
+          <span className={`text-[9px] font-semibold px-1.5 py-px rounded-full border shrink-0 ${cfg.badge}`}>{cfg.label}</span>
+          <button onClick={onClose} aria-label="Close pipeline details"
+            className="ml-auto flex h-[22px] w-[22px] items-center justify-center rounded-[6px] shrink-0
               bg-gray-100 border border-gray-200 text-gray-400 hover:bg-gray-200 hover:text-gray-700
               dark:bg-white/[0.04] dark:border-white/[0.07] dark:text-white/40
               dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
             <X size={13} />
           </button>
         </div>
-        <div className="text-[13px] font-semibold tracking-tight text-gray-900 dark:text-white/90 mb-1 min-w-0 truncate">{pipeline.name}</div>
         <div className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-white/35">
           <Clock size={11} />
           <span>v{pipeline.version} · {triggerLabel(pipeline.definition)}</span>
@@ -272,22 +263,33 @@ function PipelineDrawer({ pipeline, onClose }: { pipeline: Pipeline; onClose: ()
 
 // ── main ──────────────────────────────────────────────────────────────────────
 
-type FilterType = 'all' | 'production' | 'integration' | 'draft' | 'failed';
+type FilterType = 'all' | 'production' | 'integration' | 'draft';
+type TriggerFilter = 'all' | 'cron' | 'manual' | 'webhook';
 
 const FILTERS: { key: FilterType; label: string; dot?: string }[] = [
   { key: 'all',         label: 'All' },
   { key: 'production',  label: 'Production',      dot: 'bg-emerald-400' },
   { key: 'integration', label: 'Integration',     dot: 'bg-blue-400' },
   { key: 'draft',       label: 'Draft',           dot: 'bg-amber-400' },
-  { key: 'failed',      label: 'Last run failed', dot: 'bg-red-400' },
 ];
+
+const TRIGGER_FILTERS: { key: TriggerFilter; label: string }[] = [
+  { key: 'all', label: 'All triggers' },
+  { key: 'cron', label: 'Cron' },
+  { key: 'manual', label: 'Manual' },
+  { key: 'webhook', label: 'Webhook' },
+];
+
+function triggerType(p: Pipeline): Exclude<TriggerFilter, 'all'> | 'other' {
+  const type = p.definition?.trigger?.type ?? 'manual';
+  return type === 'cron' || type === 'manual' || type === 'webhook' ? type : 'other';
+}
 
 function matches(p: Pipeline, f: FilterType): boolean {
   if (f === 'all')         return true;
   if (f === 'production')  return stageOf(p) === 'production';
   if (f === 'integration') return stageOf(p) === 'testing';
   if (f === 'draft')       return stageOf(p) === 'draft';
-  if (f === 'failed')      return p.last_run_phase === 'failed';
   return true;
 }
 
@@ -296,6 +298,8 @@ export default function PipelinesPage() {
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterType>('all');
+  const [triggerFilter, setTriggerFilter] = useState<TriggerFilter>('all');
+  const [failedOnly, setFailedOnly] = useState(false);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Pipeline | null>(null);
 
@@ -314,54 +318,83 @@ export default function PipelinesPage() {
 
   const visible = pipelines
     .filter(p => matches(p, filter))
-    .filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()));
+    .filter(p => triggerFilter === 'all' || triggerType(p) === triggerFilter)
+    .filter(p => !failedOnly || p.last_run_phase === 'failed')
+    .filter(p => !search || pipelineName(p).toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div className="flex h-full">
       <div className="flex flex-1 flex-col min-w-0 min-h-0">
         {/* toolbar */}
-        <div className="flex items-center gap-2 px-6 py-2.5 border-b border-gray-100 dark:border-white/[0.06] flex-wrap shrink-0">
-          {FILTERS.map(({ key, label, dot }) => (
-            <button key={key} onClick={() => setFilter(key)}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border transition-all ${
-                filter === key
-                  ? 'bg-gray-900 border-gray-900 text-white dark:bg-white/[0.12] dark:border-white/[0.2] dark:text-white'
-                  : 'bg-transparent border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:border-white/[0.07] dark:text-white/45 dark:hover:bg-white/[0.065] dark:hover:text-white/75'
-              }`}>
-              {dot && <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />}
-              {label}
-              <span className="text-gray-400 dark:text-white/30 ml-0.5">{counts[key]}</span>
-            </button>
-          ))}
-          <div className="ml-auto flex items-center gap-2">
-            <div className="relative flex items-center">
-              <Search size={13} className="absolute left-2.5 text-gray-400 dark:text-white/30 pointer-events-none" />
-              <input value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="Search…" className="glass-input pl-7 py-1.5 text-[12px] w-40" />
+        <div className="flex flex-col gap-2 px-6 py-2.5 border-b border-gray-100 dark:border-white/[0.06] shrink-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-[.06em] text-gray-400 dark:text-white/30">Stage</span>
+            {FILTERS.map(({ key, label, dot }) => (
+              <button key={key} onClick={() => setFilter(key)}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border transition-all ${
+                  filter === key
+                    ? 'bg-gray-900 border-gray-900 text-white dark:bg-white/[0.12] dark:border-white/[0.2] dark:text-white'
+                    : 'bg-transparent border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:border-white/[0.07] dark:text-white/45 dark:hover:bg-white/[0.065] dark:hover:text-white/75'
+                }`}>
+                {dot && <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />}
+                {label}
+                <span className="text-gray-400 dark:text-white/30 ml-0.5">{counts[key]}</span>
+              </button>
+            ))}
+            <div className="ml-auto flex items-center gap-2">
+              <div className="relative flex items-center">
+                <Search size={13} className="absolute left-2.5 text-gray-400 dark:text-white/30 pointer-events-none" />
+                <input value={search} onChange={e => setSearch(e.target.value)}
+                  placeholder="Search…" className="glass-input pl-7 py-1.5 text-[12px] w-40" />
+              </div>
+              <button onClick={load} aria-label="Refresh pipelines" className="icon-button h-8 w-8 border-transparent bg-transparent"><RefreshCw size={14} /></button>
+              <button onClick={() => navigate('/')} className="glass-btn-primary text-[12px] py-1.5 px-4">+ New</button>
             </div>
-            <button onClick={load} className="icon-button w-8 h-8 border-transparent bg-transparent"><RefreshCw size={14} /></button>
-            <button onClick={() => navigate('/')} className="glass-btn-primary text-[12px] py-1.5 px-4">+ New</button>
           </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-[.06em] text-gray-400 dark:text-white/30">Trigger</span>
+            {TRIGGER_FILTERS.map(({ key, label }) => (
+              <button key={key} onClick={() => setTriggerFilter(key)}
+                className={`px-3 py-1 rounded-full text-[11px] font-medium border transition-all ${triggerFilter === key
+                  ? 'bg-gray-900 border-gray-900 text-white dark:bg-white/[0.12] dark:border-white/[0.2] dark:text-white'
+                  : 'bg-transparent border-gray-200 text-gray-500 hover:bg-gray-100 dark:border-white/[0.07] dark:text-white/45 dark:hover:bg-white/[0.065] dark:hover:text-white/75'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <button type="button" aria-pressed={failedOnly} onClick={() => setFailedOnly(v => !v)}
+            className={`flex w-fit items-center gap-2 py-0.5 text-[12px] font-medium transition-colors ${failedOnly ? 'text-red-500' : 'text-gray-500 dark:text-white/55'}`}>
+            <span className={`relative h-[17px] w-[30px] rounded-full transition-colors ${failedOnly ? 'bg-red-500' : 'bg-gray-200 dark:bg-white/[0.14]'}`}>
+              <span className={`absolute top-0.5 h-[13px] w-[13px] rounded-full bg-white shadow-sm transition-[left] ${failedOnly ? 'left-[15px]' : 'left-0.5'}`} />
+            </span>
+            Only show last-run failures
+            <span className="text-gray-400 dark:text-white/30">({pipelines.filter(p => p.last_run_phase === 'failed').length})</span>
+          </button>
         </div>
 
         {/* rows */}
         <div className="flex-1 overflow-y-auto">
           {loading && <div className="flex items-center justify-center h-32 text-[12px] text-gray-400 dark:text-white/25">Loading…</div>}
-          {!loading && visible.length === 0 && <div className="flex items-center justify-center h-32 text-[12px] text-gray-400 dark:text-white/25">No pipelines found</div>}
+          {!loading && visible.length === 0 && (
+            <div className="flex h-32 flex-col items-center justify-center gap-2 text-[12px] text-gray-400 dark:text-white/35">
+              <span>No pipelines match these filters.</span>
+              <button className="glass-btn-ghost px-3 py-1 text-xs" onClick={() => { setFilter('all'); setTriggerFilter('all'); setFailedOnly(false); setSearch(''); }}>Clear filters</button>
+            </div>
+          )}
           {visible.map(p => {
             const stage = stageOf(p);
             const cfg = STAGE_CFG[stage];
             const sel = selected?.id === p.id;
             return (
-              <div key={p.id} onClick={() => setSelected(sel ? null : p)}
-                className={`group flex items-stretch border-b border-gray-100 dark:border-white/[0.05] cursor-pointer transition-colors ${
+              <button type="button" key={p.id} onClick={() => setSelected(sel ? null : p)}
+                className={`group flex w-full items-stretch border-b border-gray-100 text-left text-gray-900 dark:border-white/[0.05] dark:text-white/90 cursor-pointer transition-colors ${
                   sel ? 'bg-brand-50 dark:bg-brand-500/[0.06]' : 'hover:bg-gray-50 dark:hover:bg-white/[0.025]'
                 }`}>
                 <div className={`w-[3px] shrink-0 ${cfg.bar}`} />
                 <div className="flex flex-1 flex-wrap items-center gap-3.5 px-5 py-3 min-w-0">
-                  <ConnChain definition={p.definition} />
+                  <PipelineIcon definition={p.definition} />
                   <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-medium text-gray-900 dark:text-white/88 truncate">{p.name}</div>
+                    <div className="text-[13px] font-medium text-gray-900 dark:text-white/90 truncate">{pipelineName(p)}</div>
                     <div className="text-[11px] text-gray-400 dark:text-white/32 mt-0.5">{triggerLabel(p.definition)}</div>
                   </div>
                   <div className="flex flex-none items-center gap-2.5 ml-auto">
@@ -373,7 +406,7 @@ export default function PipelinesPage() {
                     <span className="text-[11px] text-gray-400 dark:text-white/28 w-16 text-right">{reltime(p.last_run_at)}</span>
                   </div>
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>

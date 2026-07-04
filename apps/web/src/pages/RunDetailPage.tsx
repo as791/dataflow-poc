@@ -50,6 +50,7 @@ export default function RunDetailPage() {
   const [data, setData] = useState<{ execution: any; definition: any; nodeRuns: NodeRun[]; qualityResults?: any[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [trace, setTrace] = useState<any[] | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>();
 
@@ -65,7 +66,7 @@ export default function RunDetailPage() {
     };
     poll();
     return () => { alive = false; clearTimeout(timer.current); };
-  }, [id]);
+  }, [id, reloadKey]);
 
   const graph = useMemo(
     () => data ? buildRunGraph(data.definition, data.nodeRuns) : { nodes: [], edges: [] },
@@ -100,7 +101,7 @@ export default function RunDetailPage() {
         )}
         {features.deepObservability && <button className="glass-btn-ghost ml-auto text-sm" onClick={loadTrace}>Temporal trace</button>}
       </div>
-      {error && <div className="mx-6 mt-4"><ApiError message={error} /></div>}
+      {error && <div className="mx-6 mt-4"><ApiError message={error} onRetry={() => { setError(null); setData(null); setReloadKey(key => key + 1); }} /></div>}
       {!!data?.qualityResults?.length && <div className="flex flex-wrap gap-2 border-b border-gray-100 px-6 py-3 dark:border-white/[0.07]">
         {data.qualityResults.map(result => <div key={result.node_id} className={`rounded-lg border px-3 py-2 text-xs ${result.status === 'passed' ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-500/10' : result.status === 'failed' ? 'border-red-300 bg-red-50 dark:bg-red-500/10' : 'border-amber-300 bg-amber-50 dark:bg-amber-500/10'}`}>
           <p className="font-semibold">{result.node_id} · quality {result.status}</p>
@@ -114,11 +115,13 @@ export default function RunDetailPage() {
         {!trace.length && <p className="opacity-60">No history events.</p>}
       </div>}
       <div className="flex-1">
+        {!data && !error ? <div className="flex h-full items-center justify-center text-sm text-gray-400">Loading run…</div> : data && (
         <ReactFlow nodes={graph.nodes} edges={graph.edges} nodeTypes={nodeTypes}
           fitView nodesDraggable={false} nodesConnectable={false} elementsSelectable={false}>
           <Background variant={BackgroundVariant.Dots} gap={24} size={1}
             color={dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'} />
         </ReactFlow>
+        )}
       </div>
     </div>
   );
