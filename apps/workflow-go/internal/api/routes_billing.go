@@ -21,7 +21,7 @@ func (s *Server) registerBillingWebhook(mux *http.ServeMux) {
 }
 func (s *Server) registerBilling(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/billing/usage", handle(s.billingUsage))
-	mux.HandleFunc("POST /api/billing/orders", handle(s.billingOrder))
+	mux.Handle("POST /api/billing/orders", owner(handle(s.billingOrder)))
 	mux.HandleFunc("GET /api/billing/history", handle(s.billingHistory))
 }
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { History, Milestone, RefreshCw } from 'lucide-react';
 import { api } from '../api';
 import { ApiError } from '../components/ApiError';
@@ -200,8 +200,11 @@ export default function LifecyclePage() {
       {error && <ApiError message={error} onRetry={refresh} />}
 
       <div className="glass-card divide-y divide-gray-100 dark:divide-white/5">
-        {rows.length === 0 && !loading && (
-          <p className="p-6 text-sm text-gray-400 dark:text-white/40">No pipelines yet.</p>
+        {rows.length === 0 && !loading && !error && (
+          <div className="p-6 text-center">
+            <p className="text-sm text-gray-400 dark:text-white/40">No pipelines yet.</p>
+            <Link to="/" className="glass-btn-primary mt-3 inline-flex text-sm">Create a pipeline</Link>
+          </div>
         )}
         {rows.map(row => {
           const stage = deriveStage(row.status, row.environment);

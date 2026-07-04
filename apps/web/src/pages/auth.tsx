@@ -64,10 +64,11 @@ const OAUTH_ERRORS: Record<string, string> = {
 // We detect this by checking if VITE_OIDC_ENABLED=true is set at build time.
 const OIDC_ENABLED = import.meta.env.VITE_OIDC_ENABLED === 'true';
 const PASSWORD_AUTH_ENABLED = import.meta.env.VITE_PASSWORD_AUTH_ENABLED === 'true';
+const GOOGLE_AUTH_ENABLED = import.meta.env.VITE_GOOGLE_AUTH_ENABLED === 'true';
 
-function PasswordForm() {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [email, setEmail] = useState('');
+function PasswordForm({ initialEmail = '', inviteToken }: { initialEmail?: string; inviteToken?: string }) {
+  const [mode, setMode] = useState<'login' | 'register'>(inviteToken ? 'register' : 'login');
+  const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState('');
   const [tenantName, setTenantName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -77,7 +78,7 @@ function PasswordForm() {
     e.preventDefault(); setBusy(true); setErr(null);
     try {
       if (mode === 'register') {
-        await api.registerWithPassword({ email, password, tenantName: tenantName || undefined });
+        await api.registerWithPassword({ email, password, tenantName: tenantName || undefined, inviteToken });
       } else {
         await api.loginWithPassword({ email, password });
       }
@@ -94,19 +95,21 @@ function PasswordForm() {
 
   return (
     <form onSubmit={submit} className="mt-5 space-y-3 border-t border-white/[0.07] pt-5">
-      <p className="text-xs text-white/40">Or sign in with email</p>
-      <input className="glass-input w-full text-sm" type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} required />
+      <p className="text-xs text-white/40">{inviteToken ? 'Create your account' : 'Or sign in with email'}</p>
+      <input className="glass-input w-full text-sm" type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} readOnly={!!inviteToken} required />
       <input className="glass-input w-full text-sm" type="password" placeholder="Password (8+ chars)" value={password} onChange={e => setPassword(e.target.value)} required minLength={8} />
-      {mode === 'register' && (
+      {mode === 'register' && !inviteToken && (
         <input className="glass-input w-full text-sm" placeholder="Workspace name (optional)" value={tenantName} onChange={e => setTenantName(e.target.value)} />
       )}
       {err && <div className="text-xs text-rose-300">{err}</div>}
       <button type="submit" className="glass-btn-primary w-full" disabled={busy}>
         {busy ? '…' : mode === 'login' ? 'Sign in' : 'Create account'}
       </button>
-      <button type="button" className="text-xs text-white/40 hover:text-white/70 w-full text-center" onClick={() => { setMode(m => m === 'login' ? 'register' : 'login'); setErr(null); }}>
-        {mode === 'login' ? 'Need an account? Register' : 'Already have an account? Sign in'}
-      </button>
+      {!inviteToken && (
+        <button type="button" className="text-xs text-white/40 hover:text-white/70 w-full text-center" onClick={() => { setMode(m => m === 'login' ? 'register' : 'login'); setErr(null); }}>
+          {mode === 'login' ? 'Need an account? Register' : 'Already have an account? Sign in'}
+        </button>
+      )}
     </form>
   );
 }
@@ -121,7 +124,7 @@ export function LoginPage() {
 
   return (
     <AuthShell title="Sign in" subtitle="Welcome to DataFlow.">
-      <GoogleButton label="Continue with Google" />
+      {GOOGLE_AUTH_ENABLED && <GoogleButton label="Continue with Google" />}
       {OIDC_ENABLED && (
         <a className="glass-btn-ghost mt-2 w-full" href="/api/auth/oidc">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -134,7 +137,7 @@ export function LoginPage() {
       <ErrorLine msg={errorCode ? (OAUTH_ERRORS[errorCode] ?? 'Sign-in failed.') : null} />
       {!PASSWORD_AUTH_ENABLED && (
         <p className="text-xs mt-5 opacity-60">
-          New here? Signing in creates your workspace automatically.
+          Need access? Contact your workspace administrator.
         </p>
       )}
     </AuthShell>
@@ -161,8 +164,10 @@ export function AcceptInvitePage() {
 
   return (
     <AuthShell title={`Join ${info.tenantName}`}
-      subtitle={`You've been invited as ${info.role}. Sign in with the Google account for ${info.email}.`}>
-      <GoogleButton label="Continue with Google" />
+      subtitle={`You've been invited as ${info.role}.`}>
+      {GOOGLE_AUTH_ENABLED && <GoogleButton label="Continue with Google" />}
+      {PASSWORD_AUTH_ENABLED && <PasswordForm initialEmail={info.email} inviteToken={token!} />}
+      {!GOOGLE_AUTH_ENABLED && !PASSWORD_AUTH_ENABLED && <p className="mt-5 text-sm text-white/50">No sign-in method is configured. Contact your workspace administrator.</p>}
     </AuthShell>
   );
 }

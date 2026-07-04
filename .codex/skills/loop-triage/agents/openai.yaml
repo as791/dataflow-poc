@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loop Triage"
+  short_description: "Prioritize actionable engineering loop signals"
+  default_prompt: "Use $loop-triage to turn recent engineering signals into prioritized actions and durable state updates."

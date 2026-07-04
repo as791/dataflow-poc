@@ -1,6 +1,7 @@
 import {
-  BarChart3, Cable, CreditCard, History, LogOut, Menu, Milestone, Moon, Network, Settings, Sun, Users, Workflow, Gauge, X,
+  BarChart3, Cable, CreditCard, History, LogOut, Menu, Moon, Network, Orbit, Settings, Sparkles, Sun, Users, Workflow, Gauge, X,
 } from 'lucide-react';
+import { AtomMark } from './AtomMark';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
@@ -8,7 +9,8 @@ import { useTheme } from '../context/ThemeContext';
 
 const NAV = [
   { to: '/pipelines',  label: 'Pipelines',  icon: Workflow,  end: false },
-  { to: '/lifecycle',  label: 'Lifecycle',  icon: Milestone },
+  { to: '/ai-builder', label: 'AI Builder', icon: Sparkles },
+  { to: '/lifecycle',  label: 'Lifecycle',  icon: Orbit },
   { to: '/runs',       label: 'Runs',       icon: History },
   { to: '/monitoring', label: 'Monitoring', icon: Gauge },
   { to: '/lineage',    label: 'Lineage',    icon: Network },
@@ -25,7 +27,7 @@ const PAGE_META: Record<string, { title: string; eyebrow: string }> = {
   '/runs':       { title: 'Runs',        eyebrow: 'History & observability' },
   '/monitoring': { title: 'Monitoring',  eyebrow: 'Reliability & health' },
   '/lineage':    { title: 'Lineage',     eyebrow: 'Workspace architecture' },
-  '/connectors': { title: 'Connectors',  eyebrow: 'Data sources' },
+  '/connectors': { title: 'Connect accounts', eyebrow: 'Data sources' },
   '/analytics':  { title: 'Analytics',   eyebrow: 'Explore outcomes' },
   '/team':       { title: 'Team',        eyebrow: 'Workspace access' },
   '/billing':    { title: 'Billing',     eyebrow: 'Usage & plan' },
@@ -66,15 +68,15 @@ export function AppShell() {
       )}
 
       {/* ── sidebar: 52px compact glass, matches canvas ── */}
-      <aside className="hidden sm:flex w-[52px] flex-none flex-col items-center gap-1 py-3
+      <aside className="relative z-40 hidden sm:flex w-[52px] flex-none flex-col items-center gap-1 overflow-visible py-3
         border-r border-gray-200 dark:border-white/[0.08]
         bg-white/95 dark:bg-[#0d0f17]/95 backdrop-blur-lg shrink-0">
 
         {/* brand mark */}
-        <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-[10px]
+        <NavLink to="/pipelines" aria-label="DataFlow home" className="mb-2 flex h-9 w-9 items-center justify-center rounded-[10px]
           bg-gradient-to-br from-brand-400 to-brand-600 shadow-md shadow-brand-500/20">
-          <Workflow size={16} className="text-white" strokeWidth={2} />
-        </div>
+          <AtomMark size={22} />
+        </NavLink>
         <div className="my-1 h-px w-8 bg-gray-200 dark:bg-white/[0.08]" />
 
         {/* nav */}
@@ -149,8 +151,8 @@ export function AppShell() {
             <Menu size={18} />
           </button>
           <div>
-            <p className="text-[10px] font-medium uppercase tracking-[.18em] text-gray-400 dark:text-white/30">{meta.eyebrow}</p>
-            <h1 className="text-[13px] font-semibold tracking-tight text-gray-900 dark:text-white/90">{meta.title}</h1>
+            <p className="text-[9px] font-semibold uppercase tracking-[.16em] text-gray-400 dark:text-white/30">{meta.eyebrow}</p>
+            <h1 className="mt-0.5 text-[15px] font-bold tracking-[-0.02em] text-gray-900 dark:text-white/90">{meta.title}</h1>
           </div>
           <div className="flex-1" />
           <div className="hidden items-center gap-2.5 text-[11px] text-gray-400 dark:text-white/40 sm:flex">

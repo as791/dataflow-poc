@@ -2,7 +2,6 @@ package connectors
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,19 +55,4 @@ func (r *Registry) Catalog() []model.CatalogEntry {
 		out = append(out, model.CatalogEntry{ActivityType: m.ActivityType, NodeType: nodeType, Label: m.Label, Color: color, SupportsIngestion: ingestion, Fields: m.Fields})
 	}
 	return out
-}
-func ValidateManifest(m model.ConnectorManifest) error {
-	if m.ActivityType == "" {
-		return fmt.Errorf("manifest.activityType is required")
-	}
-	if m.Label == "" {
-		return fmt.Errorf("manifest %s: label is required", m.ActivityType)
-	}
-	if m.Kind != "source" && m.Kind != "sink" {
-		return fmt.Errorf("manifest %s: kind must be 'source' or 'sink'", m.ActivityType)
-	}
-	if m.URL == "" {
-		return fmt.Errorf("manifest %s: url is required", m.ActivityType)
-	}
-	return nil
 }

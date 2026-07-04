@@ -1,0 +1,30 @@
+import React from 'react';
+
+/** Compact square icon-only button — mirrors .icon-button in index.css. */
+export function IconButton({ children, active = false, title, ...rest }) {
+  const [hover, setHover] = React.useState(false);
+  return (
+    <button
+      title={title}
+      aria-label={title}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 36,
+        height: 36,
+        borderRadius: 'var(--radius-md)',
+        border: `1px solid ${active ? 'rgba(124,108,242,0.2)' : 'var(--border-default)'}`,
+        background: active ? 'rgba(124,108,242,0.15)' : hover ? '#f3f4f6' : '#f9fafb',
+        color: active ? 'var(--brand-500)' : hover ? '#374151' : '#9ca3af',
+        cursor: 'pointer',
+        transition: 'all .2s ease',
+      }}
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+}

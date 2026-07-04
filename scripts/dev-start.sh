@@ -62,7 +62,7 @@ sleep 3
 
 echo ""
 echo "──────────────────────────────────────"
-echo "  Web   → http://localhost:3002"
+echo "  Web   → http://localhost:3000"
 echo "  API   → http://localhost:4000"
 echo "  Auth  → password login when AUTH_PASSWORD_ENABLED=true, otherwise OAuth"
 echo "  Logs  → $LOG_DIR/"

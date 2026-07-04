@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BadgeHelp, Blocks, RefreshCw, Sheet, ShieldCheck, Plug } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { BadgeHelp, Blocks, Cloud, Database, Globe2, Plug, Radio, Server, Sheet, Snowflake, type LucideIcon } from 'lucide-react';
 import { api } from '../api';
 import { useFeatures } from '../context/FeatureContext';
 import { ApiError } from '../components/ApiError';
@@ -7,6 +8,7 @@ import { ApiError } from '../components/ApiError';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Provider = 'google' | 'microsoft' | 'zendesk';
+type CredentialProvider = 'postgres' | 'mysql' | 'mongodb' | 'clickhouse' | 's3' | 'sftp' | 'snowflake' | 'iceberg' | 'kafka' | 'http';
 
 interface Connection {
   id: string;
@@ -53,6 +55,19 @@ function ProviderIcon({ provider }: { provider: Provider }) {
     </div>
   );
 }
+
+const CREDENTIAL_CATALOG: Array<{ key: CredentialProvider; label: string; subtitle: string; icon: LucideIcon; color: string; feature?: 'realtime' | 'advancedConnectors' }> = [
+  { key: 'postgres', label: 'PostgreSQL', subtitle: 'Database · CDC', icon: Database, color: 'from-blue-600 to-sky-500' },
+  { key: 'mysql', label: 'MySQL', subtitle: 'Database · CDC', icon: Database, color: 'from-sky-500 to-amber-500' },
+  { key: 'mongodb', label: 'MongoDB', subtitle: 'Document DB · CDC', icon: Database, color: 'from-emerald-600 to-green-500' },
+  { key: 's3', label: 'Amazon S3', subtitle: 'Object storage', icon: Cloud, color: 'from-amber-500 to-orange-600' },
+  { key: 'kafka', label: 'Kafka', subtitle: 'Event streaming', icon: Radio, color: 'from-slate-700 to-violet-600', feature: 'realtime' },
+  { key: 'snowflake', label: 'Snowflake', subtitle: 'Cloud warehouse', icon: Snowflake, color: 'from-cyan-500 to-blue-600', feature: 'advancedConnectors' },
+  { key: 'sftp', label: 'SFTP', subtitle: 'Secure file transfer', icon: Server, color: 'from-slate-600 to-slate-800', feature: 'advancedConnectors' },
+  { key: 'iceberg', label: 'Apache Iceberg', subtitle: 'Lakehouse tables', icon: Cloud, color: 'from-indigo-500 to-cyan-500', feature: 'advancedConnectors' },
+  { key: 'clickhouse', label: 'ClickHouse', subtitle: 'Analytics database', icon: Server, color: 'from-yellow-400 to-amber-600' },
+  { key: 'http', label: 'HTTP API', subtitle: 'REST endpoint', icon: Globe2, color: 'from-violet-500 to-fuchsia-600' },
+];
 
 // ─── Zendesk connect modal ────────────────────────────────────────────────────
 
@@ -130,8 +145,8 @@ function ZendeskModal({ onClose, onConnect }: {
 
 // ─── Credential instance modal (A3 — non-OAuth creds) ──────────────────────────
 
-function CredentialModal({ onClose, onSaved, realtime, advanced }: { onClose: () => void; onSaved: () => void; realtime: boolean; advanced: boolean }) {
-  const [provider, setProvider] = useState<'postgres' | 'mysql' | 'mongodb' | 'clickhouse' | 's3' | 'sftp' | 'snowflake' | 'iceberg' | 'kafka' | 'http'>('postgres');
+function CredentialModal({ onClose, onSaved, realtime, advanced, initialProvider = 'postgres' }: { onClose: () => void; onSaved: () => void; realtime: boolean; advanced: boolean; initialProvider?: CredentialProvider }) {
+  const [provider, setProvider] = useState<CredentialProvider>(initialProvider);
   const [name, setName] = useState('');
   const [f, setF] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -171,7 +186,7 @@ function CredentialModal({ onClose, onSaved, realtime, advanced }: { onClose: ()
       <div className="glass-modal" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-lg font-semibold">Add credential</h2>
-          <button className="glass-btn-ghost w-8 h-8 flex items-center justify-center text-lg leading-none" onClick={onClose}>×</button>
+          <button className="glass-btn-ghost w-8 h-8 flex items-center justify-center text-lg leading-none" onClick={onClose} aria-label="Close">×</button>
         </div>
         <form onSubmit={submit} className="space-y-3">
           <label className="glass-label">Type
@@ -189,7 +204,7 @@ function CredentialModal({ onClose, onSaved, realtime, advanced }: { onClose: ()
             </select>
           </label>
           <label className="glass-label">Name
-            <input className="glass-input" value={name} onChange={e => setName(e.target.value)} placeholder="warehouse" required />
+            <input className="glass-input" value={name} onChange={e => setName(e.target.value)} placeholder="Connector name" required />
           </label>
           {provider === 'postgres' || provider === 'mysql' ? (
             <>
@@ -312,23 +327,23 @@ function ConnectorCard({ provider, label, connections, onDisconnect, onConnect }
   const hasConnections = connections.length > 0;
 
   return (
-    <div className="glass-card p-5 flex flex-col gap-4">
+    <div className="glass-card flex min-h-[158px] flex-col gap-3 p-4">
       {/* Header */}
       <div className="flex items-center gap-3">
         <ProviderIcon provider={provider} />
         <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-base">{label}</h3>
+          <h3 className="text-sm font-semibold">{label}</h3>
           <p className="text-xs text-gray-400 mt-0.5">
             {provider === 'zendesk' ? 'Per-subdomain OAuth' : 'OAuth 2.0'}
           </p>
         </div>
         {hasConnections ? (
-          <span className="glass-badge-success">
+          <span className="glass-badge-success px-2 py-0.5 text-[10px]">
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-success mr-1" />
             Active
           </span>
         ) : (
-          <span className="glass-badge">
+          <span className="glass-badge px-2 py-0.5 text-[10px]">
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-white/30 mr-1" />
             Not connected
           </span>
@@ -337,9 +352,9 @@ function ConnectorCard({ provider, label, connections, onDisconnect, onConnect }
 
       {/* Connected accounts */}
       {hasConnections && (
-        <ul className="divide-y divide-gray-100 dark:divide-white/5">
+        <ul className="divide-y divide-gray-100 text-xs dark:divide-white/5">
           {connections.map(conn => (
-            <li key={conn.id} className="flex items-center justify-between py-2 text-sm">
+            <li key={conn.id} className="flex items-center justify-between py-1.5">
               <div className="min-w-0">
                 <p className="truncate text-gray-900 dark:text-white/90">
                   {conn.email ?? conn.subdomain ?? conn.id}
@@ -352,7 +367,7 @@ function ConnectorCard({ provider, label, connections, onDisconnect, onConnect }
                 )}
               </div>
               <button
-                className="glass-btn-danger ml-3 px-2.5 py-1 text-xs flex-shrink-0"
+                className="glass-btn-danger ml-3 px-2 py-1 text-[10px] flex-shrink-0"
                 disabled={disconnecting === conn.id}
                 onClick={() => handleDisconnect(conn.id)}
                 title="Disconnect"
@@ -366,17 +381,17 @@ function ConnectorCard({ provider, label, connections, onDisconnect, onConnect }
 
       {/* Action row */}
       {!hasConnections && (
-        <div className="pt-1">
-          <button className="glass-btn-primary w-full" onClick={onConnect}>
+        <div className="mt-auto pt-1">
+          <button className="glass-btn-primary w-full py-1.5 text-xs" onClick={onConnect}>
             Connect {label} →
           </button>
         </div>
       )}
 
       {/* Zendesk extra: add another subdomain */}
-      {provider === 'zendesk' && (
+      {provider === 'zendesk' && hasConnections && (
         <button
-          className="glass-btn-ghost text-sm flex items-center gap-1.5 self-start"
+          className="mt-auto flex items-center gap-1 self-start text-xs font-medium text-brand-500 hover:text-brand-400"
           onClick={onConnect}
         >
           <span className="text-brand-400">+</span>
@@ -391,11 +406,12 @@ function ConnectorCard({ provider, label, connections, onDisconnect, onConnect }
 
 export function ConnectorsPage() {
   const { features } = useFeatures();
+  const navigate = useNavigate();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [zendeskModalOpen, setZendeskModalOpen] = useState(false);
-  const [credModalOpen, setCredModalOpen] = useState(false);
+  const [credentialProvider, setCredentialProvider] = useState<CredentialProvider | null>(null);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
   const [cdcResources, setCdcResources] = useState<Record<string, string>>({});
   const [cdcStatus, setCdcStatus] = useState<Record<string, any>>({});
@@ -479,26 +495,13 @@ export function ConnectorsPage() {
   ];
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 px-6 py-10">
+    <div className="mx-auto max-w-6xl space-y-5 px-6 py-7">
       {/* Page header */}
       <div>
         <div className="flex items-center justify-between">
           <div>
             <h1 className="page-heading">Connect accounts</h1>
-            <p className="page-subtitle mt-1">
-              OAuth integrations — tokens are stored encrypted per-tenant.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              className="glass-btn-ghost text-sm flex items-center gap-1.5"
-              onClick={refresh}
-              disabled={loading}
-              title="Refresh"
-            >
-              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-              {loading ? 'Loading…' : 'Refresh'}
-            </button>
+            <p className="page-subtitle mt-1">Choose a connector. Credentials and OAuth tokens are encrypted per tenant.</p>
           </div>
         </div>
 
@@ -511,7 +514,9 @@ export function ConnectorsPage() {
           Loading connectors…
         </div>
       ) : (
-        <div className="grid gap-4">
+        <section>
+          <h2 className="section-heading mb-2.5">Accounts</h2>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {PROVIDERS.map(({ key, label, onConnect }) => (
             <ConnectorCard
               key={key}
@@ -526,21 +531,47 @@ export function ConnectorsPage() {
               }
             />
           ))}
-        </div>
+          </div>
+        </section>
       )}
 
-      {/* Credentials (non-OAuth instances) */}
-      <div className="glass-card p-5">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Plug size={16} className="text-brand-300" />
-            <h3 className="font-semibold text-base">Credentials</h3>
-          </div>
-          <button className="glass-btn-ghost text-sm" onClick={() => setCredModalOpen(true)}>+ Add credential</button>
+      <section>
+        <h2 className="section-heading mb-2.5">Databases &amp; services</h2>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {CREDENTIAL_CATALOG.map(({ key, label, subtitle, icon: Icon, color, feature }) => {
+            const count = credentials.filter(c => c.provider === key).length;
+            const available = !feature || features[feature];
+            return (
+              <button key={key} type="button" aria-label={available ? `Configure ${label}` : `View plans for ${label}`}
+                onClick={() => available ? setCredentialProvider(key) : navigate('/billing')}
+                className="glass-card-interactive group flex min-h-[126px] flex-col p-4 text-left">
+                <div className="flex items-start gap-3">
+                  <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${color} text-white shadow-lg`}>
+                    <Icon size={18} strokeWidth={1.8} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-gray-900 dark:text-white/90">{label}</span>
+                    <span className="mt-0.5 block text-[11px] text-gray-400 dark:text-white/40">{subtitle}</span>
+                  </span>
+                  {count > 0
+                    ? <span className="glass-badge-success px-2 py-0.5 text-[10px]">{count} active</span>
+                    : !available && <span className="glass-badge px-2 py-0.5 text-[10px]">Plan</span>}
+                </div>
+                <span className="mt-auto pt-4 text-xs font-medium text-brand-500 group-hover:text-brand-400">{available ? 'Configure →' : 'View plans →'}</span>
+              </button>
+            );
+          })}
         </div>
-        {credentials.length === 0 ? (
-          <p className="text-xs text-gray-400 dark:text-white/40">No credentials yet. Add a database, object store, or HTTP connection for pipeline nodes.</p>
-        ) : (
+      </section>
+
+      {/* Configured credential instances retain operational controls. */}
+      {credentials.length > 0 && (
+        <section className="glass-card p-4">
+          <div className="mb-2 flex items-center gap-2">
+            <Plug size={15} className="text-brand-300" />
+            <h2 className="text-sm font-semibold">Configured connections</h2>
+            <span className="glass-badge ml-auto px-2 py-0.5 text-[10px]">{credentials.length}</span>
+          </div>
           <ul className="divide-y divide-gray-100 dark:divide-white/5">
             {credentials.map(c => {
               const supportsCdc = ['postgres', 'mysql', 'mongodb'].includes(c.provider);
@@ -584,23 +615,8 @@ export function ConnectorsPage() {
               );
             })}
           </ul>
-        )}
-      </div>
-
-      {/* Info panel */}
-      <div className="glass-panel flex gap-3 p-5 text-xs text-gray-500 dark:text-white/50">
-        <ShieldCheck size={18} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-300" />
-        <div className="space-y-1">
-        <p>
-          <span className="font-medium text-gray-700 dark:text-white/70">Security note:</span>{' '}
-          OAuth tokens are AES-256 encrypted and stored per-tenant. Revoking a connection
-          immediately invalidates the stored token.
-        </p>
-        <p>
-          After connecting, you can reference these accounts in your pipeline nodes.
-        </p>
-        </div>
-      </div>
+        </section>
+      )}
 
       {/* Zendesk modal */}
       {zendeskModalOpen && (
@@ -611,8 +627,9 @@ export function ConnectorsPage() {
       )}
 
       {/* Credential modal */}
-      {credModalOpen && (
-        <CredentialModal realtime={features.realtime} advanced={features.advancedConnectors} onClose={() => setCredModalOpen(false)} onSaved={refresh} />
+      {credentialProvider && (
+        <CredentialModal initialProvider={credentialProvider} realtime={features.realtime} advanced={features.advancedConnectors}
+          onClose={() => setCredentialProvider(null)} onSaved={refresh} />
       )}
     </div>
   );

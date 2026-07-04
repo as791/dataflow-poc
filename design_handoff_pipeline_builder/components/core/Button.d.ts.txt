@@ -1,0 +1,17 @@
+import * as React from 'react';
+
+export interface ButtonProps {
+  /** Visual treatment. `primary` = gradient brand fill, `ghost` = neutral surface, `danger` = red, `success` = emerald gradient. */
+  variant?: 'primary' | 'ghost' | 'danger' | 'success';
+  size?: 'sm' | 'md' | 'lg';
+  disabled?: boolean;
+  icon?: React.ReactNode;
+  children?: React.ReactNode;
+  onClick?: (e: React.MouseEvent) => void;
+  style?: React.CSSProperties;
+}
+
+/**
+ * @startingPoint section="Core" subtitle="Primary/ghost/danger/success button" viewport="700x260"
+ */
+export declare function Button(props: ButtonProps): JSX.Element;

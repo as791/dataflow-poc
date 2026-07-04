@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loop Verifier"
+  short_description: "Independently verify loop-produced changes"
+  default_prompt: "Use $loop-verifier to independently check this change's intent, scope, tests, and risk."

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end smoke test using only services inside Compose.
 set -e
-API=${API:-http://localhost:3000}
+API=${API:-http://localhost:4000}
 COOKIE=$(mktemp)
 trap 'rm -f "$COOKIE"' EXIT
 EMAIL="smoke-$(date +%s)@example.test"
