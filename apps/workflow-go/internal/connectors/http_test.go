@@ -10,6 +10,9 @@ import (
 
 func TestHTTPFetch(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("User-Agent"); got != "DataFlow/1.0" {
+			t.Fatalf("expected DataFlow User-Agent, got %q", got)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		// Mock response mimicking JSONPlaceholder
 		json.NewEncoder(w).Encode([]map[string]interface{}{

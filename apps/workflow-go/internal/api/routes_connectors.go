@@ -361,6 +361,9 @@ func (s *Server) consumeOAuthState(r *http.Request, state, provider string) (oau
 }
 func oauthURL(base string, values url.Values) string { return base + "?" + values.Encode() }
 func (s *Server) googleConnectorStart(w http.ResponseWriter, r *http.Request) error {
+	if os.Getenv("GOOGLE_CLIENT_ID") == "" || os.Getenv("GOOGLE_CLIENT_SECRET") == "" {
+		return &HTTPError{Status: http.StatusServiceUnavailable, Message: "Google OAuth is not configured"}
+	}
 	state, err := s.mintOAuthState(r, "google", nil)
 	if err != nil {
 		return err
