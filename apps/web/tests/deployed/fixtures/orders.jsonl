@@ -1,0 +1,4 @@
+{"id":1,"customer":"Alice","amount":100,"status":"new","updated_at":"2026-07-01T10:00:00Z"}
+{"id":2,"customer":"Bob","amount":250,"status":"paid","updated_at":"2026-07-01T10:01:00Z"}
+{"id":3,"customer":"Carol","amount":75,"status":"cancelled","updated_at":"2026-07-01T10:02:00Z"}
+{"id":4,"customer":"Dan","amount":400,"status":"paid","updated_at":"2026-07-01T10:03:00Z"}

@@ -112,6 +112,7 @@ func (r *Runtime) fetchManifest(ctx context.Context, m model.ConnectorManifest, 
 	if err != nil {
 		return SourceResult{}, err
 	}
+	request.Header.Set("User-Agent", "DataFlow/1.0")
 	for key, value := range m.Headers {
 		request.Header.Set(key, value)
 	}

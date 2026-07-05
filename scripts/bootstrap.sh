@@ -71,6 +71,10 @@ kind get clusters | grep -qx dataflow || kind create cluster --config <(sed "s|_
 docker build -f apps/workflow-go/Dockerfile -t dataflow-app:local .
 docker build -f apps/web/Dockerfile -t dataflow-web:local .
 kind load docker-image --name dataflow dataflow-app:local dataflow-web:local
+if [ -z "${GCP_SECRET_MANAGER_NAME:-}" ] && command -v gcloud >/dev/null 2>&1 \
+  && gcloud secrets describe dataflow-secrets >/dev/null 2>&1; then
+  GCP_SECRET_MANAGER_NAME=dataflow-secrets
+fi
 if [ -n "${GCP_SECRET_MANAGER_NAME:-}" ]; then
   echo "▶ Fetching secrets from GCP Secret Manager ($GCP_SECRET_MANAGER_NAME)"
   SECRET_JSON=$(gcloud secrets versions access latest --secret="$GCP_SECRET_MANAGER_NAME" 2>/dev/null)
@@ -88,6 +92,7 @@ process.stdin.on('end', () => {
   fs.writeFileSync('gcp-secrets.yaml', yaml);
 });"
     HELM_SECRETS_ARG="-f gcp-secrets.yaml"
+    trap 'rm -f gcp-secrets.yaml' EXIT
   else
     echo "⚠️ Could not fetch secret $GCP_SECRET_MANAGER_NAME"
   fi
@@ -106,15 +111,17 @@ if [ -f cohestra/deploy/helm/fcp/Chart.yaml ]; then
     --set 'flink.watchNamespaces[0]=dataflow'
 fi
 
-kubectl -n dataflow rollout status deployment/ollama --timeout=15m
-kubectl -n dataflow rollout status deployment/api --timeout=5m
-kubectl -n dataflow rollout status deployment/web --timeout=5m
 PUBLIC_IP=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip || true)
 if [ -n "$PUBLIC_IP" ]; then
   docker rm -f caddy >/dev/null 2>&1 || true
   docker run -d --restart unless-stopped --name caddy --network host \
     -v caddy_data:/data -v caddy_config:/config \
     caddy:alpine caddy reverse-proxy --from "${PUBLIC_IP}.nip.io" --to localhost:3002 >/dev/null
+fi
+
+kubectl -n dataflow rollout status deployment/api --timeout=5m
+kubectl -n dataflow rollout status deployment/web --timeout=5m
+if [ -n "$PUBLIC_IP" ]; then
   echo "✓ DataFlow ready. Web: https://${PUBLIC_IP}.nip.io · Cohestra: http://localhost:8080 · Temporal: http://localhost:8082"
 else
   echo "✓ DataFlow ready. Web: http://localhost:3002 · Cohestra: http://localhost:8080 · Temporal: http://localhost:8082"
