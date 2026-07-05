@@ -19,7 +19,7 @@ func TestHTTPFetch(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	rt := &Runtime{HTTP: ts.Client(), Sources: map[string]Source{}}
+	rt := &Runtime{HTTP: ts.Client(), Sources: map[string]Source{}, Handlers: map[string]Handler{}}
 	rt.registerHTTP()
 
 	sourceFn := rt.Sources["http.fetch"]
@@ -57,7 +57,7 @@ func TestWebhookSink(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	rt := &Runtime{HTTP: ts.Client(), Handlers: map[string]Handler{}}
+	rt := &Runtime{HTTP: ts.Client(), Sources: map[string]Source{}, Handlers: map[string]Handler{}}
 	rt.registerHTTP()
 
 	sinkFn := rt.Handlers["sink.webhook"]
