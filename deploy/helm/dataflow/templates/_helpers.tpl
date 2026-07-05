@@ -5,11 +5,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "dataflow.appEnv" -}}
 - name: DATABASE_URL
-  value: postgres://dataflow:dataflow@postgres:5432/dataflow?sslmode=disable
+  valueFrom: {secretKeyRef: {name: dataflow-secrets, key: databaseUrl}}
 - name: APP_DATABASE_URL
-  value: postgres://dataflow_app:dataflow_app@postgres:5432/dataflow?sslmode=disable
+  valueFrom: {secretKeyRef: {name: dataflow-secrets, key: appDatabaseUrl}}
 - name: REDIS_URL
-  value: redis://redis:6379
+  valueFrom: {secretKeyRef: {name: dataflow-secrets, key: redisUrl}}
 - name: TEMPORAL_ADDRESS
   value: temporal:7233
 - name: CLICKHOUSE_URL
@@ -34,6 +34,16 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   value: http://localhost:3002
 - name: JWT_ACCESS_SECRET
   valueFrom: {secretKeyRef: {name: dataflow-secrets, key: jwt}}
+- name: OAUTH_TOKEN_ENCRYPTION_KEY
+  valueFrom: {secretKeyRef: {name: dataflow-secrets, key: oauthKey}}
+- name: GOOGLE_CLIENT_ID
+  valueFrom: {secretKeyRef: {name: dataflow-secrets, key: googleClientId, optional: true}}
+- name: GOOGLE_CLIENT_SECRET
+  valueFrom: {secretKeyRef: {name: dataflow-secrets, key: googleClientSecret, optional: true}}
+- name: AZURE_CLIENT_ID
+  valueFrom: {secretKeyRef: {name: dataflow-secrets, key: azureClientId, optional: true}}
+- name: AZURE_CLIENT_SECRET
+  valueFrom: {secretKeyRef: {name: dataflow-secrets, key: azureClientSecret, optional: true}}
 - name: AUTH_PASSWORD_ENABLED
   value: "true"
 - name: OLLAMA_URL

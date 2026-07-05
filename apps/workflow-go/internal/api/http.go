@@ -163,7 +163,7 @@ func handle(fn func(http.ResponseWriter, *http.Request) error) http.HandlerFunc 
 				return
 			}
 			slog.Error("route failed", "method", r.Method, "path", r.URL.Path, "error", err)
-			jsonError(w, http.StatusInternalServerError, "internal error")
+			jsonError(w, http.StatusInternalServerError, err.Error())
 		}
 	}
 }

@@ -1,0 +1,27 @@
+{
+  "activityType": "webhook.trigger",
+  "label": "Webhook Trigger",
+  "kind": "trigger",
+  "supportsIngestion": false,
+  "fields": [
+    {
+      "key": "path",
+      "label": "Webhook URL Path",
+      "type": "text",
+      "placeholder": "/my-custom-webhook-123"
+    },
+    {
+      "key": "method",
+      "label": "Expected HTTP Method",
+      "type": "select",
+      "options": ["POST", "PUT", "GET"],
+      "defaultValue": "POST"
+    },
+    {
+      "key": "secret",
+      "label": "HMAC Secret (for X-Signature-Sha256 validation)",
+      "type": "text",
+      "placeholder": "your-webhook-signing-secret"
+    }
+  ]
+}
