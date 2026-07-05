@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import ReactFlow, { Background, BackgroundVariant, Handle, Position, type NodeProps } from 'reactflow';
-import { ArrowLeft, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Pause, Play, RotateCcw, X } from 'lucide-react';
 import { api } from '../api';
 import { ApiError } from '../components/ApiError';
 import { useCatalog } from '../context/CatalogContext';
@@ -52,6 +52,7 @@ export default function RunDetailPage() {
   const [retrying, setRetrying] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [trace, setTrace] = useState<any[] | null>(null);
+	const [live, setLive] = useState<any>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
@@ -59,8 +60,10 @@ export default function RunDetailPage() {
     const poll = async () => {
       try {
         const d = await api.getExecution(id!);
+		const status = await api.executionStatus(id!).catch(() => null);
         if (!alive) return;
         setData(d);
+		setLive(status);
         if (!TERMINAL.includes(d.execution?.phase)) timer.current = setTimeout(poll, 1500);
       } catch (e: any) { if (alive) setError(e.message ?? 'Failed to load run'); }
     };
@@ -83,6 +86,7 @@ export default function RunDetailPage() {
     try { setTrace((await api.getExecutionTrace(id!)).events ?? []); }
     catch (e: any) { setError(e.message ?? 'Trace failed'); }
   };
+	const signal = async (action: 'pause' | 'resume' | 'cancel') => { await api.signal(id!, action); setLive((value: any) => ({ ...value, phase: action === 'resume' ? 'running' : action === 'pause' ? 'paused' : 'cancelled' })); };
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
@@ -100,7 +104,15 @@ export default function RunDetailPage() {
           </button>
         )}
         {features.deepObservability && <button className="glass-btn-ghost ml-auto text-sm" onClick={loadTrace}>Temporal trace</button>}
+		{(live?.stream || live?.cohestraId) && <div className="ml-auto flex items-center gap-2">
+			{live.phase === 'paused' ? <button className="glass-btn-ghost text-sm" onClick={() => signal('resume')}><Play size={14} /> Resume</button> : <button className="glass-btn-ghost text-sm" onClick={() => signal('pause')}><Pause size={14} /> Pause</button>}
+			<button className="glass-btn-danger text-sm" onClick={() => signal('cancel')}><X size={14} /> Cancel</button>
+			{live?.cohestraId && <button className="glass-btn-ghost text-sm" onClick={() => api.signal(id!, 'rollback')}>Rollback</button>}
+		</div>}
       </div>
+	  {live?.stream && <div className="grid grid-cols-2 gap-3 border-b border-gray-100 px-6 py-3 text-xs dark:border-white/[0.07] sm:grid-cols-5">
+		{[['Records', live.stream.records], ['Batches', live.stream.batches], ['Lag', live.stream.lagRecords], ['Throughput/s', Number(live.stream.throughputPerSec).toFixed(1)], ['Errors', live.stream.errors]].map(([label, value]) => <div key={String(label)}><span className="text-gray-400">{label}</span><strong className="ml-2 text-gray-900 dark:text-white/90">{value}</strong></div>)}
+	  </div>}
       {error && <div className="mx-6 mt-4"><ApiError message={error} onRetry={() => { setError(null); setData(null); setReloadKey(key => key + 1); }} /></div>}
       {!!data?.qualityResults?.length && <div className="flex flex-wrap gap-2 border-b border-gray-100 px-6 py-3 dark:border-white/[0.07]">
         {data.qualityResults.map(result => <div key={result.node_id} className={`rounded-lg border px-3 py-2 text-xs ${result.status === 'passed' ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-500/10' : result.status === 'failed' ? 'border-red-300 bg-red-50 dark:bg-red-500/10' : 'border-amber-300 bg-amber-50 dark:bg-amber-500/10'}`}>

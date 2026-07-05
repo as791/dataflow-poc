@@ -295,6 +295,15 @@ export const CATALOG: CatalogEntry[] = [
     ],
   },
   {
+    activityType: 'sink.iceberg', nodeType: 'sink', label: 'Apache Iceberg (destination)', color: '#4B88A2',
+    requiredFeature: 'advancedConnectors',
+    fields: [
+      { key: 'connection', label: 'Iceberg REST catalog', type: 'instance-picker', provider: 'iceberg', writes: ['connectionId'] },
+      { key: 'namespace', label: 'Namespace', type: 'text', placeholder: 'analytics' },
+      { key: 'table', label: 'Existing table', type: 'text', placeholder: 'orders' },
+    ],
+  },
+  {
     activityType: 'sink.gsheets', nodeType: 'sink', label: 'Google Sheets (destination)', color: '#639922',
     fields: [
       { key: 'connection', label: 'Destination', type: 'instance-picker', provider: 'google', writes: ['connectionId'] },

@@ -1,0 +1,13 @@
+{
+  "id": "00000000-0000-0000-0000-000000000002",
+  "version": 1,
+  "name": "S3 Spark SQL to Iceberg",
+  "tenantId": "replace-with-tenant-id",
+  "trigger": { "type": "manual" },
+  "execution": { "engine": "spark-sql", "transformSql": "SELECT customer_id, sum(amount) AS revenue FROM source GROUP BY customer_id" },
+  "nodes": [
+    { "id": "orders", "type": "source", "activityType": "s3.fetch", "config": { "connectionId": "s3-connection", "bucket": "raw", "key": "orders/*.parquet" } },
+    { "id": "revenue", "type": "sink", "activityType": "sink.iceberg", "config": { "connectionId": "iceberg-connection", "namespace": "analytics", "table": "customer_revenue" } }
+  ],
+  "edges": [{ "id": "orders-revenue", "source": "orders", "target": "revenue" }]
+}

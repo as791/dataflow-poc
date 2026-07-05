@@ -8,9 +8,17 @@
   }
   html {
     color-scheme: light;
+    --chart-text: #374151;
+    --chart-muted: #6b7280;
+    --chart-grid: rgba(17,24,39,.12);
+    --chart-tooltip-bg: rgba(255,255,255,.96);
   }
   html.dark {
     color-scheme: dark;
+    --chart-text: rgba(255,255,255,.8);
+    --chart-muted: rgba(255,255,255,.5);
+    --chart-grid: rgba(255,255,255,.1);
+    --chart-tooltip-bg: rgba(15,12,41,.96);
   }
   body {
     @apply antialiased;

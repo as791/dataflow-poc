@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # One-command bootstrap for self-hosting DataFlow.
 #
-#   ./scripts/bootstrap.sh            # generate config + secrets, then start
-#   ./scripts/bootstrap.sh --ai       # also start the Ollama AI builder profile
+#   ./scripts/bootstrap.sh            # generate config + secrets, then Helm deploy
 #   NO_UP=1 ./scripts/bootstrap.sh    # generate only, don't start the stack
 #
 # Idempotent: existing .env values and the worker keypair are preserved.
@@ -57,19 +56,35 @@ PUB_ONELINE=$(node -e 'process.stdout.write(require("fs").readFileSync("secrets/
 set_env WORKER_PUBLIC_KEY_PEM "\"$PUB_ONELINE\""
 echo "  ✓ wired WORKER_PUBLIC_KEY_PEM"
 
-# 4. Start the stack.
-PROFILES=()
-[ "${1:-}" = "--ai" ] && PROFILES=(--profile ai)
+# 4. Deploy the local Helm stack. Ollama is part of the release and becomes
+# ready only after its configured model has been pulled.
 if [ -n "${NO_UP:-}" ]; then
   echo "▶ NO_UP set — skipping startup. Start later with:"
-  echo "    docker compose ${PROFILES[*]:-} up -d --build"
+  echo "    ./scripts/bootstrap.sh"
   exit 0
 fi
-if ! command -v docker >/dev/null 2>&1; then
-  echo "▶ docker not found. Generated config is ready; install Docker then run:"
-  echo "    docker compose ${PROFILES[*]:-} up -d --build"
-  exit 0
+for command in docker kind kubectl helm; do
+  command -v "$command" >/dev/null 2>&1 || { echo "▶ $command is required"; exit 1; }
+done
+
+kind get clusters | grep -qx dataflow || kind create cluster --config <(sed "s|__REPO_ROOT__|$PWD|" deploy/kind/dataflow.yaml)
+docker build -f apps/workflow-go/Dockerfile -t dataflow-app:local .
+docker build -f apps/web/Dockerfile -t dataflow-web:local .
+kind load docker-image --name dataflow dataflow-app:local dataflow-web:local
+helm upgrade --install dataflow deploy/helm/dataflow --namespace dataflow --create-namespace
+
+if [ -f cohestra/deploy/helm/fcp/Chart.yaml ]; then
+  kind load docker-image --name dataflow cohestra-control-api:latest cohestra-worker:latest
+  helm upgrade --install cohestra cohestra/deploy/helm/fcp --namespace cohestra-system --create-namespace \
+    --set image.pullPolicy=Never \
+    --set image.controlApi.repository=cohestra-control-api --set image.controlApi.tag=latest \
+    --set image.worker.repository=cohestra-worker --set image.worker.tag=latest \
+    --set controlApi.replicaCount=1 --set controlApi.service.type=NodePort --set controlApi.service.nodePort=30080 \
+    --set worker.replicaCount=1 --set temporal.mode=bundled --set temporal.bundled.uiEnabled=true \
+    --set 'flink.watchNamespaces[0]=dataflow'
 fi
-echo "▶ starting stack: docker compose ${PROFILES[*]:-} up -d --build"
-docker compose ${PROFILES[@]+"${PROFILES[@]}"} up -d --build
-echo "✓ DataFlow is starting. Web: http://localhost:3002  ·  Temporal UI: http://localhost:8082"
+
+kubectl -n dataflow rollout status deployment/ollama --timeout=15m
+kubectl -n dataflow rollout status deployment/api --timeout=5m
+kubectl -n dataflow rollout status deployment/web --timeout=5m
+echo "✓ DataFlow ready. Web: http://localhost:3002 · Cohestra: http://localhost:8080 · Temporal: http://localhost:8082"

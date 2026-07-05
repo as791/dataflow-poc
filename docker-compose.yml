@@ -25,8 +25,8 @@ x-app-env: &app-env
   APP_URL: http://localhost:3002
   JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-access-secret-change-me}
   AUTH_PASSWORD_ENABLED: ${AUTH_PASSWORD_ENABLED:-true}
-  SMTP_HOST: ${SMTP_HOST:-mailhog}
-  SMTP_PORT: ${SMTP_PORT:-1025}
+  SMTP_HOST: ${SMTP_HOST:-email-smtp.us-east-1.amazonaws.com}
+  SMTP_PORT: ${SMTP_PORT:-465}
   SMTP_FROM: ${SMTP_FROM:-noreply@dataflow.local}
   SMTP_USER: ${SMTP_USER:-}
   SMTP_PASS: ${SMTP_PASS:-}
@@ -56,6 +56,9 @@ x-app-env: &app-env
   OPENLINEAGE_URL: ${OPENLINEAGE_URL:-}
   OPENLINEAGE_API_KEY: ${OPENLINEAGE_API_KEY:-}
   OPENLINEAGE_NAMESPACE: ${OPENLINEAGE_NAMESPACE:-dataflow}
+  COHESTRA_URL: ${COHESTRA_URL:-http://host.docker.internal:8080}
+  # ponytail: local simulated Cohestra only; set a registry digest for real Kubernetes.
+  COHESTRA_FLINK_IMAGE: ${COHESTRA_FLINK_IMAGE:-dataflow-flink-sql@sha256:362650f23505dd07b809bf1f0d78c52fbc4e8ebaebd9204981672801b22c556d}
   WORKER_PUBLIC_KEY_PEM: ${WORKER_PUBLIC_KEY_PEM:-}
   # Open-core edition: 'community' (default) or 'enterprise'.
   EDITION: ${EDITION:-community}
@@ -116,6 +119,8 @@ services:
       - ./db/018_oidc_sub.sql:/docker-entrypoint-initdb.d/018_oidc_sub.sql:ro
       - ./db/019_feature_entitlements.sql:/docker-entrypoint-initdb.d/019_feature_entitlements.sql:ro
       - ./db/020_cross_run_dedupe.sql:/docker-entrypoint-initdb.d/020_cross_run_dedupe.sql:ro
+      - ./db/021_engine_entitlements.sql:/docker-entrypoint-initdb.d/021_engine_entitlements.sql:ro
+      - ./db/022_flink_execution_state.sql:/docker-entrypoint-initdb.d/022_flink_execution_state.sql:ro
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dataflow"]
@@ -172,7 +177,7 @@ services:
   # Opt-in CDC runtime. Neither broker nor Connect REST is published to the
   # host; the API is the authenticated control plane.
   redpanda:
-    profiles: [cdc]
+    profiles: [cdc, realtime]
     image: docker.redpanda.com/redpandadata/redpanda:v26.1.10
     command:
       - redpanda
@@ -185,7 +190,7 @@ services:
     volumes:
       - redpandadata:/var/lib/redpanda/data
     healthcheck:
-      test: ["CMD-SHELL", "rpk cluster health --brokers=localhost:9092 --exit-when-healthy"]
+      test: ["CMD-SHELL", "rpk cluster health --exit-when-healthy"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -193,7 +198,7 @@ services:
     networks: [dataflow]
 
   kafka-connect:
-    profiles: [cdc]
+    profiles: [cdc, realtime]
     image: quay.io/debezium/connect:3.5
     environment:
       BOOTSTRAP_SERVERS: redpanda:9092
@@ -209,6 +214,7 @@ services:
       KEY_CONVERTER_SCHEMAS_ENABLE: "false"
       VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
       REST_ADVERTISED_HOST_NAME: kafka-connect
+      KAFKA_HEAP_OPTS: -Xms128m -Xmx512m
     depends_on:
       redpanda: { condition: service_healthy }
     healthcheck:
@@ -241,6 +247,7 @@ services:
 
   mailhog:
     image: mailhog/mailhog:v1.0.1
+    profiles: [mailhog]   # opt-in only: docker compose --profile mailhog up
     ports: ["8025:8025", "1025:1025"]
     mem_limit: 64m
     networks: [dataflow]
@@ -345,7 +352,6 @@ services:
       clickhouse:          { condition: service_healthy }
       temporal:            { condition: service_started }
       temporal-namespaces: { condition: service_completed_successfully }
-      mailhog:             { condition: service_started }
     mem_limit: 512m
     networks: [dataflow]
     ports: ["4000:4000"]
@@ -442,6 +448,46 @@ services:
     restart: "no"
     networks: [dataflow]
 
+  # ───────── Flink SQL runtime  (opt-in: --profile realtime) ────────────────
+  flink-jobmanager:
+    profiles: [realtime]
+    image: dataflow-flink-sql
+    build: { context: ., dockerfile: infra/flink/Dockerfile }
+    command: jobmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        state.checkpoints.dir: file:///opt/flink/checkpoints
+        execution.checkpointing.interval: 30s
+    ports: ["8084:8081"]
+    volumes: [flinkcheckpoints:/opt/flink/checkpoints]
+    networks: [dataflow]
+
+  flink-taskmanager:
+    profiles: [realtime]
+    image: dataflow-flink-sql
+    build: { context: ., dockerfile: infra/flink/Dockerfile }
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 2
+    depends_on: [flink-jobmanager]
+    volumes: [flinkcheckpoints:/opt/flink/checkpoints]
+    networks: [dataflow]
+
+  flink-sql-gateway:
+    profiles: [realtime]
+    image: dataflow-flink-sql
+    build: { context: ., dockerfile: infra/flink/Dockerfile }
+    command: ["/opt/flink/bin/sql-gateway.sh", "start-foreground", "-Dsql-gateway.endpoint.rest.address=0.0.0.0"]
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+    depends_on: [flink-jobmanager]
+    ports: ["8083:8083"]
+    networks: [dataflow]
+
   # ───────── observability  (opt-in: --profile observability) ───────────────
 
   otel-collector:
@@ -498,3 +544,4 @@ volumes:
   chdata:
   ollamadata:
   redpandadata:
+  flinkcheckpoints:

@@ -21,6 +21,12 @@ type PipelineDefinition struct {
 	Metadata      *PipelineMetadata           `json:"metadata,omitempty"`
 	SLO           *PipelineSLO                `json:"slo,omitempty"`
 	Notifications *PipelineNotificationPolicy `json:"notifications,omitempty"`
+	Execution     *ExecutionConfig            `json:"execution,omitempty"`
+}
+
+type ExecutionConfig struct {
+	Engine       string `json:"engine,omitempty"`
+	TransformSQL string `json:"transformSql,omitempty"`
 }
 
 type Trigger struct {
@@ -124,6 +130,16 @@ type ExecutionStatus struct {
 	NodeResults map[string]NodeResult `json:"nodeResults"`
 	StartedAt   string                `json:"startedAt"`
 	CompletedAt string                `json:"completedAt,omitempty"`
+	Stream      *StreamStatus         `json:"stream,omitempty"`
+}
+
+type StreamStatus struct {
+	Batches          int     `json:"batches"`
+	Records          int     `json:"records"`
+	Errors           int     `json:"errors"`
+	LagRecords       int64   `json:"lagRecords"`
+	ThroughputPerSec float64 `json:"throughputPerSec"`
+	LastHeartbeat    string  `json:"lastHeartbeat"`
 }
 
 type TriggerInput struct {
@@ -133,16 +149,20 @@ type TriggerInput struct {
 }
 
 type WorkflowInput struct {
-	Definition        PipelineDefinition `json:"definition"`
-	TenantID          string             `json:"tenantId"`
-	ExecutionID       string             `json:"executionId"`
-	PipelineRowID     string             `json:"pipelineRowId,omitempty"`
-	Environment       Environment        `json:"environment,omitempty"`
-	ExecutionPrepared bool               `json:"executionPrepared,omitempty"`
-	Trigger           TriggerInput       `json:"trigger"`
-	EncryptedDEK      string             `json:"encryptedDek,omitempty"`
-	DEKIV             string             `json:"dekIv,omitempty"`
+	Definition        PipelineDefinition  `json:"definition"`
+	TenantID          string              `json:"tenantId"`
+	ExecutionID       string              `json:"executionId"`
+	PipelineRowID     string              `json:"pipelineRowId,omitempty"`
+	Environment       Environment         `json:"environment,omitempty"`
+	ExecutionPrepared bool                `json:"executionPrepared,omitempty"`
+	Trigger           TriggerInput        `json:"trigger"`
+	EncryptedDEK      string              `json:"encryptedDek,omitempty"`
+	DEKIV             string              `json:"dekIv,omitempty"`
+	Stream            *StreamStatus       `json:"stream,omitempty"`
+	Flink             *FlinkWorkflowState `json:"flink,omitempty"`
 }
+
+type FlinkWorkflowState struct{ CohestraID, DesiredState, LastError, Checkpoint string }
 
 type TenantContext struct {
 	TenantID      string `json:"tenantId"`

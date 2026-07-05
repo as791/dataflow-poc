@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	flinkengine "github.com/dataflow-poc/workflow-go/internal/flink"
 	"github.com/dataflow-poc/workflow-go/internal/model"
+	sparkengine "github.com/dataflow-poc/workflow-go/internal/spark"
 	"github.com/google/uuid"
 )
 
@@ -17,6 +19,9 @@ func validatePipeline(def model.PipelineDefinition) error {
 	}
 	if def.Trigger.Type == "" {
 		return fmt.Errorf("trigger.type is required")
+	}
+	if def.Execution != nil && !map[string]bool{"": true, "workflow": true, "stream-direct": true, "spark-sql": true, "flink-sql": true}[def.Execution.Engine] {
+		return fmt.Errorf("unsupported execution engine %q", def.Execution.Engine)
 	}
 	validTypes := map[string]bool{"source": true, "transform": true, "sink": true, "fork": true, "merge": true}
 	ids := map[string]bool{}
@@ -66,11 +71,112 @@ func validatePipeline(def model.PipelineDefinition) error {
 	if visited != len(def.Nodes) {
 		return fmt.Errorf("pipeline contains a cycle")
 	}
+	if def.Execution != nil && def.Execution.Engine == "stream-direct" {
+		if err := validateStreamDirect(def); err != nil {
+			return err
+		}
+	}
+	if def.Execution != nil && def.Execution.Engine == "spark-sql" {
+		if err := validateSparkSQL(def); err != nil {
+			return err
+		}
+	}
+	if def.Execution != nil && def.Execution.Engine == "flink-sql" {
+		if err := validateFlinkSQL(def); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateFlinkSQL(def model.PipelineDefinition) error {
+	if err := flinkengine.ValidateSelect(def.Execution.TransformSQL); err != nil {
+		return err
+	}
+	sources, sinks := 0, 0
+	for _, node := range def.Nodes {
+		if node.Type == "source" {
+			sources++
+			if node.ActivityType != "kafka.fetch" {
+				return fmt.Errorf("flink-sql requires Kafka/CDC input")
+			}
+		}
+		if node.Type == "sink" {
+			sinks++
+			if node.ActivityType != "sink.clickhouse" {
+				return fmt.Errorf("flink-sql requires ClickHouse output")
+			}
+		}
+		if node.Type == "transform" {
+			return fmt.Errorf("flink-sql uses execution.transformSql instead of transform nodes")
+		}
+	}
+	if sources != 1 || sinks != 1 {
+		return fmt.Errorf("flink-sql requires one source and one sink")
+	}
+	_, err := flinkengine.BuildDeployment(def, "validation")
+	return err
+}
+
+func validateSparkSQL(def model.PipelineDefinition) error {
+	if err := sparkengine.ValidateSelect(def.Execution.TransformSQL); err != nil {
+		return err
+	}
+	sources, sinks := 0, 0
+	for _, node := range def.Nodes {
+		if node.Type == "source" {
+			sources++
+			if !map[string]bool{"s3.fetch": true, "iceberg.fetch": true}[node.ActivityType] {
+				return fmt.Errorf("spark-sql does not support source %s", node.ActivityType)
+			}
+		}
+		if node.Type == "sink" {
+			sinks++
+			if !map[string]bool{"sink.iceberg": true, "sink.clickhouse": true}[node.ActivityType] {
+				return fmt.Errorf("spark-sql does not support sink %s", node.ActivityType)
+			}
+		}
+		if node.Type == "transform" {
+			return fmt.Errorf("spark-sql uses execution.transformSql instead of transform nodes")
+		}
+	}
+	if sources != 1 || sinks != 1 {
+		return fmt.Errorf("spark-sql requires one source and one sink")
+	}
+	return nil
+}
+
+func validateStreamDirect(def model.PipelineDefinition) error {
+	allowed := map[string]bool{"kafka.fetch": true, "transform.map": true, "transform.filter": true, "transform.rename": true, "transform.parse": true, "transform.contract": true, "sink.postgres": true, "sink.mysql": true, "sink.mongodb": true, "sink.clickhouse": true}
+	sources, sinks := 0, 0
+	for _, node := range def.Nodes {
+		if !allowed[node.ActivityType] {
+			return fmt.Errorf("stream-direct does not support %s", node.ActivityType)
+		}
+		if node.Type == "source" {
+			sources++
+		}
+		if node.Type == "sink" {
+			sinks++
+		}
+	}
+	if sources != 1 || sinks != 1 || len(def.Edges) != len(def.Nodes)-1 {
+		return fmt.Errorf("stream-direct requires one linear source-to-sink graph")
+	}
 	return nil
 }
 
 func pipelineFeatures(def model.PipelineDefinition) map[string]bool {
 	features := map[string]bool{}
+	if def.Execution != nil && def.Execution.Engine == "stream-direct" {
+		features["realtime"] = true
+	}
+	if def.Execution != nil && def.Execution.Engine == "spark-sql" {
+		features["sparkSql"] = true
+	}
+	if def.Execution != nil && def.Execution.Engine == "flink-sql" {
+		features["realtime"], features["flinkSql"] = true, true
+	}
 	for _, node := range def.Nodes {
 		if node.ActivityType == "kafka.fetch" || node.ActivityType == "sink.kafka" || node.Config["syncMode"] == "cdc" || node.Config["writeMode"] == "apply-cdc" {
 			features["realtime"] = true
@@ -78,7 +184,7 @@ func pipelineFeatures(def model.PipelineDefinition) map[string]bool {
 		if node.ActivityType == "transform.dedupe" && node.Config["scope"] == "pipeline" {
 			features["statefulProcessing"] = true
 		}
-		if map[string]bool{"sftp.fetch": true, "sink.sftp": true, "snowflake.fetch": true, "sink.snowflake": true, "iceberg.fetch": true}[node.ActivityType] {
+		if map[string]bool{"sftp.fetch": true, "sink.sftp": true, "snowflake.fetch": true, "sink.snowflake": true, "iceberg.fetch": true, "sink.iceberg": true}[node.ActivityType] {
 			features["advancedConnectors"] = true
 		}
 	}
