@@ -39,15 +39,39 @@ func jsonResponse(w http.ResponseWriter, status int, value interface{}) {
 	}
 }
 
-func jsonError(w http.ResponseWriter, status int, message string) {
-	jsonResponse(w, status, map[string]string{"error": message})
+type APIErrorCode string
+
+const (
+	ErrInvalidRequest   APIErrorCode = "ERR_INVALID_REQUEST"
+	ErrMissingField     APIErrorCode = "ERR_MISSING_FIELD"
+	ErrNotFound         APIErrorCode = "ERR_NOT_FOUND"
+	ErrRateLimit        APIErrorCode = "ERR_RATE_LIMIT_EXCEEDED"
+	ErrInternal         APIErrorCode = "ERR_INTERNAL"
+	ErrUnauthorized     APIErrorCode = "ERR_UNAUTHORIZED"
+	ErrForbidden        APIErrorCode = "ERR_FORBIDDEN"
+	ErrConflict         APIErrorCode = "ERR_CONFLICT"
+	ErrValidation       APIErrorCode = "ERR_VALIDATION"
+	ErrInvalidEnvironment APIErrorCode = "ERR_INVALID_ENVIRONMENT"
+	ErrConnectorExists  APIErrorCode = "ERR_CONNECTOR_EXISTS"
+	ErrOAuthRevoked     APIErrorCode = "ERR_OAUTH_REVOKED"
+	ErrNotSupported     APIErrorCode = "ERR_NOT_SUPPORTED"
+)
+
+type ErrorResponse struct {
+	Error   string            `json:"error"`
+	Code    APIErrorCode      `json:"code,omitempty"`
+	Details map[string]string `json:"details,omitempty"`
+}
+
+func jsonError(w http.ResponseWriter, status int, code APIErrorCode, message string, details map[string]string) {
+	jsonResponse(w, status, ErrorResponse{Error: message, Code: code, Details: details})
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target interface{}) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 5<<20)
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(target); err != nil {
-		jsonError(w, http.StatusBadRequest, "invalid JSON body")
+		jsonError(w, http.StatusBadRequest, ErrInvalidRequest, "invalid JSON body", nil)
 		return false
 	}
 	return true
@@ -127,7 +151,7 @@ func middleware(next http.Handler) http.Handler {
 			if recovered := recover(); recovered != nil {
 				slog.Error("unhandled route panic", "error", recovered, "stack", string(debug.Stack()))
 				if writer.status == http.StatusOK {
-					jsonError(writer, http.StatusInternalServerError, "internal error")
+					jsonError(writer, http.StatusInternalServerError, ErrInternal, "internal error", nil)
 				}
 			}
 			slog.Info("http request", "method", r.Method, "path", r.URL.Path, "status", writer.status, "duration_ms", time.Since(started).Milliseconds())
@@ -146,7 +170,7 @@ func (s *Server) rateLimit(scope string, limit int64, window time.Duration, next
 				_ = s.Redis.Expire(r.Context(), key, window).Err()
 			}
 			if count > limit {
-				jsonError(w, http.StatusTooManyRequests, "rate limit exceeded")
+				jsonError(w, http.StatusTooManyRequests, ErrRateLimit, "rate limit exceeded", nil)
 				return
 			}
 		}
@@ -159,26 +183,35 @@ func handle(fn func(http.ResponseWriter, *http.Request) error) http.HandlerFunc 
 		if err := fn(w, r); err != nil {
 			var clientErr *HTTPError
 			if errors.As(err, &clientErr) {
-				jsonError(w, clientErr.Status, clientErr.Message)
+				jsonError(w, clientErr.Status, clientErr.Code, clientErr.Message, clientErr.Details)
 				return
 			}
 			slog.Error("route failed", "method", r.Method, "path", r.URL.Path, "error", err)
-			jsonError(w, http.StatusInternalServerError, err.Error())
+			jsonError(w, http.StatusInternalServerError, ErrInternal, err.Error(), nil)
 		}
 	}
 }
 
 type HTTPError struct {
 	Status  int
+	Code    APIErrorCode
 	Message string
+	Details map[string]string
 }
 
 func (e *HTTPError) Error() string { return e.Message }
 
-func badRequest(message string) error {
-	return &HTTPError{Status: http.StatusBadRequest, Message: message}
+func badRequest(code APIErrorCode, message string) error {
+	return &HTTPError{Status: http.StatusBadRequest, Code: code, Message: message}
 }
-func notFound(message string) error { return &HTTPError{Status: http.StatusNotFound, Message: message} }
+
+func badRequestWithDetails(code APIErrorCode, message string, details map[string]string) error {
+	return &HTTPError{Status: http.StatusBadRequest, Code: code, Message: message, Details: details}
+}
+
+func notFound(code APIErrorCode, message string) error { 
+	return &HTTPError{Status: http.StatusNotFound, Code: code, Message: message} 
+}
 
 func env(name, fallback string) string {
 	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
@@ -190,7 +223,7 @@ func env(name, fallback string) string {
 func requireString(body map[string]interface{}, key string) (string, error) {
 	value, ok := body[key].(string)
 	if !ok || strings.TrimSpace(value) == "" {
-		return "", badRequest(fmt.Sprintf("%s required", key))
+		return "", badRequest(ErrMissingField, fmt.Sprintf("%s required", key))
 	}
 	return value, nil
 }

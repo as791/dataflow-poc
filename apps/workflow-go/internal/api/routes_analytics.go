@@ -188,7 +188,7 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	if spec.Dataset == "" {
-		return badRequest("dataset is required")
+		return badRequest(ErrInvalidRequest, "dataset is required")
 	}
 	records, err := s.datasetRecords(r, spec.Dataset)
 	if err != nil {
@@ -209,7 +209,7 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 	for _, name := range spec.Select {
 		expr, err := field(name)
 		if err != nil {
-			return badRequest(err.Error())
+			return badRequest(ErrInvalidRequest, err.Error())
 		}
 		selects = append(selects, expr+" AS `"+name+"`")
 	}
@@ -217,18 +217,18 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 		if !contains(spec.Select, name) {
 			expr, err := field(name)
 			if err != nil {
-				return badRequest(err.Error())
+				return badRequest(ErrInvalidRequest, err.Error())
 			}
 			selects = append(selects, expr+" AS `"+name+"`")
 		}
 	}
 	if spec.Aggregate != nil {
 		if !map[string]bool{"count": true, "sum": true, "avg": true, "min": true, "max": true}[spec.Aggregate.Fn] {
-			return badRequest("invalid aggregate function")
+			return badRequest(ErrInvalidRequest, "invalid aggregate function")
 		}
 		expr, err := field(spec.Aggregate.Field)
 		if err != nil {
-			return badRequest(err.Error())
+			return badRequest(ErrInvalidRequest, err.Error())
 		}
 		selects = append(selects, spec.Aggregate.Fn+"("+expr+") AS aggregate_value")
 	}
@@ -240,22 +240,22 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 	if spec.TimeRange != nil {
 		clauses, err := analyticsTimeRangeClauses(spec.TimeRange.From, spec.TimeRange.To)
 		if err != nil {
-			return badRequest(err.Error())
+			return badRequest(ErrInvalidRequest, err.Error())
 		}
 		where = append(where, clauses...)
 	}
 	for _, clause := range spec.Where {
 		if !map[string]bool{"=": true, "!=": true, ">": true, "<": true, ">=": true, "<=": true, "LIKE": true, "IN": true}[clause.Op] {
-			return badRequest("invalid operator")
+			return badRequest(ErrInvalidRequest, "invalid operator")
 		}
 		expr, err := field(clause.Field)
 		if err != nil {
-			return badRequest(err.Error())
+			return badRequest(ErrInvalidRequest, err.Error())
 		}
 		if clause.Op == "IN" {
 			values, ok := clause.Value.([]interface{})
 			if !ok || len(values) == 0 {
-				return badRequest("IN value must be a non-empty array")
+				return badRequest(ErrInvalidRequest, "IN value must be a non-empty array")
 			}
 			parts := []string{}
 			for _, value := range values {
@@ -285,7 +285,7 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 		} else {
 			expr, err := field(spec.OrderBy.Field)
 			if err != nil {
-				return badRequest(err.Error())
+				return badRequest(ErrInvalidRequest, err.Error())
 			}
 			query += " ORDER BY " + expr + " " + direction
 		}
@@ -332,10 +332,10 @@ func (s *Server) dashboardCreate(w http.ResponseWriter, r *http.Request) error {
 	}
 	body.Name = strings.TrimSpace(body.Name)
 	if body.Name == "" {
-		return badRequest("name is required")
+		return badRequest(ErrInvalidRequest, "name is required")
 	}
 	if body.Definition == nil {
-		return badRequest("definition object is required")
+		return badRequest(ErrInvalidRequest, "definition object is required")
 	}
 	tenant := tenantFrom(r)
 	var row map[string]interface{}
@@ -361,7 +361,7 @@ func (s *Server) dashboardGet(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if len(rows) == 0 {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	jsonResponse(w, http.StatusOK, rows[0])
 	return nil
@@ -375,12 +375,12 @@ func (s *Server) dashboardUpdate(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	if body.Name == nil && body.Definition == nil {
-		return badRequest("name or definition is required")
+		return badRequest(ErrInvalidRequest, "name or definition is required")
 	}
 	if body.Name != nil {
 		trimmed := strings.TrimSpace(*body.Name)
 		if trimmed == "" {
-			return badRequest("name is required")
+			return badRequest(ErrInvalidRequest, "name is required")
 		}
 		body.Name = &trimmed
 	}
@@ -398,7 +398,7 @@ func (s *Server) dashboardUpdate(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if row == nil {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	jsonResponse(w, http.StatusOK, row)
 	return nil
@@ -415,7 +415,7 @@ func (s *Server) dashboardDelete(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if !changed {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	jsonResponse(w, http.StatusOK, map[string]bool{"ok": true})
 	return nil
@@ -427,7 +427,7 @@ func (s *Server) dashboardShare(w http.ResponseWriter, r *http.Request) error {
 	err := s.DB.TenantTx(r.Context(), tenant.TenantID, func(tx pgx.Tx) error {
 		var one string
 		if err := tx.QueryRow(r.Context(), `SELECT id FROM dashboards WHERE id=$1`, r.PathValue("id")).Scan(&one); err != nil {
-			return notFound("dashboard not found")
+			return notFound(ErrNotFound, "dashboard not found")
 		}
 		_, err := tx.Exec(r.Context(), `INSERT INTO dashboard_shares (share_token_hash,dashboard_id,tenant_id,expires_at,created_by) VALUES ($1,$2,$3,$4,$5)`, sha256Hex(token), r.PathValue("id"), tenant.TenantID, expires, tenant.UserID)
 		return err
@@ -446,7 +446,7 @@ func (s *Server) analyticsShared(w http.ResponseWriter, r *http.Request) error {
 	var dashboardID, tenantID string
 	var expires time.Time
 	if err := s.DB.Pool.QueryRow(r.Context(), `SELECT dashboard_id,tenant_id,expires_at FROM dashboard_shares WHERE share_token_hash=$1`, sha256Hex(r.PathValue("token"))).Scan(&dashboardID, &tenantID, &expires); err != nil {
-		return notFound("share not found or expired")
+		return notFound(ErrNotFound, "share not found or expired")
 	}
 	if expires.Before(time.Now()) {
 		return &HTTPError{Status: http.StatusGone, Message: "share has expired"}
@@ -456,7 +456,7 @@ func (s *Server) analyticsShared(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if len(rows) == 0 {
-		return notFound("dashboard not found")
+		return notFound(ErrNotFound, "dashboard not found")
 	}
 	jsonResponse(w, http.StatusOK, map[string]interface{}{"dashboard": rows[0], "expiresAt": expires, "readOnly": true})
 	return nil

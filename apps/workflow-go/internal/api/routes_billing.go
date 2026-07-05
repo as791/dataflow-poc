@@ -61,7 +61,7 @@ func (s *Server) billingOrder(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	if body.Units < 1 || body.Units > 100 {
-		return badRequest("units must be an integer between 1 and 100")
+		return badRequest(ErrInvalidRequest, "units must be an integer between 1 and 100")
 	}
 	key, secret := os.Getenv("RAZORPAY_KEY_ID"), os.Getenv("RAZORPAY_KEY_SECRET")
 	if key == "" || secret == "" {
@@ -118,7 +118,7 @@ func (s *Server) billingWebhook(w http.ResponseWriter, r *http.Request) error {
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {
-		return badRequest("bad json")
+		return badRequest(ErrInvalidRequest, "bad json")
 	}
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write(body)
@@ -133,7 +133,7 @@ func (s *Server) billingWebhook(w http.ResponseWriter, r *http.Request) error {
 		} `json:"payload"`
 	}
 	if json.Unmarshal(body, &event) != nil {
-		return badRequest("bad json")
+		return badRequest(ErrInvalidRequest, "bad json")
 	}
 	payment := event.Payload["payment"].Entity
 	order := event.Payload["order"].Entity
@@ -144,7 +144,7 @@ func (s *Server) billingWebhook(w http.ResponseWriter, r *http.Request) error {
 	switch event.Event {
 	case "payment.captured", "order.paid":
 		if orderID == "" {
-			return badRequest("no order_id")
+			return badRequest(ErrInvalidRequest, "no order_id")
 		}
 		rows, err := s.DB.Pool.Query(r.Context(), `SELECT id,tenant_id,quota_units,status FROM payment_orders WHERE razorpay_order_id=$1`, orderID)
 		if err != nil {
@@ -155,7 +155,7 @@ func (s *Server) billingWebhook(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 		if len(values) == 0 {
-			return notFound("unknown order")
+			return notFound(ErrNotFound, "unknown order")
 		}
 		record := values[0]
 		if record["status"] == "paid" {

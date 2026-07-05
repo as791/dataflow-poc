@@ -29,7 +29,7 @@ func (s *Server) registerAuth(mux *http.ServeMux) {
 
 func (s *Server) registerPassword(w http.ResponseWriter, r *http.Request) error {
 	if os.Getenv("AUTH_PASSWORD_ENABLED") != "true" {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	var body struct{ Email, Password, TenantName, InviteToken string }
 	if !decodeJSON(w, r, &body) {
@@ -37,7 +37,7 @@ func (s *Server) registerPassword(w http.ResponseWriter, r *http.Request) error 
 	}
 	body.Email = strings.ToLower(strings.TrimSpace(body.Email))
 	if body.Email == "" || len(body.Password) < 8 {
-		return badRequest("email and a password of at least 8 characters are required")
+		return badRequest(ErrInvalidRequest, "email and a password of at least 8 characters are required")
 	}
 	var existing string
 	if err := s.DB.Pool.QueryRow(r.Context(), `SELECT id FROM users WHERE email=$1`, body.Email).Scan(&existing); err == nil {
@@ -57,13 +57,13 @@ func (s *Server) registerPassword(w http.ResponseWriter, r *http.Request) error 
 	if body.InviteToken != "" {
 		inviteTenantID, ok := inviteTenant(body.InviteToken)
 		if !ok {
-			return badRequest("invalid or expired invite")
+			return badRequest(ErrInvalidRequest, "invalid or expired invite")
 		}
 		if _, err := tx.Exec(r.Context(), `SELECT set_config('app.tenant_id',$1,true)`, inviteTenantID); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(r.Context(), `SELECT tenant_id,role FROM user_invitations WHERE token_hash=$1 AND email=$2 AND accepted_at IS NULL AND expires_at>now()`, sha256Hex(body.InviteToken), body.Email).Scan(&tenantID, &role); err != nil {
-			return badRequest("invalid or expired invite")
+			return badRequest(ErrInvalidRequest, "invalid or expired invite")
 		}
 		if _, err := tx.Exec(r.Context(), `UPDATE user_invitations SET accepted_at=now() WHERE token_hash=$1 AND accepted_at IS NULL`, sha256Hex(body.InviteToken)); err != nil {
 			return err
@@ -96,14 +96,14 @@ func (s *Server) registerPassword(w http.ResponseWriter, r *http.Request) error 
 
 func (s *Server) loginPassword(w http.ResponseWriter, r *http.Request) error {
 	if os.Getenv("AUTH_PASSWORD_ENABLED") != "true" {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	var body struct{ Email, Password string }
 	if !decodeJSON(w, r, &body) {
 		return nil
 	}
 	if body.Email == "" || body.Password == "" {
-		return badRequest("email and password are required")
+		return badRequest(ErrInvalidRequest, "email and password are required")
 	}
 	var userID, tenantID, hash string
 	err := s.DB.Pool.QueryRow(r.Context(), `SELECT id,tenant_id,password_hash FROM users WHERE email=$1`, strings.ToLower(body.Email)).Scan(&userID, &tenantID, &hash)
@@ -179,7 +179,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) error {
 	}
 	user, err := oneMap(rows)
 	if err != nil || user == nil {
-		return notFound("user not found")
+		return notFound(ErrNotFound, "user not found")
 	}
 	jsonResponse(w, http.StatusOK, map[string]interface{}{"user": user})
 	return nil
@@ -188,11 +188,11 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) error {
 	token := r.URL.Query().Get("token")
 	if token == "" {
-		return badRequest("token required")
+		return badRequest(ErrInvalidRequest, "token required")
 	}
 	tenantID, ok := inviteTenant(token)
 	if !ok {
-		return badRequest("invalid or used token")
+		return badRequest(ErrInvalidRequest, "invalid or used token")
 	}
 	var email, role, tenantName string
 	var expires time.Time
@@ -200,10 +200,10 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) error {
 		return tx.QueryRow(r.Context(), `SELECT i.email,i.role,i.expires_at,t.name FROM user_invitations i JOIN tenants t ON t.id=i.tenant_id WHERE i.token_hash=$1 AND i.accepted_at IS NULL`, sha256Hex(token)).Scan(&email, &role, &expires, &tenantName)
 	})
 	if err != nil {
-		return badRequest("invalid or used token")
+		return badRequest(ErrInvalidRequest, "invalid or used token")
 	}
 	if expires.Before(time.Now()) {
-		return badRequest("token expired")
+		return badRequest(ErrInvalidRequest, "token expired")
 	}
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"email": email, "role": role, "tenantName": tenantName,
