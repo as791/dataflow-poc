@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BarChart3, Plus, Save, X } from 'lucide-react';
+import { BarChart3, Plus, Save, Trash2, X } from 'lucide-react';
 import GridLayout, { Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import type { Dataset, SchemaField, WidgetDef, DashboardDefinition, Dashboard } from '../components/analytics/types';
+import { timeRangeFor, type Dataset, type SchemaField, type WidgetDef, type DashboardDefinition, type Dashboard, type TimeRange } from '../components/analytics/types';
 import { ChartRenderer } from '../components/analytics/ChartRenderer';
 import { AddWidgetModal } from '../components/analytics/AddWidgetModal';
 import { SaveDashboardModal } from '../components/analytics/SaveDashboardModal';
@@ -20,7 +20,9 @@ export function AnalyticsPage() {
   const [layout, setLayout] = useState<Layout[]>([]);
   const [loadingDatasets, setLoadingDatasets] = useState(true);
   const [loadingData, setLoadingData] = useState<Record<string, boolean>>({});
+  const [widgetErrors, setWidgetErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [timeRange, setTimeRange] = useState<TimeRange>(() => timeRangeFor(24));
   const [showAddModal, setShowAddModal] = useState(false);
   const [initialDataset, setInitialDataset] = useState<string>();
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -64,17 +66,21 @@ export function AnalyticsPage() {
     const ws = db.definition.widgets ?? [];
     setWidgets(ws);
     setLayout(ws.map(w => ({ i: w.id, x: w.layout.x, y: w.layout.y, w: w.layout.w, h: w.layout.h })));
+    const range = db.definition.timeRange ?? timeRangeFor(24);
+    setTimeRange(range);
+    setWidgetErrors({});
     setDirty(false);
-    ws.forEach(w => fetchWidgetData(w));
+    ws.forEach(w => fetchWidgetData(w, range));
   }
 
-  const fetchWidgetData = useCallback(async (widget: WidgetDef) => {
+  const fetchWidgetData = useCallback(async (widget: WidgetDef, range: TimeRange) => {
     setLoadingData(prev => ({ ...prev, [widget.id]: true }));
+    setWidgetErrors(prev => { const next = { ...prev }; delete next[widget.id]; return next; });
     try {
-      const { rows } = await api.queryAnalytics({ dataset: widget.dataset, spec: widget.spec });
+      const { rows } = await api.queryAnalytics({ dataset: widget.dataset, spec: widget.spec, timeRange: range });
       setWidgets(prev => prev.map(w => w.id === widget.id ? { ...w, data: rows } : w));
     } catch (e: any) {
-      setError(`Could not load “${widget.title}”: ${e.message ?? 'Query failed'}`);
+      setWidgetErrors(prev => ({ ...prev, [widget.id]: e.message ?? 'Query failed' }));
     }
     finally {
       setLoadingData(prev => ({ ...prev, [widget.id]: false }));
@@ -86,8 +92,8 @@ export function AnalyticsPage() {
     setWidgets(prev => [...prev, widget]);
     setLayout(prev => [...prev, { i: widget.id, x: widget.layout.x, y: widget.layout.y, w: widget.layout.w, h: widget.layout.h }]);
     setDirty(true);
-    await fetchWidgetData(widget);
-  }, [fetchWidgetData]);
+    await fetchWidgetData(widget, timeRange);
+  }, [fetchWidgetData, timeRange]);
 
   const removeWidget = useCallback((id: string) => {
     setWidgets(prev => prev.filter(w => w.id !== id));
@@ -108,6 +114,7 @@ export function AnalyticsPage() {
     const definition: DashboardDefinition = {
       widgets: widgets.map(({ id, layout, type, dataset, title, spec }) =>
         ({ id, layout, type, dataset, title, spec })),
+      timeRange,
     };
     let saved: Dashboard;
     if (existingId) {
@@ -119,6 +126,28 @@ export function AnalyticsPage() {
     }
     setActiveDashboard(saved);
     setDirty(false);
+  };
+
+  const changeTimeRange = (hours: number) => {
+    const range = timeRangeFor(hours);
+    setTimeRange(range);
+    setDirty(true);
+    widgets.forEach(widget => fetchWidgetData(widget, range));
+  };
+
+  const deleteDashboard = async () => {
+    if (!activeDashboard || !window.confirm(`Delete “${activeDashboard.name}”?`)) return;
+    try {
+      await api.deleteDashboard(activeDashboard.id);
+      const remaining = dashboards.filter(d => d.id !== activeDashboard.id);
+      setDashboards(remaining);
+      setActiveDashboard(null);
+      setWidgets([]);
+      setLayout([]);
+      if (remaining[0]) loadDashboard(remaining[0]);
+    } catch (e: any) {
+      setError(e.message ?? 'Could not delete dashboard');
+    }
   };
 
   if (loadingDatasets) {
@@ -197,7 +226,13 @@ export function AnalyticsPage() {
           </div>
           <div className="flex items-center gap-2">
             {error && <ApiError message={error} />}
+            <label className="sr-only" htmlFor="analytics-time-range">Dashboard time range</label>
+            <select id="analytics-time-range" className="glass-select w-24 py-1.5" defaultValue="24" onChange={e => changeTimeRange(Number(e.target.value))}>
+              <option value="0.25">15m</option><option value="1">1h</option><option value="6">6h</option>
+              <option value="24">24h</option><option value="168">7d</option>
+            </select>
             <button className="glass-btn-ghost text-sm" onClick={() => { setInitialDataset(undefined); setShowAddModal(true); }}><Plus size={15} /> Add widget</button>
+            {activeDashboard && <button className="glass-btn-danger text-sm" onClick={deleteDashboard} title="Delete dashboard"><Trash2 size={15} /></button>}
             <button
               className={`glass-btn-primary text-sm ${!dirty ? 'opacity-50' : ''}`}
               onClick={() => setShowSaveModal(true)}
@@ -244,7 +279,9 @@ export function AnalyticsPage() {
                     </button>
                   </div>
                   <div className="flex-1 min-h-0 px-1 pb-2">
-                    <ChartRenderer widget={widget} />
+                    {widgetErrors[widget.id]
+                      ? <div className="m-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-danger/30 dark:bg-danger/10 dark:text-danger/90">{widgetErrors[widget.id]}</div>
+                      : <ChartRenderer widget={widget} />}
                   </div>
                 </div>
               ))}

@@ -17,6 +17,7 @@ import { definitionToMermaid, mermaidToDefinition } from '@dataflow/shared';
 import { useCatalog } from '../context/CatalogContext';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useFeatures } from '../context/FeatureContext';
 import { MermaidPreview } from '../components/MermaidPreview';
 import { api } from '../api';
 import { ActivityIcon, nodeTypes } from '../components/canvas/FlowNode';
@@ -53,6 +54,7 @@ export default function PipelineCanvasPage() {
   const [searchParams] = useSearchParams();
   const { dark, toggle: toggleTheme } = useTheme();
   const { user } = useAuth();
+  const { features } = useFeatures();
   const hydrated = useRef<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const connectSource = useRef<string | null>(null);
@@ -68,6 +70,7 @@ export default function PipelineCanvasPage() {
   const [name, setName] = useState('My pipeline');
   const [pipelineKey, setPipelineKey] = useState('');
   const [trigger, setTrigger] = useState<any>({ type: 'manual' });
+  const [execution, setExecution] = useState<any>(undefined);
   const [policy, setPolicy] = useState({ owner: '', domain: '', tags: '', freshnessMinutes: '', maxFailureRatePercent: '', maxDurationSeconds: '', notificationConnectionId: '', minimumSeverity: 'critical' });
   const [savedRowId, setSavedRowId] = useState<string | null>(null);
   const [pipelineStage, setPipelineStage] = useState<Stage>('draft');
@@ -82,6 +85,9 @@ export default function PipelineCanvasPage() {
   const [mermaidDraft, setMermaidDraft] = useState('');
   const [showAI, setShowAI] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
+  const [aiMessages, setAiMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [aiProposal, setAiProposal] = useState<any | null>(null);
+  const [aiUndo, setAiUndo] = useState<any | null>(null);
   const { generate: aiGenerate, refine: aiRefine, loading: aiLoading, error: aiError } = useAiGenerate();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -109,6 +115,7 @@ export default function PipelineCanvasPage() {
     if (def.name) setName(def.name);
     if (def.id) setPipelineKey(def.id);
     if (def.trigger) setTrigger(def.trigger);
+    setExecution(def.execution);
     setPolicy({
       owner: def.metadata?.owner ?? '', domain: def.metadata?.domain ?? '', tags: (def.metadata?.tags ?? []).join(', '),
       freshnessMinutes: def.slo?.freshnessMinutes?.toString() ?? '',
@@ -119,6 +126,10 @@ export default function PipelineCanvasPage() {
     });
     setMsg(message);
   }, [byType]);
+
+  useEffect(() => {
+    if (searchParams.get('ai') === '1') setShowAI(true);
+  }, [searchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -250,7 +261,7 @@ export default function PipelineCanvasPage() {
   };
 
   const buildDefinition = () => flowToDefinition(nodes, edges, {
-    name, trigger, pipelineKey,
+    name, trigger, pipelineKey, execution,
     metadata: {
       owner: policy.owner.trim() || undefined, domain: policy.domain.trim() || undefined,
       tags: policy.tags.split(',').map(tag => tag.trim()).filter(Boolean),
@@ -344,39 +355,40 @@ export default function PipelineCanvasPage() {
   };
 
   const runAI = async () => {
-    if (!aiPrompt.trim()) return;
+    if (aiLoading || !aiPrompt.trim()) return;
     const hasExisting = nodes.length > 0;
     setMsg(hasExisting ? 'Refining pipeline…' : 'Generating pipeline…');
 
-    // Preserve existing node configs before any updates
-    const prevData = new Map(nodes.map(n => [n.id, n.data]));
-
     const result = hasExisting
-      ? await aiRefine(buildDefinition(), aiPrompt)
+      ? await aiRefine(buildDefinition(), aiPrompt, definitionToMermaid(buildDefinition().nodes, buildDefinition().edges), aiMessages)
       : await aiGenerate(aiPrompt);
 
     if (result) {
-      const def = result.definition;
-      const flow = definitionToFlow(def, byType);
-      // Merge: keep config/ingestion for nodes that survived the update
-      flow.nodes.forEach(n => {
-        const prev = prevData.get(n.id);
-        if (prev) {
-          n.data.config = prev.config;
-          if (prev.ingestion) n.data.ingestion = prev.ingestion;
-        }
-      });
-      fitPending.current = true;
-      setNodes(flow.nodes); setEdges(flow.edges);
-      if (!hasExisting) {
-        if (def.suggestedName || def.name) setName(def.suggestedName ?? def.name);
-        if (def.trigger) setTrigger(def.trigger);
-      }
-      setMermaidDraft(result.mermaid ?? definitionToMermaid(def.nodes, def.edges));
-      setBottomTab('mermaid'); setDrawerOpen(true);
-      setShowAI(false); setAiPrompt('');
-      setMsg(hasExisting ? 'Pipeline refined. Review changes in Mermaid.' : 'AI pipeline generated. DAG and Mermaid ready.');
+      setAiProposal(result);
+      setAiMessages(m => [...m, { role: 'user', content: aiPrompt }, { role: 'assistant', content: result.warnings.length ? result.warnings.join('; ') : 'Proposal ready' }]);
+      setMsg('AI proposal ready — review before applying');
     }
+  };
+
+  const applyAI = () => {
+    if (!aiProposal) return;
+    const previous = buildDefinition();
+    const next = definitionToFlow(aiProposal.definition, byType);
+    setAiUndo(previous); setNodes(next.nodes); setEdges(next.edges); fitPending.current = true;
+    if (aiProposal.definition.execution) setExecution(aiProposal.definition.execution);
+    if (!nodes.length) {
+      setName(aiProposal.definition.suggestedName ?? aiProposal.definition.name ?? name);
+      if (aiProposal.definition.trigger) setTrigger(aiProposal.definition.trigger);
+    }
+    setAiProposal(null); setAiPrompt(''); setMsg('AI proposal applied');
+  };
+
+  const undoAI = () => {
+    if (!aiUndo) return;
+    const previous = definitionToFlow(aiUndo, byType);
+    setNodes(previous.nodes); setEdges(previous.edges); setName(aiUndo.name ?? name); setTrigger(aiUndo.trigger ?? trigger);
+    setExecution(aiUndo.execution);
+    setAiUndo(null); fitPending.current = true; setMsg('AI change undone');
   };
 
   const openDrawer = async (tab: BottomTab = 'runs') => {
@@ -435,7 +447,9 @@ export default function PipelineCanvasPage() {
   const executionOffset = drawerExpanded ? 'calc(52vh + 28px)' : drawerHeight + 28;
 
   return (
-    <div ref={canvasRef} className="relative h-screen overflow-hidden bg-[#f5f5f5] dark:bg-[#0d0f17]">
+    <div ref={canvasRef} className="flex h-screen overflow-hidden bg-[#f5f5f5] dark:bg-[#0d0f17]">
+      {/* ── Canvas area (flex-1, shrinks when AI panel opens) ── */}
+      <div className="relative flex-1 min-w-0 overflow-hidden">
       <ReactFlow
         nodes={nodes} edges={edges} nodeTypes={nodeTypes}
         onInit={setFlow}
@@ -788,90 +802,118 @@ export default function PipelineCanvasPage() {
         )}
         <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-gray-200 dark:border-white/[0.09]
           bg-white/95 dark:bg-[#0d1018]/90 px-2 py-2 shadow-sm dark:shadow-glass backdrop-blur-xl">
+		  <select className="max-w-32 bg-transparent text-xs text-gray-600 outline-none dark:text-white/60" aria-label="Execution engine" value={execution?.engine ?? 'workflow'} onChange={e => setExecution({ ...execution, engine: e.target.value })}>
+			<option value="workflow">Workflow</option>
+			<option value="stream-direct" disabled={!features.realtime}>Direct stream{!features.realtime ? ' · locked' : ''}</option>
+			<option value="spark-sql" disabled={!features.sparkSql}>Spark SQL{!features.sparkSql ? ' · locked' : ''}</option>
+			<option value="flink-sql" disabled={!features.realtime || !features.flinkSql}>Flink SQL{!features.realtime || !features.flinkSql ? ' · locked' : ''}</option>
+		  </select>
           <button className="glass-btn-ghost border-transparent bg-transparent text-xs" onClick={save}><Save size={14} /> Save</button>
           <button className="glass-btn-ghost border-transparent bg-transparent text-xs" onClick={activate}><Rocket size={14} /> Activate</button>
           <button className="glass-btn-primary text-xs" onClick={run}><Play size={13} fill="currentColor" /> Run</button>
         </div>
       </div>
+	  {(execution?.engine === 'spark-sql' || execution?.engine === 'flink-sql') && <div className="pointer-events-auto absolute right-4 top-16 z-10 w-[min(520px,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white/95 p-2 shadow-sm dark:border-white/10 dark:bg-[#0d1018]/95"><input className="glass-input w-full font-mono text-xs" aria-label={`${execution.engine} SELECT`} placeholder="SELECT ... FROM source" value={execution?.transformSql ?? ''} onChange={e => setExecution({ ...execution, transformSql: e.target.value })} /></div>}
 
-      {/* AI command bar */}
-      {showAI && (
-        <div className="absolute top-20 left-1/2 z-30 -translate-x-1/2 w-full max-w-xl px-4 pointer-events-none">
-          <div className="pointer-events-auto rounded-2xl border border-gray-200 dark:border-white/[0.12]
-            bg-white dark:bg-[#11141d]/95 shadow-xl dark:shadow-glass-glow backdrop-blur-xl overflow-hidden">
-            <div className="flex items-center gap-3 px-4 py-3">
+
+      </div>{/* end canvas area */}
+
+      {/* ── AI panel — flex sibling, pushes canvas left ── */}
+      <aside
+        className={`flex flex-col flex-none overflow-hidden border-l border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#0d1018] transition-[width] duration-200 ease-in-out ${
+          showAI ? 'w-[390px]' : 'w-0'
+        }`}
+      >
+        {showAI && (
+          <>
+            <div className="flex items-center gap-3 border-b border-gray-100 px-4 py-3 dark:border-white/[0.07]">
               <Sparkles size={16} className="text-brand-500 flex-none" />
-              <input
-                className="flex-1 bg-transparent text-sm text-gray-900 dark:text-white/90 outline-none placeholder-gray-400 dark:placeholder-white/30"
-                placeholder={nodes.length > 0 ? 'Describe changes… e.g. Add a filter step before the Postgres sink' : 'Describe your pipeline… e.g. Sync Zendesk tickets to Postgres'}
-                value={aiPrompt} onChange={e => setAiPrompt(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && runAI()} autoFocus />
-              <button className="glass-btn-primary text-xs flex-none"
-                disabled={aiLoading || !aiPrompt.trim()} onClick={runAI}>
-                {aiLoading ? '…' : nodes.length > 0 ? 'Refine' : 'Generate'}
-              </button>
-              <button className="glass-btn-ghost text-xs flex-none" onClick={() => navigate('/ai-builder')}>
-                Open full AI Builder →
-              </button>
-              <button className="icon-button h-7 w-7 border-transparent bg-transparent flex-none" onClick={() => setShowAI(false)}>
-                <X size={14} />
-              </button>
+              <b className="text-sm text-gray-900 dark:text-white/90">Build with AI</b>
+              <button className="icon-button ml-auto h-7 w-7" onClick={() => setShowAI(false)} aria-label="Close AI panel"><X size={14} /></button>
             </div>
-            {aiError && <p className="border-t border-red-100 bg-red-50 px-4 py-2 text-[10px] text-red-600 dark:border-red-500/15 dark:bg-red-500/[0.06] dark:text-red-300">{aiError}</p>}
-            {aiLoading && <div className="h-0.5 animate-pulse bg-brand-500" />}
-          </div>
-        </div>
-      )}
-
-      {/* Right config drawer */}
-      {rightPanelOpen && (
-        <aside className="absolute right-0 top-0 bottom-0 z-20 w-full max-w-[360px]
-          border-l border-gray-200 dark:border-white/[0.08]
-          bg-white/97 dark:bg-[#0d1018]/94 backdrop-blur-xl shadow-[-16px_0_40px_rgba(0,0,0,.06)] dark:shadow-[-24px_0_60px_rgba(0,0,0,.35)]">
-          <div className="flex h-14 items-center justify-between border-b border-gray-100 dark:border-white/[0.07] px-4">
-            <div>
-              <p className="text-xs font-semibold text-gray-900 dark:text-white/85">
-                {showMermaid ? 'Mermaid editor' : selectedEdge ? 'Branch condition' : 'Node settings'}
-              </p>
-              <p className="text-[10px] text-gray-400 dark:text-white/30">
-                {showMermaid ? 'Edit graph as code' : selectedEdge ? 'Conditional routing' : 'Configure selected node'}
-              </p>
+            <div className="flex-1 space-y-3 overflow-y-auto p-4">
+              {aiMessages.map((m, i) => <div key={i} className={`rounded-xl p-3 text-xs ${m.role === 'user' ? 'ml-8 bg-brand-500/10 text-gray-800 dark:text-white/80' : 'mr-8 bg-gray-100 text-gray-600 dark:bg-white/[0.06] dark:text-white/60'}`}>{m.content}</div>)}
+              {aiProposal && <div className="space-y-3 rounded-xl border border-brand-300/30 bg-brand-500/[0.05] p-3">
+                <div className="text-xs font-semibold text-gray-900 dark:text-white/90">Proposed graph · {aiProposal.definition.nodes?.length ?? 0} nodes</div>
+                <div className="max-h-52 overflow-auto rounded-lg bg-white p-2 dark:bg-black/20"><MermaidPreview source={aiProposal.mermaid} /></div>
+                {aiProposal.definition.execution?.engine && <div className="text-xs text-gray-500 dark:text-white/50">Engine: {aiProposal.definition.execution.engine}</div>}
+                {aiProposal.warnings?.map((w: string, i: number) => <div key={i} className="text-xs text-amber-600 dark:text-amber-400">{w}</div>)}
+                <div className="flex gap-2"><button className="glass-btn-primary text-xs" onClick={applyAI}>Apply</button><button className="glass-btn-ghost text-xs" onClick={() => setAiProposal(null)}>Discard</button><button className="glass-btn-ghost text-xs" disabled={aiLoading} onClick={runAI}>Retry</button></div>
+              </div>}
             </div>
-            <button className="icon-button h-8 w-8" onClick={() => { setShowMermaid(false); setSelected(null); setSelectedEdge(null); }}>
-              <X size={15} />
-            </button>
-          </div>
-          <div className="h-[calc(100%-56px)] overflow-auto p-4">
-            {showMermaid ? (
-              <>
-                <textarea className="glass-input h-52 w-full font-mono text-[11px]"
-                  value={mermaidDraft} onChange={e => setMermaidDraft(e.target.value)} />
-                <button className="glass-btn-primary mt-3 w-full" onClick={applyMermaid}>
-                  <Code2 size={15} /> Apply to canvas
+            <div className="border-t border-gray-100 p-3 dark:border-white/[0.07]">
+              <div className="flex items-center gap-2">
+                <input
+                  className="glass-input flex-1 text-sm"
+                  placeholder={nodes.length > 0 ? 'Describe changes… e.g. Add a filter step before the Postgres sink' : 'Describe your pipeline… e.g. Sync Zendesk tickets to Postgres'}
+                  value={aiPrompt} onChange={e => setAiPrompt(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && runAI()} autoFocus />
+                <button className="glass-btn-primary text-xs flex-none"
+                  disabled={aiLoading || !aiPrompt.trim()} onClick={runAI}>
+                  {aiLoading ? '…' : nodes.length > 0 ? 'Refine' : 'Generate'}
                 </button>
-                <div className="mt-4 overflow-hidden rounded-[14px] border border-gray-100 dark:border-white/[0.08] bg-gray-50 dark:bg-black/15 p-2">
-                  <MermaidPreview source={mermaidDraft} />
-                </div>
-                <p className="mt-2 text-[10px] text-gray-400 dark:text-white/30">Structure only. Node config preserved by matching ID.</p>
-              </>
-            ) : selectedEdge ? (
-              <div>
-                <p className="mb-1 text-xs font-semibold text-gray-900 dark:text-white/85">Branch condition</p>
-                <p className="mb-3 text-[10px] text-gray-400 dark:text-white/35">Records flow only when true. Blank = always.</p>
-                <textarea className="glass-input h-20 w-full font-mono text-[11px]"
-                  placeholder="r.amount > 100"
-                  value={selectedEdge.data?.condition ?? ''}
-                  onChange={e => {
-                    patchEdgeCondition(selectedEdge.id, e.target.value);
-                    setSelectedEdge((s: any) => ({ ...s, data: { ...s.data, condition: e.target.value } }));
-                  }} />
               </div>
-            ) : selected ? (
-              <ConfigPanel node={nodes.find(n => n.id === selected.id) ?? selected} onChange={patchNode} onDelete={deleteNode} />
-            ) : null}
-          </div>
-        </aside>
-      )}
+              {aiError && <p className="border-t border-red-100 bg-red-50 px-4 py-2 text-[10px] text-red-600 dark:border-red-500/15 dark:bg-red-500/[0.06] dark:text-red-300">{aiError}</p>}
+              {aiLoading && <div className="h-0.5 animate-pulse bg-brand-500" />}
+              {aiUndo && <button className="mt-2 text-xs text-brand-500" onClick={undoAI}>Undo last apply</button>}
+            </div>
+          </>
+        )}
+      </aside>
+
+      {/* Right config / Mermaid panel — flex sibling, pushes canvas left */}
+      <aside
+        className={`flex flex-col flex-none overflow-hidden border-l border-gray-200 dark:border-white/[0.08] bg-white/97 dark:bg-[#0d1018]/94 backdrop-blur-xl transition-[width] duration-200 ease-in-out ${
+          rightPanelOpen ? 'w-[360px]' : 'w-0'
+        }`}
+      >
+        {rightPanelOpen && (
+          <>
+            <div className="flex h-14 flex-none items-center justify-between border-b border-gray-100 dark:border-white/[0.07] px-4">
+              <div>
+                <p className="text-xs font-semibold text-gray-900 dark:text-white/85">
+                  {showMermaid ? 'Mermaid editor' : selectedEdge ? 'Branch condition' : 'Node settings'}
+                </p>
+                <p className="text-[10px] text-gray-400 dark:text-white/30">
+                  {showMermaid ? 'Edit graph as code' : selectedEdge ? 'Conditional routing' : 'Configure selected node'}
+                </p>
+              </div>
+              <button className="icon-button h-8 w-8" onClick={() => { setShowMermaid(false); setSelected(null); setSelectedEdge(null); }}>
+                <X size={15} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              {showMermaid ? (
+                <>
+                  <textarea className="glass-input h-52 w-full font-mono text-[11px]"
+                    value={mermaidDraft} onChange={e => setMermaidDraft(e.target.value)} />
+                  <button className="glass-btn-primary mt-3 w-full" onClick={applyMermaid}>
+                    <Code2 size={15} /> Apply to canvas
+                  </button>
+                  <div className="mt-4 overflow-hidden rounded-[14px] border border-gray-100 dark:border-white/[0.08] bg-gray-50 dark:bg-black/15 p-2">
+                    <MermaidPreview source={mermaidDraft} />
+                  </div>
+                  <p className="mt-2 text-[10px] text-gray-400 dark:text-white/30">Structure only. Node config preserved by matching ID.</p>
+                </>
+              ) : selectedEdge ? (
+                <div>
+                  <p className="mb-1 text-xs font-semibold text-gray-900 dark:text-white/85">Branch condition</p>
+                  <p className="mb-3 text-[10px] text-gray-400 dark:text-white/35">Records flow only when true. Blank = always.</p>
+                  <textarea className="glass-input h-20 w-full font-mono text-[11px]"
+                    placeholder="r.amount > 100"
+                    value={selectedEdge.data?.condition ?? ''}
+                    onChange={e => {
+                      patchEdgeCondition(selectedEdge.id, e.target.value);
+                      setSelectedEdge((s: any) => ({ ...s, data: { ...s.data, condition: e.target.value } }));
+                    }} />
+                </div>
+              ) : selected ? (
+                <ConfigPanel node={nodes.find(n => n.id === selected.id) ?? selected} onChange={patchNode} onDelete={deleteNode} />
+              ) : null}
+            </div>
+          </>
+        )}
+      </aside>
 
       {/* Execution monitor */}
       {executionId && (

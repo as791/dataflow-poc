@@ -19,6 +19,7 @@ export interface PipelineDefinition {
   metadata?: PipelineMetadata;
   slo?: PipelineSlo;
   notifications?: PipelineNotificationPolicy;
+  execution?: { engine?: 'workflow' | 'stream-direct' | 'spark-sql' | 'flink-sql'; transformSql?: string };
 }
 
 export interface PipelineMetadata {
@@ -138,6 +139,7 @@ export interface ExecutionStatus {
   nodeResults: Record<string, NodeResult>;
   startedAt: string;
   completedAt?: string;
+  stream?: { batches: number; records: number; errors: number; lagRecords: number; throughputPerSec: number; lastHeartbeat: string };
 }
 
 export interface DynamicWorkflowInput {
@@ -152,6 +154,7 @@ export interface DynamicWorkflowInput {
   // start; downstream activities receive plaintext DEK in workflow context.
   encryptedDek?: string;
   dekIv?: string;
+  stream?: ExecutionStatus['stream'];
 }
 
 // ─── Tenant / auth context attached to every authenticated API request ─────

@@ -55,7 +55,17 @@ func (s *Server) fireExecution(ctx context.Context, def model.PipelineDefinition
 	input := model.WorkflowInput{Definition: def, TenantID: def.TenantID, ExecutionID: executionID,
 		Environment: environment, Trigger: model.TriggerInput{Type: triggerType, PayloadRef: payloadRef, FiredAt: time.Now().UTC().Format(time.RFC3339Nano)}, EncryptedDEK: encryptedDEK}
 	temporalClient := s.Temporal[string(environment)]
-	run, err := temporalClient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: executionID, TaskQueue: "dynamic-dag-" + string(environment)}, "DynamicDAGWorkflow", input)
+	workflowName := "DynamicDAGWorkflow"
+	if def.Execution != nil && def.Execution.Engine == "stream-direct" {
+		workflowName = "StreamDirectWorkflow"
+	}
+	if def.Execution != nil && def.Execution.Engine == "spark-sql" {
+		workflowName = "SparkJobWorkflow"
+	}
+	if def.Execution != nil && def.Execution.Engine == "flink-sql" {
+		workflowName = "FlinkJobWorkflow"
+	}
+	run, err := temporalClient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: executionID, TaskQueue: "dynamic-dag-" + string(environment)}, workflowName, input)
 	if err != nil {
 		s.releaseQuota(ctx, def.TenantID)
 		return "", err

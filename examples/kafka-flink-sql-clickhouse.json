@@ -1,0 +1,13 @@
+{
+  "id": "00000000-0000-0000-0000-000000000003",
+  "version": 1,
+  "name": "Kafka Flink SQL to ClickHouse",
+  "tenantId": "replace-with-tenant-id",
+  "trigger": { "type": "manual" },
+  "execution": { "engine": "flink-sql", "transformSql": "SELECT id, status, updated_at FROM source WHERE status IS NOT NULL" },
+  "nodes": [
+    { "id": "orders", "type": "source", "activityType": "kafka.fetch", "config": { "connectionId": "redpanda-connection", "topic": "debezium.public.orders", "valueFormat": "debezium-json", "columns": [{ "name": "id", "type": "BIGINT" }, { "name": "status", "type": "STRING" }, { "name": "updated_at", "type": "TIMESTAMP(3)" }] } },
+    { "id": "clickhouse", "type": "sink", "activityType": "sink.clickhouse", "config": { "connectionId": "clickhouse-connection", "collection": "orders", "columns": [{ "name": "id", "type": "BIGINT" }, { "name": "status", "type": "STRING" }, { "name": "updated_at", "type": "TIMESTAMP(3)" }] } }
+  ],
+  "edges": [{ "id": "orders-clickhouse", "source": "orders", "target": "clickhouse" }]
+}

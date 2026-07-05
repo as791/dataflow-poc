@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 
-export interface AiGenerateResult { mermaid: string; definition: any }
+export interface AiGenerateResult { mermaid: string; definition: any; warnings: string[] }
 
 export function useAiGenerate() {
   const [loading, setLoading] = useState(false);
@@ -11,16 +11,16 @@ export function useAiGenerate() {
     setLoading(true); setError(null);
     try {
       const r = await api.generatePipeline(prompt);
-      return { mermaid: r.mermaid, definition: r.definition ?? r };
+      return { mermaid: r.mermaid, definition: r.definition ?? r, warnings: r.warnings ?? [] };
     } catch (e: any) { setError(e.message); return null; }
     finally { setLoading(false); }
   };
 
-  const refine = async (definition: any, prompt: string): Promise<AiGenerateResult | null> => {
+  const refine = async (definition: any, prompt: string, mermaid?: string, messages?: any[]): Promise<AiGenerateResult | null> => {
     setLoading(true); setError(null);
     try {
-      const r = await api.refinePipeline(definition, prompt);
-      return { mermaid: r.mermaid, definition: r.definition ?? r };
+      const r = await api.refinePipeline(definition, prompt, mermaid, messages);
+      return { mermaid: r.mermaid, definition: r.definition ?? r, warnings: r.warnings ?? [] };
     } catch (e: any) { setError(e.message); return null; }
     finally { setLoading(false); }
   };

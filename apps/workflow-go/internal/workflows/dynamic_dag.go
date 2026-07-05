@@ -277,13 +277,14 @@ func runNode(
 
 	var result model.NodeResult
 	err := workflow.ExecuteActivity(ctx, "dispatchNode", map[string]interface{}{
-		"activityType": node.ActivityType,
-		"config":       node.Config,
-		"inputRef":     inputRef,
-		"tenantId":     input.TenantID,
-		"executionId":  input.ExecutionID,
-		"nodeId":       node.ID,
-		"encryptedDek": input.EncryptedDEK,
+		"activityType":    node.ActivityType,
+		"config":          node.Config,
+		"inputRef":        inputRef,
+		"tenantId":        input.TenantID,
+		"executionId":     input.ExecutionID,
+		"nodeId":          node.ID,
+		"pipelineVersion": input.Definition.Version,
+		"encryptedDek":    input.EncryptedDEK,
 	}).Get(ctx, &result)
 	if err != nil {
 		return failed(node.ID, err), nil

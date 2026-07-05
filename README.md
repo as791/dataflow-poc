@@ -76,28 +76,27 @@ state only after successful completion.
 
 ## Quick Start
 
-Requirements: Docker Desktop with at least 8 GB RAM and 4 CPUs.
+Requirements: Docker Desktop with at least 8 GB RAM, plus kind, kubectl, and Helm.
 
 ```bash
-./scripts/bootstrap.sh          # generate local secrets and start the stack
-./scripts/bootstrap.sh --ai     # also start Ollama for AI pipeline drafting
+./scripts/bootstrap.sh          # fresh local kind + Helm; includes Ollama
 ./scripts/smoke-test.sh         # run the end-to-end smoke test
 ```
 
 | Service | URL |
 |---|---|
 | Pipeline UI | http://localhost:3002 |
-| API | http://localhost:4000 |
+| Cohestra | http://localhost:8080 |
 | Temporal UI | http://localhost:8082 |
 | Grafana | http://localhost:3001 |
 | Jaeger | http://localhost:16686 |
 | Prometheus | http://localhost:9090 |
 
-Stop the stack and delete local data with `docker compose down -v`.
+Stop the stack and delete local data with `kind delete cluster --name dataflow`.
 
 ## Local Development
 
-Run the stack in containers and start Vite locally for frontend hot reload:
+Run the stack in Kubernetes and start Vite locally for frontend hot reload:
 
 ```bash
 ./scripts/bootstrap.sh

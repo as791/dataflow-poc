@@ -17,6 +17,15 @@ export interface QuerySpec {
   limit?: number;
 }
 
+export interface TimeRange {
+  from: string;
+  to: string;
+}
+
+export function timeRangeFor(hours: number, now = new Date()): TimeRange {
+  return { from: new Date(now.getTime() - hours * 3_600_000).toISOString(), to: now.toISOString() };
+}
+
 export type ChartType = 'bar' | 'line' | 'pie' | 'table';
 
 export interface WidgetDef {
@@ -31,6 +40,7 @@ export interface WidgetDef {
 
 export interface DashboardDefinition {
   widgets: WidgetDef[];
+  timeRange?: TimeRange;
 }
 
 export interface Dashboard {

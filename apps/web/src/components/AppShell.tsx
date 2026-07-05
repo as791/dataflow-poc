@@ -1,5 +1,5 @@
 import {
-  BarChart3, Cable, CreditCard, History, LogOut, Menu, Moon, Network, Orbit, Settings, Sparkles, Sun, Users, Workflow, Gauge, X,
+  BarChart3, Cable, CreditCard, History, LogOut, Menu, Moon, Network, Orbit, Settings, Sun, Users, Workflow, Gauge, X,
 } from 'lucide-react';
 import { AtomMark } from './AtomMark';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -9,7 +9,6 @@ import { useTheme } from '../context/ThemeContext';
 
 const NAV = [
   { to: '/pipelines',  label: 'Pipelines',  icon: Workflow,  end: false },
-  { to: '/ai-builder', label: 'AI Builder', icon: Sparkles },
   { to: '/lifecycle',  label: 'Lifecycle',  icon: Orbit },
   { to: '/runs',       label: 'Runs',       icon: History },
   { to: '/monitoring', label: 'Monitoring', icon: Gauge },
@@ -22,7 +21,6 @@ const NAV = [
 
 const PAGE_META: Record<string, { title: string; eyebrow: string }> = {
   '/pipelines':  { title: 'Pipelines',   eyebrow: 'Build & orchestrate' },
-  '/ai-builder': { title: 'AI Builder',  eyebrow: 'Generate with local AI' },
   '/lifecycle':  { title: 'Lifecycle',   eyebrow: 'Promote & gate' },
   '/runs':       { title: 'Runs',        eyebrow: 'History & observability' },
   '/monitoring': { title: 'Monitoring',  eyebrow: 'Reliability & health' },
