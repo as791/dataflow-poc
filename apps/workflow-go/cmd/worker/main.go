@@ -29,6 +29,9 @@ func main() {
 
 	w := worker.New(temporalClient, taskQueue, worker.Options{})
 	w.RegisterWorkflow(workflows.DynamicDAGWorkflow)
+	w.RegisterWorkflow(workflows.StreamDirectWorkflow)
+	w.RegisterWorkflow(workflows.SparkJobWorkflow)
+	w.RegisterWorkflow(workflows.FlinkJobWorkflow)
 	log.Printf("Go workflow worker started namespace=%s taskQueue=%s", namespace, taskQueue)
 	if err := w.Run(worker.InterruptCh()); err != nil {
 		log.Fatal(err)

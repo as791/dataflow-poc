@@ -1,4 +1,4 @@
-import { BrowserRouter, Outlet, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { CatalogProvider } from './context/CatalogContext';
 import { ThemeProvider } from './context/ThemeContext';
@@ -6,7 +6,6 @@ import { FeatureProvider } from './context/FeatureContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AppShell } from './components/AppShell';
 import PipelineCanvasPage from './pages/PipelineCanvasPage';
-import AIBuilderPage from './pages/AIBuilderPage';
 import LifecyclePage from './pages/LifecyclePage';
 import RunsPage from './pages/RunsPage';
 import RunDetailPage from './pages/RunDetailPage';
@@ -36,7 +35,7 @@ export default function App() {
             </Route>
 
             <Route element={<ProtectedRoute><FeatureProvider><CatalogProvider><AppShell /></CatalogProvider></FeatureProvider></ProtectedRoute>}>
-              <Route path="ai-builder" element={<AIBuilderPage />} />
+              <Route path="ai-builder" element={<Navigate to="/?ai=1" replace />} />
               <Route path="pipelines" element={<PipelinesPage />} />
               <Route path="lifecycle" element={<LifecyclePage />} />
               <Route path="runs" element={<RunsPage />} />

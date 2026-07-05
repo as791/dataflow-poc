@@ -377,7 +377,11 @@ func (s *Server) getJSON(r *http.Request, endpoint string, target interface{}) e
 }
 
 func (s *Server) doJSON(request *http.Request, target interface{}) error {
-	response, err := s.HTTP.Do(request)
+	return doJSON(s.HTTP, request, target)
+}
+
+func doJSON(client *http.Client, request *http.Request, target interface{}) error {
+	response, err := client.Do(request)
 	if err != nil {
 		return err
 	}

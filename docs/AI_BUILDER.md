@@ -3,17 +3,17 @@
 Describe a pipeline in plain English and get an editable diagram + a live canvas,
 drafted by a **local** LLM (Ollama — no API key, your data stays on your box).
 
-## Enable it
+## Local deployment
 
-The AI builder is opt-in behind a compose profile so low-RAM hosts can skip it:
+The Helm release includes Ollama and does not report ready until the configured
+model is installed:
 
 ```bash
-./scripts/bootstrap.sh --ai      # or: docker compose --profile ai up -d
+./scripts/bootstrap.sh
 ```
 
-This starts an `ollama` sidecar and pulls a model (default `llama3.1:8b`,
-override with `OLLAMA_MODEL`). With the profile off, the core stack runs normally
-and `/api/ai/*` returns `503`.
+The local default is `llama3.2:3b`, stored on an 8 GiB persistent volume. Override
+`ollamaModel` with a Helm value when a smaller or larger model is required.
 
 ## How it works
 

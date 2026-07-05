@@ -1,0 +1,36 @@
+images:
+  app: dataflow-app:local
+  web: dataflow-web:local
+  postgres: postgres:16-alpine
+  redis: redis:7-alpine
+  clickhouse: clickhouse/clickhouse-server:24.5-alpine
+  temporal: temporalio/auto-setup:1.27.2
+  temporalUI: temporalio/ui:2.39.0
+  temporalAdmin: temporalio/admin-tools:1.31.1
+  ollama: ollama/ollama:latest
+
+hostPath: /workspace
+ollamaModel: llama3.2:3b
+cohestraURL: http://cohestra-control-api.cohestra-system:8080
+
+web:
+  nodePort: 30002
+temporalUI:
+  nodePort: 30082
+
+storage:
+  postgres: 2Gi
+  clickhouse: 2Gi
+  ollama: 8Gi
+
+# SMTP — uses AWS SES by default.
+# Credentials (smtpUser, smtpPass, smtpFrom) must be stored in the
+# 'dataflow-secrets' Kubernetes Secret before running helm install/upgrade:
+#   kubectl create secret generic dataflow-secrets \
+#     --from-literal=jwt=<JWT_SECRET> \
+#     --from-literal=smtpUser=<SES_SMTP_ACCESS_KEY_ID> \
+#     --from-literal=smtpPass=<SES_SMTP_SECRET_ACCESS_KEY> \
+#     --from-literal=smtpFrom=<VERIFIED_SENDER_EMAIL>
+smtp:
+  host: email-smtp.us-east-1.amazonaws.com
+  port: "465"

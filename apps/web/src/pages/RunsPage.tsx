@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ExternalLink, RefreshCw, Search, X } from 'lucide-react';
 import { api } from '../api';
 import { displayEnvironment } from './LifecyclePage';
@@ -31,6 +31,9 @@ const ENV_PILLS = [
   { key: 'test', label: 'Integration' },
   { key: 'prod', label: 'Production' },
 ];
+
+const RANGES = [['15m', 15], ['1h', 60], ['6h', 360], ['24h', 1440], ['7d', 10080]] as const;
+const localDateTime = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 19);
 
 const PILL_CLS = (active: boolean) =>
   `flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border transition-all ${
@@ -106,14 +109,32 @@ function RunDrawer({ run, onClose }: { run: Execution; onClose: () => void }) {
 }
 
 export default function RunsPage() {
+  const [params, setParams] = useSearchParams();
   const [rows, setRows] = useState<Execution[]>([]);
   const [pipelines, setPipelines] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [selected, setSelected] = useState<Execution | null>(null);
-  const [search, setSearch] = useState('');
-  const [filters, setFilters] = useState({ pipeline: '', env: '', status: '', from: '', to: '' });
+  const [search, setSearch] = useState(params.get('q') ?? '');
+  const [range, setRange] = useState(params.get('range') ?? '24h');
+  const [customOpen, setCustomOpen] = useState(false);
+  const [filters, setFilters] = useState({ pipeline: params.get('pipeline') ?? '', env: params.get('env') ?? '', status: params.get('status') ?? '', from: params.get('from') ?? '', to: params.get('to') ?? '' });
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => value && next.set(key, value));
+    if (search) next.set('q', search);
+    next.set('range', range);
+    setParams(next, { replace: true });
+  }, [filters, search, range, setParams]);
+
+  useEffect(() => {
+    if (range === 'custom') return;
+    const minutes = RANGES.find(([key]) => key === range)?.[1] ?? 1440;
+    const now = new Date();
+    setFilters(f => ({ ...f, from: localDateTime(new Date(now.getTime() - minutes * 60_000)), to: localDateTime(now) }));
+  }, [range]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -150,7 +171,8 @@ export default function RunsPage() {
       <div className="flex flex-1 flex-col min-w-0 min-h-0">
 
         {/* toolbar */}
-        <div className="flex items-center gap-2 px-6 py-2.5 border-b border-gray-100 dark:border-white/[0.06] flex-wrap shrink-0">
+        <div className="grid gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-white/[0.06] shrink-0 lg:grid-cols-[auto_1fr] lg:px-6">
+          <div className="flex items-center gap-2 overflow-x-auto"><span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Status</span>
           {/* status pills */}
           {STATUS_PILLS.map(({ key, label, dot }) => (
             <button key={key} onClick={() => setF('status', key)} className={PILL_CLS(filters.status === key)}>
@@ -161,22 +183,31 @@ export default function RunsPage() {
 
           <div className="h-4 w-px bg-gray-200 dark:bg-white/10 mx-0.5" />
 
-          {/* env pills */}
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Environment</span>
           {ENV_PILLS.map(({ key, label }) => (
             <button key={key} onClick={() => setF('env', key)} className={PILL_CLS(filters.env === key)}>
               {label}
             </button>
           ))}
+          </div>
 
           {/* right controls */}
-          <div className="ml-auto flex items-center gap-2 flex-wrap">
+          <div className="relative flex flex-wrap items-center gap-2 lg:justify-end">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Pipeline</span>
             <select className="glass-input text-[12px] py-1.5" value={filters.pipeline}
               onChange={e => setF('pipeline', e.target.value)}>
               <option value="">All pipelines</option>
               {pipelines.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
-            <DateTimePicker value={filters.from} onChange={v => setF('from', v)} placeholder="From" />
-            <DateTimePicker value={filters.to}   onChange={v => setF('to',   v)} placeholder="To" />
+            <select className="glass-input w-auto text-[12px] py-1.5" value={range} onChange={e => { setRange(e.target.value); setCustomOpen(e.target.value === 'custom'); }} aria-label="Time range">
+              {RANGES.map(([key]) => <option key={key}>{key}</option>)}<option value="custom">Custom</option>
+            </select>
+            {range === 'custom' && <button className="glass-btn-ghost whitespace-nowrap py-1.5 text-xs" onClick={() => setCustomOpen(v => !v)}>From / To</button>}
+            {customOpen && <div className="absolute right-10 top-10 z-30 space-y-2 rounded-xl border border-gray-200 bg-white p-3 shadow-xl dark:border-white/10 dark:bg-[#11141d]">
+              <label className="block text-[10px] text-gray-500">From<DateTimePicker value={filters.from} onChange={v => setF('from', v)} /></label>
+              <label className="block text-[10px] text-gray-500">To<DateTimePicker value={filters.to} onChange={v => setF('to', v)} /></label>
+              <p className="text-[10px] text-gray-400">Timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}</p>
+            </div>}
             <div className="relative flex items-center">
               <Search size={13} className="absolute left-2.5 text-gray-400 dark:text-white/30 pointer-events-none" />
               <input value={search} onChange={e => setSearch(e.target.value)}

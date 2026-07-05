@@ -33,6 +33,8 @@ declare global {
 const RAZORPAY_SCRIPT_SRC = 'https://checkout.razorpay.com/v1/checkout.js';
 const ADD_ONS: Array<{ key: PaidFeatureKey; label: string; billing: string; description: string }> = [
   { key: 'realtime', label: 'Realtime', billing: 'Usage metered', description: 'CDC and Kafka streaming connectors.' },
+  { key: 'sparkSql', label: 'Spark SQL', billing: 'Paid add-on', description: 'Large batch and incremental lake processing.' },
+  { key: 'flinkSql', label: 'Flink SQL', billing: 'Paid add-on', description: 'Stateful event-time stream processing.' },
   { key: 'statefulProcessing', label: 'Stateful processing', billing: 'Paid add-on', description: 'Cross-run deduplication and durable transform state.' },
   { key: 'advancedConnectors', label: 'Advanced connectors', billing: 'Paid add-on', description: 'SFTP and warehouse connector pack.' },
   { key: 'deepObservability', label: 'Deep observability', billing: 'Paid add-on', description: 'Temporal traces and extended retention.' },

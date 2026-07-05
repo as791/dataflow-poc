@@ -286,7 +286,8 @@ function infer(node: PipelineNode): DataAssetRef | null {
       const table = value(node, 'table');
       return table ? asset(`snowflake://${connection}/${table}`, 'snowflake', connection, table, 'table', l) : null;
     }
-    case 'iceberg.fetch': {
+    case 'iceberg.fetch':
+    case 'sink.iceberg': {
       const connection = value(node, 'connectionId') ?? 'default';
       const name = [value(node, 'namespace'), value(node, 'table')].filter(Boolean).join('.');
       return name ? asset(`iceberg://${connection}/${name}`, 'iceberg', connection, name, 'table', l) : null;

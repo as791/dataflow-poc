@@ -1,7 +1,7 @@
 // Auth-aware fetch wrapper. Reads the access token from AuthContext
 // (set via setAccessToken) and includes credentials so the refresh
 // cookie travels on /api/auth/* calls.
-import type { Dataset, QuerySpec } from './components/analytics/types';
+import type { Dataset, QuerySpec, TimeRange } from './components/analytics/types';
 
 let accessToken: string | null = null;
 let onUnauthorized: () => Promise<boolean> = async () => false;
@@ -72,8 +72,8 @@ export const api = {
   // AI builder (Ollama). Returns { mermaid, definition }.
   generatePipeline: (prompt: string) =>
     request('/api/ai/generate', { method: 'POST', body: JSON.stringify({ prompt }) }).then(j),
-  refinePipeline: (definition: any, prompt: string) =>
-    request('/api/ai/refine', { method: 'POST', body: JSON.stringify({ definition, prompt }) }).then(j),
+  refinePipeline: (definition: any, prompt: string, mermaid?: string, messages?: any[]) =>
+    request('/api/ai/refine', { method: 'POST', body: JSON.stringify({ definition, prompt, mermaid, messages }) }).then(j),
 
   listExecutions: (params?: Record<string, string>) => {
     const clean = Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][];
@@ -118,13 +118,14 @@ export const api = {
   // Analytics
   getAnalyticsDatasets: (): Promise<Dataset[]> => request('/api/analytics/datasets').then(j),
   getAnalyticsSchema: (name: string) => request(`/api/analytics/datasets/${encodeURIComponent(name)}/schema`).then(j),
-  queryAnalytics: (body: { dataset: string; spec: QuerySpec }) =>
-    request('/api/analytics/query', { method: 'POST', body: JSON.stringify(body) }).then(j),
+  queryAnalytics: (body: { dataset: string; spec: QuerySpec; timeRange?: TimeRange }) =>
+    request('/api/analytics/query', { method: 'POST', body: JSON.stringify({ dataset: body.dataset, ...body.spec, timeRange: body.timeRange }) }).then(j),
   listDashboards: () => request('/api/analytics/dashboards').then(j),
   createDashboard: (body: { name: string; definition: any }) =>
     request('/api/analytics/dashboards', { method: 'POST', body: JSON.stringify(body) }).then(j),
   updateDashboard: (id: string, body: { name?: string; definition?: any }) =>
     request(`/api/analytics/dashboards/${id}`, { method: 'PUT', body: JSON.stringify(body) }).then(j),
+  deleteDashboard: (id: string) => request(`/api/analytics/dashboards/${id}`, { method: 'DELETE' }).then(j),
 
   // Connectors OAuth start
   startConnectorOAuth: (provider: 'google' | 'microsoft') =>
