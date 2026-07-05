@@ -15,7 +15,15 @@ func (s *Server) registerPipelines(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/pipelines", handle(s.pipelineList))
 	mux.Handle("POST /api/pipelines/{rowId}/activate", s.pipelineAccess("editor", handle(s.pipelineActivate)))
 	mux.Handle("POST /api/pipelines/{rowId}/run", s.pipelineAccess("editor", handle(s.pipelineRun)))
-	mux.Handle("POST /api/pipelines/{rowId}/promote", s.pipelineAccess("admin", handle(s.pipelinePromote)))
+	mux.Handle("POST /api/pipelines/{rowId}/promote", s.pipelineAccess("admin", handle(func(w http.ResponseWriter, r *http.Request) error {
+		var body struct {
+			Allow bool `json:"allowBreakingContract"`
+		}
+		if !decodeJSON(w, r, &body) {
+			return nil
+		}
+		return s.pipelinePromote(w, r, body.Allow)
+	})))
 	mux.Handle("POST /api/pipelines/{rowId}/stage", s.pipelineAccess("admin", handle(s.pipelineStage)))
 	mux.Handle("POST /api/pipelines/{rowId}/backfills/plan", s.pipelineAccess("viewer", handle(s.backfillPlanRoute)))
 	mux.Handle("POST /api/pipelines/{rowId}/backfills", s.pipelineAccess("admin", handle(s.backfillCreate)))
@@ -191,20 +199,131 @@ func deriveStage(status, environment string) string {
 	return "draft"
 }
 
-func (s *Server) createProductionVersion(r *http.Request, row map[string]interface{}, def model.PipelineDefinition) (map[string]interface{}, error) {
+// extractContracts extracts all data contracts from a pipeline definition
+func extractContracts(def model.PipelineDefinition) map[string]map[string]interface{} {
+	contracts := make(map[string]map[string]interface{})
+
+	// Build adjacency map for traversing edges
+	incoming := make(map[string][]string)
+	for _, edge := range def.Edges {
+		incoming[edge.Target] = append(incoming[edge.Target], edge.Source)
+	}
+
+	// Build node lookup map for efficiency
+	nodeMap := make(map[string]model.Node)
+	for _, node := range def.Nodes {
+		nodeMap[node.ID] = node
+	}
+
+	// Helper function to traverse upstream and find contracts with cycle detection
+	var findContract func(nodeID string, visited map[string]bool) map[string]interface{}
+	findContract = func(nodeID string, visited map[string]bool) map[string]interface{} {
+		if visited[nodeID] {
+			return nil
+		}
+		visited[nodeID] = true
+
+		for _, sourceID := range incoming[nodeID] {
+			if node, exists := nodeMap[sourceID]; exists && node.ActivityType == "transform.contract" {
+				if schema, ok := node.Config["schemaJson"].(map[string]interface{}); ok {
+					return schema
+				}
+			}
+			if contract := findContract(sourceID, visited); contract != nil {
+				return contract
+			}
+		}
+		return nil
+	}
+
+	// Find contracts for all sink nodes
+	for _, node := range def.Nodes {
+		if node.Type == "sink" {
+			visited := make(map[string]bool)
+			if contract := findContract(node.ID, visited); contract != nil {
+				contracts[node.ID] = contract
+			}
+		}
+	}
+
+	return contracts
+}
+
+// compareContracts compares contracts between two versions and returns breaking changes
+func compareContracts(oldContracts, newContracts map[string]map[string]interface{}) []string {
+	var breaks []string
+
+	// Check for removed or modified contracts
+	for sinkID, oldContract := range oldContracts {
+		newContract, exists := newContracts[sinkID]
+		if !exists {
+			breaks = append(breaks, fmt.Sprintf("contract removed for sink %s", sinkID))
+			continue
+		}
+
+		// Check for removed fields
+		for field := range oldContract {
+			if _, exists := newContract[field]; !exists {
+				breaks = append(breaks, fmt.Sprintf("field %s removed from contract for sink %s", field, sinkID))
+			}
+		}
+
+		// Check for type changes
+		for field, oldSpec := range oldContract {
+			if newSpec, exists := newContract[field]; exists {
+				oldType := fmt.Sprintf("%v", oldSpec)
+				newType := fmt.Sprintf("%v", newSpec)
+				// Remove optional marker for comparison
+				oldType = trimOptional(oldType)
+				newType = trimOptional(newType)
+				if oldType != newType {
+					breaks = append(breaks, fmt.Sprintf("field %s type changed from %s to %s in sink %s", field, oldType, newType, sinkID))
+				}
+			}
+		}
+	}
+
+	return breaks
+}
+
+func trimOptional(spec string) string {
+	if len(spec) > 0 && spec[len(spec)-1] == '?' {
+		return spec[:len(spec)-1]
+	}
+	return spec
+}
+
+func (s *Server) createProductionVersion(r *http.Request, row map[string]interface{}, def model.PipelineDefinition, allowBreakingContract bool) (map[string]interface{}, error) {
 	if stringValue(row["environment"]) != "test" {
 		return nil, &HTTPError{Status: http.StatusConflict, Message: "only Integration versions can be promoted"}
 	}
 	tenant := tenantFrom(r)
-	var green bool
 	var out = map[string]interface{}{}
 	err := s.DB.TenantTx(r.Context(), tenant.TenantID, func(tx pgx.Tx) error {
 		var one int
 		if err := tx.QueryRow(r.Context(), `SELECT 1 FROM executions WHERE pipeline_id=$1 AND environment='test' AND phase='completed' LIMIT 1`, row["id"]).Scan(&one); err != nil {
 			return &HTTPError{Status: http.StatusConflict, Message: "promotion gate: this version has no successful Integration run"}
 		}
-		green = true
-		_ = green
+
+		// Check for contract breaking changes with current production version
+		var currentProdDef model.PipelineDefinition
+		var currentProdBody []byte
+		err := tx.QueryRow(r.Context(), `SELECT definition FROM pipelines WHERE pipeline_key=$1 AND environment='prod' AND status='active'`, row["pipeline_key"]).Scan(&currentProdBody)
+		if err == nil {
+			// There's an existing production version, check contracts
+			if err := json.Unmarshal(currentProdBody, &currentProdDef); err == nil {
+				oldContracts := extractContracts(currentProdDef)
+				newContracts := extractContracts(def)
+				breaks := compareContracts(oldContracts, newContracts)
+				if len(breaks) > 0 && !allowBreakingContract {
+					return &HTTPError{
+						Status:  http.StatusConflict,
+						Message: fmt.Sprintf("breaking data contract: %s", fmt.Sprintf("%v", breaks)),
+					}
+				}
+			}
+		}
+
 		var version int
 		if err := tx.QueryRow(r.Context(), `SELECT coalesce(MAX(version),0)+1 FROM pipelines WHERE pipeline_key=$1`, row["pipeline_key"]).Scan(&version); err != nil {
 			return err
@@ -218,13 +337,13 @@ func (s *Server) createProductionVersion(r *http.Request, row map[string]interfa
 		if err := tx.QueryRow(r.Context(), `INSERT INTO pipelines (pipeline_key,version,tenant_id,name,definition,status,environment,promoted_from_version) VALUES ($1,$2,$3,$4,$5,'active','prod',$6) RETURNING id`, row["pipeline_key"], version, tenant.TenantID, row["name"], body, row["version"]).Scan(&id); err != nil {
 			return err
 		}
-		out = map[string]interface{}{"rowId": id, "version": version, "fromVersion": row["version"], "def": def, "env": model.EnvironmentProd, "stage": "production", "contractOverride": false}
+		out = map[string]interface{}{"rowId": id, "version": version, "fromVersion": row["version"], "def": def, "env": model.EnvironmentProd, "stage": "production", "contractOverride": allowBreakingContract}
 		return nil
 	})
 	return out, err
 }
 
-func (s *Server) pipelinePromote(w http.ResponseWriter, r *http.Request) error {
+func (s *Server) pipelinePromote(w http.ResponseWriter, r *http.Request, allowBreakingContract bool) error {
 	row, def, err := s.loadPipeline(r, r.PathValue("rowId"))
 	if err != nil {
 		return err
@@ -235,7 +354,7 @@ func (s *Server) pipelinePromote(w http.ResponseWriter, r *http.Request) error {
 	if err = s.enforcePipelineFeatures(r, def); err != nil {
 		return err
 	}
-	out, err := s.createProductionVersion(r, row, def)
+	out, err := s.createProductionVersion(r, row, def, allowBreakingContract)
 	if err != nil {
 		return err
 	}
@@ -244,7 +363,7 @@ func (s *Server) pipelinePromote(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	s.audit(r.Context(), tenantFrom(r), "pipeline.promoted", id, out, r)
-	jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "rowId": id, "environment": "prod", "version": out["version"], "contractOverride": false})
+	jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "rowId": id, "environment": "prod", "version": out["version"], "contractOverride": allowBreakingContract})
 	return nil
 }
 
@@ -275,7 +394,7 @@ func (s *Server) pipelineStage(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	if from == "testing" && body.To == "production" {
-		return s.pipelinePromote(w, r)
+		return s.pipelinePromote(w, r, body.Allow)
 	}
 	return &HTTPError{Status: http.StatusConflict, Message: fmt.Sprintf("unsupported stage transition %s → %s", from, body.To)}
 }

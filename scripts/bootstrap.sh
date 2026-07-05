@@ -71,7 +71,29 @@ kind get clusters | grep -qx dataflow || kind create cluster --config <(sed "s|_
 docker build -f apps/workflow-go/Dockerfile -t dataflow-app:local .
 docker build -f apps/web/Dockerfile -t dataflow-web:local .
 kind load docker-image --name dataflow dataflow-app:local dataflow-web:local
-helm upgrade --install dataflow deploy/helm/dataflow --namespace dataflow --create-namespace
+if [ -n "${GCP_SECRET_MANAGER_NAME:-}" ]; then
+  echo "▶ Fetching secrets from GCP Secret Manager ($GCP_SECRET_MANAGER_NAME)"
+  SECRET_JSON=$(gcloud secrets versions access latest --secret="$GCP_SECRET_MANAGER_NAME" 2>/dev/null)
+  if [ -n "$SECRET_JSON" ]; then
+    echo "$SECRET_JSON" | node -e "
+const fs = require('fs');
+let d='';
+process.stdin.on('data', c => d+=c);
+process.stdin.on('end', () => {
+  const secrets = JSON.parse(d);
+  let yaml = 'secrets:\n';
+  for (const [k, v] of Object.entries(secrets)) {
+    yaml += '  ' + k + ': ' + JSON.stringify(v) + '\n';
+  }
+  fs.writeFileSync('gcp-secrets.yaml', yaml);
+});"
+    HELM_SECRETS_ARG="-f gcp-secrets.yaml"
+  else
+    echo "⚠️ Could not fetch secret $GCP_SECRET_MANAGER_NAME"
+  fi
+fi
+
+helm upgrade --install dataflow deploy/helm/dataflow --namespace dataflow --create-namespace ${HELM_SECRETS_ARG:-}
 
 if [ -f cohestra/deploy/helm/fcp/Chart.yaml ]; then
   kind load docker-image --name dataflow cohestra-control-api:latest cohestra-worker:latest
@@ -87,4 +109,13 @@ fi
 kubectl -n dataflow rollout status deployment/ollama --timeout=15m
 kubectl -n dataflow rollout status deployment/api --timeout=5m
 kubectl -n dataflow rollout status deployment/web --timeout=5m
-echo "✓ DataFlow ready. Web: http://localhost:3002 · Cohestra: http://localhost:8080 · Temporal: http://localhost:8082"
+PUBLIC_IP=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip || true)
+if [ -n "$PUBLIC_IP" ]; then
+  docker rm -f caddy >/dev/null 2>&1 || true
+  docker run -d --restart unless-stopped --name caddy --network host \
+    -v caddy_data:/data -v caddy_config:/config \
+    caddy:alpine caddy reverse-proxy --from "${PUBLIC_IP}.nip.io" --to localhost:3002 >/dev/null
+  echo "✓ DataFlow ready. Web: https://${PUBLIC_IP}.nip.io · Cohestra: http://localhost:8080 · Temporal: http://localhost:8082"
+else
+  echo "✓ DataFlow ready. Web: http://localhost:3002 · Cohestra: http://localhost:8080 · Temporal: http://localhost:8082"
+fi

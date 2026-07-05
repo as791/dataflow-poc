@@ -23,20 +23,19 @@ func (r *Runtime) registerSaaS() {
 	r.Handlers["sink.gsheets"] = r.googleSheetsSink
 }
 
-func (r *Runtime) oauthConnection(ctx context.Context, id string) (string, map[string]interface{}, error) {
+func (r *Runtime) oauthConnection(ctx context.Context, id string) (map[string]interface{}, error) {
 	row, err := r.credential(ctx, id)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
-	extra, _ := row["extra"].(map[string]interface{})
-	token := stringValue(row["access_value"])
-	if token == "" {
-		return "", nil, fmt.Errorf("connector %s has no access token", id)
+	if stringValue(row["access_value"]) == "" {
+		return nil, fmt.Errorf("connector %s has no access token", id)
 	}
-	return token, extra, nil
+	return row, nil
 }
 
-func (r *Runtime) oauthJSON(ctx context.Context, method, endpoint, token string, body interface{}, out interface{}) (*http.Response, error) {
+func (r *Runtime) oauthJSON(ctx context.Context, method, endpoint string, row map[string]interface{}, body interface{}, out interface{}) (*http.Response, error) {
+	token := stringValue(row["access_value"])
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -57,6 +56,27 @@ func (r *Runtime) oauthJSON(ctx context.Context, method, endpoint, token string,
 	if err != nil {
 		return nil, err
 	}
+	
+	// Token refresh logic
+	if res.StatusCode == http.StatusUnauthorized && stringValue(row["refresh_value"]) != "" {
+		res.Body.Close()
+		refreshed, err := r.refreshOAuthToken(ctx, row)
+		if err != nil {
+			return nil, fmt.Errorf("token expired and refresh failed: %v", err)
+		}
+		// Update the token and retry once
+		token = refreshed
+		req.Header.Set("Authorization", "Bearer "+token)
+		if body != nil {
+			encoded, _ := json.Marshal(body)
+			req.Body = io.NopCloser(bytes.NewReader(encoded))
+		}
+		res, err = r.HTTP.Do(req)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if res.StatusCode == http.StatusTooManyRequests {
 		res.Body.Close()
 		return res, fmt.Errorf("provider rate limited; retry after %s seconds", firstString(res.Header.Get("Retry-After"), "60"))
@@ -75,6 +95,63 @@ func (r *Runtime) oauthJSON(ctx context.Context, method, endpoint, token string,
 		res.Body.Close()
 	}
 	return res, nil
+}
+
+func (r *Runtime) refreshOAuthToken(ctx context.Context, row map[string]interface{}) (string, error) {
+	provider := stringValue(row["provider"])
+	refreshToken := stringValue(row["refresh_value"])
+	var tokenURL string
+	var params url.Values
+
+	switch provider {
+	case "google":
+		tokenURL = "https://oauth2.googleapis.com/token"
+		params = url.Values{
+			"client_id":     {os.Getenv("GOOGLE_CLIENT_ID")},
+			"client_secret": {os.Getenv("GOOGLE_CLIENT_SECRET")},
+			"refresh_token": {refreshToken},
+			"grant_type":    {"refresh_token"},
+		}
+	case "microsoft":
+		tokenURL = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+		params = url.Values{
+			"client_id":     {os.Getenv("AZURE_CLIENT_ID")},
+			"client_secret": {os.Getenv("AZURE_CLIENT_SECRET")},
+			"refresh_token": {refreshToken},
+			"grant_type":    {"refresh_token"},
+		}
+	default:
+		return "", fmt.Errorf("unsupported oauth provider for refresh: %s", provider)
+	}
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(params.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	res, err := r.HTTP.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+	if res.StatusCode >= 400 {
+		payload, _ := io.ReadAll(res.Body)
+		return "", fmt.Errorf("refresh failed (%d): %s", res.StatusCode, string(payload))
+	}
+	var data struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&data); err != nil || data.AccessToken == "" {
+		return "", fmt.Errorf("invalid token refresh response")
+	}
+
+	encrypted, err := r.encryptValue(data.AccessToken)
+	if err != nil {
+		return "", err
+	}
+	_, err = r.DB.Pool.Exec(ctx, "UPDATE connector_instances SET access_token = $1 WHERE id = $2", encrypted, row["id"])
+	if err != nil {
+		return "", err
+	}
+	row["access_value"] = data.AccessToken
+	return data.AccessToken, nil
 }
 
 func rowDiff(values [][]interface{}, keyColumn string, cursor map[string]interface{}) ([]interface{}, map[string]interface{}) {
@@ -121,7 +198,7 @@ func rowDiff(values [][]interface{}, keyColumn string, cursor map[string]interfa
 }
 
 func (r *Runtime) googleSheetsFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
-	token, _, err := r.oauthConnection(ctx, stringValue(p.Config["connectionId"]))
+	row, err := r.oauthConnection(ctx, stringValue(p.Config["connectionId"]))
 	if err != nil {
 		return SourceResult{}, err
 	}
@@ -129,7 +206,7 @@ func (r *Runtime) googleSheetsFetch(ctx context.Context, p SourceParams) (Source
 	var response struct {
 		Values [][]interface{} `json:"values"`
 	}
-	if _, err = r.oauthJSON(ctx, http.MethodGet, endpoint, token, nil, &response); err != nil {
+	if _, err = r.oauthJSON(ctx, http.MethodGet, endpoint, row, nil, &response); err != nil {
 		return SourceResult{}, err
 	}
 	records, cursor := rowDiff(response.Values, stringValue(p.Config["keyColumn"]), p.Cursor)
@@ -137,7 +214,7 @@ func (r *Runtime) googleSheetsFetch(ctx context.Context, p SourceParams) (Source
 }
 
 func (r *Runtime) googleDriveFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
-	token, _, err := r.oauthConnection(ctx, stringValue(p.Config["connectionId"]))
+	row, err := r.oauthConnection(ctx, stringValue(p.Config["connectionId"]))
 	if err != nil {
 		return SourceResult{}, err
 	}
@@ -153,7 +230,7 @@ func (r *Runtime) googleDriveFetch(ctx context.Context, p SourceParams) (SourceR
 			NextPageToken string        `json:"nextPageToken"`
 			Files         []interface{} `json:"files"`
 		}
-		_, err = r.oauthJSON(ctx, http.MethodGet, "https://www.googleapis.com/drive/v3/files?"+params.Encode(), token, nil, &response)
+		_, err = r.oauthJSON(ctx, http.MethodGet, "https://www.googleapis.com/drive/v3/files?"+params.Encode(), row, nil, &response)
 		if err != nil {
 			return SourceResult{}, err
 		}
@@ -163,7 +240,7 @@ func (r *Runtime) googleDriveFetch(ctx context.Context, p SourceParams) (SourceR
 			var anchor struct {
 				StartPageToken string `json:"startPageToken"`
 			}
-			_, err = r.oauthJSON(ctx, http.MethodGet, "https://www.googleapis.com/drive/v3/changes/startPageToken", token, nil, &anchor)
+			_, err = r.oauthJSON(ctx, http.MethodGet, "https://www.googleapis.com/drive/v3/changes/startPageToken", row, nil, &anchor)
 			if err != nil {
 				return SourceResult{}, err
 			}
@@ -176,7 +253,7 @@ func (r *Runtime) googleDriveFetch(ctx context.Context, p SourceParams) (SourceR
 		var anchor struct {
 			StartPageToken string `json:"startPageToken"`
 		}
-		_, err = r.oauthJSON(ctx, http.MethodGet, "https://www.googleapis.com/drive/v3/changes/startPageToken", token, nil, &anchor)
+		_, err = r.oauthJSON(ctx, http.MethodGet, "https://www.googleapis.com/drive/v3/changes/startPageToken", row, nil, &anchor)
 		return SourceResult{Records: []interface{}{}, NextCursor: map[string]interface{}{"startPageToken": anchor.StartPageToken, "backfillDone": true}}, err
 	}
 	params := url.Values{"pageToken": {tokenCursor}, "fields": {"newStartPageToken,nextPageToken,changes(fileId,removed,file(id,name,mimeType,modifiedTime,webViewLink))"}}
@@ -185,7 +262,7 @@ func (r *Runtime) googleDriveFetch(ctx context.Context, p SourceParams) (SourceR
 		NextPageToken     string                   `json:"nextPageToken"`
 		Changes           []map[string]interface{} `json:"changes"`
 	}
-	if _, err = r.oauthJSON(ctx, http.MethodGet, "https://www.googleapis.com/drive/v3/changes?"+params.Encode(), token, nil, &response); err != nil {
+	if _, err = r.oauthJSON(ctx, http.MethodGet, "https://www.googleapis.com/drive/v3/changes?"+params.Encode(), row, nil, &response); err != nil {
 		return SourceResult{}, err
 	}
 	records := make([]interface{}, 0, len(response.Changes))
@@ -202,7 +279,7 @@ func (r *Runtime) googleDriveFetch(ctx context.Context, p SourceParams) (SourceR
 }
 
 func (r *Runtime) excelFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
-	token, _, err := r.oauthConnection(ctx, stringValue(p.Config["connectionId"]))
+	row, err := r.oauthConnection(ctx, stringValue(p.Config["connectionId"]))
 	if err != nil {
 		return SourceResult{}, err
 	}
@@ -214,7 +291,7 @@ func (r *Runtime) excelFetch(ctx context.Context, p SourceParams) (SourceResult,
 	var response struct {
 		Values [][]interface{} `json:"values"`
 	}
-	if _, err = r.oauthJSON(ctx, http.MethodGet, endpoint, token, nil, &response); err != nil {
+	if _, err = r.oauthJSON(ctx, http.MethodGet, endpoint, row, nil, &response); err != nil {
 		return SourceResult{}, err
 	}
 	records, cursor := rowDiff(response.Values, stringValue(p.Config["keyColumn"]), p.Cursor)
@@ -222,10 +299,11 @@ func (r *Runtime) excelFetch(ctx context.Context, p SourceParams) (SourceResult,
 }
 
 func (r *Runtime) zendeskFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
-	token, extra, err := r.oauthConnection(ctx, stringValue(p.Config["connectionId"]))
+	row, err := r.oauthConnection(ctx, stringValue(p.Config["connectionId"]))
 	if err != nil {
 		return SourceResult{}, err
 	}
+	extra, _ := row["extra"].(map[string]interface{})
 	subdomain := firstString(extra["subdomain"], p.Config["subdomain"])
 	if subdomain == "" {
 		return SourceResult{}, fmt.Errorf("zendesk.fetch: subdomain missing on connection")
@@ -245,7 +323,7 @@ func (r *Runtime) zendeskFetch(ctx context.Context, p SourceParams) (SourceResul
 		params.Set("start_time", strconv.FormatInt(start, 10))
 	}
 	var response map[string]interface{}
-	if _, err = r.oauthJSON(ctx, http.MethodGet, endpoint+"?"+params.Encode(), token, nil, &response); err != nil {
+	if _, err = r.oauthJSON(ctx, http.MethodGet, endpoint+"?"+params.Encode(), row, nil, &response); err != nil {
 		return SourceResult{}, err
 	}
 	records, _ := response[resource].([]interface{})
@@ -257,14 +335,14 @@ func (r *Runtime) googleSheetsSink(ctx context.Context, input interface{}, cfg m
 	if err != nil || len(rows) == 0 {
 		return nil, nil, err
 	}
-	token, _, err := r.oauthConnection(ctx, stringValue(cfg["connectionId"]))
+	row, err := r.oauthConnection(ctx, stringValue(cfg["connectionId"]))
 	if err != nil {
 		return nil, nil, err
 	}
 	columns := []string{}
 	seen := map[string]bool{}
-	for _, row := range rows {
-		for column := range row {
+	for _, dataRow := range rows {
+		for column := range dataRow {
 			if !seen[column] {
 				seen[column] = true
 				columns = append(columns, column)
@@ -272,11 +350,11 @@ func (r *Runtime) googleSheetsSink(ctx context.Context, input interface{}, cfg m
 		}
 	}
 	values := make([][]interface{}, 0, len(rows)+1)
-	for _, row := range rows {
+	for _, dataRow := range rows {
 		values = append(values, func() []interface{} {
 			out := make([]interface{}, len(columns))
 			for i, column := range columns {
-				value := row[column]
+				value := dataRow[column]
 				if value == nil {
 					out[i] = ""
 				} else if _, scalar := value.(string); scalar {
@@ -291,7 +369,7 @@ func (r *Runtime) googleSheetsSink(ctx context.Context, input interface{}, cfg m
 	spreadsheet, sheet := stringValue(cfg["spreadsheetId"]), firstString(cfg["sheetName"], "Sheet1")
 	base := "https://sheets.googleapis.com/v4/spreadsheets/" + url.PathEscape(spreadsheet) + "/values/" + url.PathEscape(sheet)
 	if firstString(cfg["writeMode"], "replace") == "replace" {
-		if _, err = r.oauthJSON(ctx, http.MethodPost, base+":clear", token, map[string]interface{}{}, &map[string]interface{}{}); err != nil {
+		if _, err = r.oauthJSON(ctx, http.MethodPost, base+":clear", row, map[string]interface{}{}, &map[string]interface{}{}); err != nil {
 			return nil, nil, err
 		}
 		if cfg["includeHeader"] == true {
@@ -303,9 +381,9 @@ func (r *Runtime) googleSheetsSink(ctx context.Context, input interface{}, cfg m
 				return out
 			}()}, values...)
 		}
-		_, err = r.oauthJSON(ctx, http.MethodPut, base+"?valueInputOption=RAW", token, map[string]interface{}{"values": values}, &map[string]interface{}{})
+		_, err = r.oauthJSON(ctx, http.MethodPut, base+"?valueInputOption=RAW", row, map[string]interface{}{"values": values}, &map[string]interface{}{})
 	} else {
-		_, err = r.oauthJSON(ctx, http.MethodPost, base+":append?valueInputOption=RAW", token, map[string]interface{}{"values": values}, &map[string]interface{}{})
+		_, err = r.oauthJSON(ctx, http.MethodPost, base+":append?valueInputOption=RAW", row, map[string]interface{}{"values": values}, &map[string]interface{}{})
 	}
 	return nil, nil, err
 }
