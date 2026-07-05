@@ -1,7 +1,7 @@
 # Fully isolated environment — everything runs in containers on one private
 # network. Node.js is used only to build the React frontend.
 #
-# Default profile starts: postgres, redis, clickhouse, mailhog, temporal,
+# Default profile starts: postgres, redis, clickhouse, temporal,
 # temporal-ui, api, worker, web  (~3 GB RAM total).
 #
 # Add observability services:

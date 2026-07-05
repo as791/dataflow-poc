@@ -1,12 +1,6 @@
 package connectors
 
-import (
-	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"testing"
-)
+import "testing"
 
 func TestRowDiff(t *testing.T) {
 	values := [][]interface{}{
