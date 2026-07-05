@@ -1,11 +1,21 @@
+variable "project_id" {
+  description = "GCP Project ID"
+  type        = string
+}
+
 variable "region" {
   type    = string
-  default = "ap-south-1" # Mumbai
+  default = "asia-south1" # Mumbai
+}
+
+variable "zone" {
+  type    = string
+  default = "asia-south1-a"
 }
 
 variable "instance_type" {
   type    = string
-  default = "t4g.large"
+  default = "e2-standard-4"
 }
 
 variable "admin_cidr" {
