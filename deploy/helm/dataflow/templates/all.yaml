@@ -1,0 +1,348 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dataflow-secrets
+  labels: {{- include "dataflow.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  jwt: dev-access-secret-change-me
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: postgres-data}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: {{ .Values.storage.postgres }}}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: postgres}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: postgres}}
+  template:
+    metadata: {labels: {app: postgres}}
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.images.postgres }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: POSTGRES_USER, value: dataflow}
+            - {name: POSTGRES_PASSWORD, value: dataflow}
+            - {name: POSTGRES_DB, value: dataflow}
+          ports: [{containerPort: 5432}]
+          readinessProbe: {exec: {command: [pg_isready, -U, dataflow]}, periodSeconds: 3}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: migrations, mountPath: /docker-entrypoint-initdb.d}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: postgres-data}
+        - name: migrations
+          hostPath: {path: {{ printf "%s/db" .Values.hostPath | quote }}, type: Directory}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: postgres}
+spec: {selector: {app: postgres}, ports: [{port: 5432}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: redis}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: redis}}
+  template:
+    metadata: {labels: {app: redis}}
+    spec:
+      containers:
+        - name: redis
+          image: {{ .Values.images.redis }}
+          imagePullPolicy: IfNotPresent
+          ports: [{containerPort: 6379}]
+          readinessProbe: {exec: {command: [redis-cli, ping]}, periodSeconds: 3}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: redis}
+spec: {selector: {app: redis}, ports: [{port: 6379}]}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: clickhouse-data}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: {{ .Values.storage.clickhouse }}}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: clickhouse}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: clickhouse}}
+  template:
+    metadata: {labels: {app: clickhouse}}
+    spec:
+      containers:
+        - name: clickhouse
+          image: {{ .Values.images.clickhouse }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: CLICKHOUSE_USER, value: dataflow}
+            - {name: CLICKHOUSE_PASSWORD, value: dataflow}
+            - {name: CLICKHOUSE_DB, value: dataflow}
+          ports: [{containerPort: 8123}]
+          readinessProbe:
+            exec: {command: [clickhouse-client, --user, dataflow, --password, dataflow, --query, SELECT 1]}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/clickhouse}
+            - {name: init, mountPath: /docker-entrypoint-initdb.d/init.sql, subPath: init.sql}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: clickhouse-data}
+        - name: init
+          hostPath: {path: {{ printf "%s/db/clickhouse" .Values.hostPath | quote }}, type: Directory}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: clickhouse}
+spec: {selector: {app: clickhouse}, ports: [{port: 8123}]}
+---
+# mailhog is no longer deployed — SMTP is handled by AWS SES (external).
+# To test email locally without SES, run: docker run -p 1025:1025 -p 8025:8025 mailhog/mailhog:v1.0.1
+# and override SMTP_HOST=host.minikube.internal SMTP_PORT=1025 SMTP_USER="" SMTP_PASS="" in your values.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: temporal}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: temporal}}
+  template:
+    metadata: {labels: {app: temporal}}
+    spec:
+      initContainers:
+        - name: wait-postgres
+          image: {{ .Values.images.postgres }}
+          command: [sh, -c, "until pg_isready -h postgres -U dataflow; do sleep 2; done"]
+      containers:
+        - name: temporal
+          image: {{ .Values.images.temporal }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: DB, value: postgres12}
+            - {name: DB_PORT, value: "5432"}
+            - {name: POSTGRES_USER, value: dataflow}
+            - {name: POSTGRES_PWD, value: dataflow}
+            - {name: POSTGRES_SEEDS, value: postgres}
+            - {name: DBNAME, value: temporal}
+            - {name: VISIBILITY_DBNAME, value: temporal_visibility}
+          ports: [{containerPort: 7233}]
+          readinessProbe: {tcpSocket: {port: 7233}, initialDelaySeconds: 10, periodSeconds: 5}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: temporal}
+spec: {selector: {app: temporal}, ports: [{port: 7233}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: temporal-ui}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: temporal-ui}}
+  template:
+    metadata: {labels: {app: temporal-ui}}
+    spec:
+      containers:
+        - name: temporal-ui
+          image: {{ .Values.images.temporalUI }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: TEMPORAL_ADDRESS, value: temporal:7233}
+            - {name: TEMPORAL_UI_PORT, value: "8080"}
+          ports: [{containerPort: 8080}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: temporal-ui}
+spec:
+  type: NodePort
+  selector: {app: temporal-ui}
+  ports: [{port: 8080, targetPort: 8080, nodePort: {{ .Values.temporalUI.nodePort }}}]
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: temporal-namespaces}
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: namespaces
+          image: {{ .Values.images.temporalAdmin }}
+          imagePullPolicy: IfNotPresent
+          command: [sh, -c]
+          args:
+            - |
+              until temporal operator cluster health --address temporal:7233; do sleep 2; done
+              for ns in test prod; do
+                temporal operator namespace describe --address temporal:7233 --namespace "$ns" >/dev/null 2>&1 || temporal operator namespace create --address temporal:7233 --namespace "$ns" --retention 3d
+              done
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: ollama-data}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: {{ .Values.storage.ollama }}}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: ollama}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: ollama}}
+  template:
+    metadata: {labels: {app: ollama}}
+    spec:
+      containers:
+        - name: ollama
+          image: {{ .Values.images.ollama }}
+          imagePullPolicy: IfNotPresent
+          command: [/bin/sh, -c]
+          args:
+            - |
+              ollama serve & pid=$!
+              until ollama list >/dev/null 2>&1; do sleep 1; done
+              ollama pull "$OLLAMA_MODEL"
+              touch /tmp/model-ready
+              wait $pid
+          env:
+            - {name: OLLAMA_HOST, value: "0.0.0.0:11434"}
+            - {name: OLLAMA_MODEL, value: {{ .Values.ollamaModel | quote }}}
+          ports: [{containerPort: 11434}]
+          readinessProbe: {exec: {command: [test, -f, /tmp/model-ready]}, periodSeconds: 5}
+          volumeMounts: [{name: data, mountPath: /root/.ollama}]
+          resources:
+            requests: {memory: 1Gi}
+            limits: {memory: 4Gi}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: ollama-data}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: ollama}
+spec: {selector: {app: ollama}, ports: [{port: 11434}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: api}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: api}}
+  template:
+    metadata: {labels: {app: api}}
+    spec:
+      initContainers:
+        - name: wait-postgres
+          image: {{ .Values.images.postgres }}
+          command: [sh, -c, "until pg_isready -h postgres -U dataflow -d dataflow; do sleep 2; done"]
+      containers:
+        - name: api
+          image: {{ .Values.images.app }}
+          imagePullPolicy: Never
+          command: [api]
+          env:
+            {{- include "dataflow.appEnv" . | nindent 12 }}
+            - {name: API_PORT, value: "4000"}
+            - {name: TEMPORAL_NAMESPACE, value: default}
+            - {name: TASK_QUEUE, value: dynamic-dag}
+          ports: [{containerPort: 4000}]
+          readinessProbe: {tcpSocket: {port: 4000}, periodSeconds: 5}
+          volumeMounts: [{name: connectors, mountPath: /app/connectors/manifests, readOnly: true}]
+      volumes:
+        - name: connectors
+          hostPath: {path: {{ printf "%s/connectors/manifests" .Values.hostPath | quote }}, type: Directory}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: api}
+spec: {selector: {app: api}, ports: [{port: 4000}]}
+---
+{{- range $env := list "test" "prod" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: activity-worker-{{ $env }}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: activity-worker-{{ $env }}}}
+  template:
+    metadata: {labels: {app: activity-worker-{{ $env }}}}
+    spec:
+      containers:
+        - name: worker
+          image: {{ $.Values.images.app }}
+          imagePullPolicy: Never
+          command: [activity-worker]
+          env:
+            {{- include "dataflow.appEnv" $ | nindent 12 }}
+            - {name: TEMPORAL_NAMESPACE, value: {{ $env }}}
+            - {name: TASK_QUEUE, value: dynamic-activities-{{ $env }}}
+            - {name: WORKER_PRIVATE_KEY_PATH, value: /secrets/worker-keypair.pem}
+          volumeMounts:
+            - {name: secrets, mountPath: /secrets, readOnly: true}
+            - {name: connectors, mountPath: /app/connectors/manifests, readOnly: true}
+      volumes:
+        - name: secrets
+          hostPath: {path: {{ printf "%s/secrets" $.Values.hostPath | quote }}, type: Directory}
+        - name: connectors
+          hostPath: {path: {{ printf "%s/connectors/manifests" $.Values.hostPath | quote }}, type: Directory}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: workflow-worker-{{ $env }}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: workflow-worker-{{ $env }}}}
+  template:
+    metadata: {labels: {app: workflow-worker-{{ $env }}}}
+    spec:
+      containers:
+        - name: worker
+          image: {{ $.Values.images.app }}
+          imagePullPolicy: Never
+          command: [workflow-worker]
+          env:
+            - {name: TEMPORAL_ADDRESS, value: temporal:7233}
+            - {name: TEMPORAL_NAMESPACE, value: {{ $env }}}
+            - {name: TASK_QUEUE, value: dynamic-dag-{{ $env }}}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: web}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: web}}
+  template:
+    metadata: {labels: {app: web}}
+    spec:
+      containers:
+        - name: web
+          image: {{ .Values.images.web }}
+          imagePullPolicy: Never
+          ports: [{containerPort: 80}]
+          readinessProbe: {httpGet: {path: /login, port: 80}, periodSeconds: 5}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: web}
+spec:
+  type: NodePort
+  selector: {app: web}
+  ports: [{port: 80, targetPort: 80, nodePort: {{ .Values.web.nodePort }}}]

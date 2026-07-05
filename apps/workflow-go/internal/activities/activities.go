@@ -74,6 +74,7 @@ type FetchSourceResult struct {
 	HasMore     bool                   `json:"hasMore"`
 	RecordCount int                    `json:"recordCount"`
 	Checkpoint  map[string]interface{} `json:"checkpoint,omitempty"`
+	LagRecords  int64                  `json:"lagRecords,omitempty"`
 }
 
 func (a *Activities) dek(encoded string) ([]byte, error) {
@@ -114,7 +115,7 @@ func (a *Activities) FetchSourcePage(ctx context.Context, p FetchSourceParams) (
 		return FetchSourceResult{}, err
 	}
 	_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "success", time.Since(started), len(result.Records), "")
-	return FetchSourceResult{OutputRef: ref, HasMore: result.HasMore, RecordCount: len(result.Records), Checkpoint: result.NextCursor}, nil
+	return FetchSourceResult{OutputRef: ref, HasMore: result.HasMore, RecordCount: len(result.Records), Checkpoint: result.NextCursor, LagRecords: result.LagRecords}, nil
 }
 
 type CommitCursorParams struct {
@@ -183,16 +184,18 @@ func (a *Activities) CommitDedupeKeys(ctx context.Context, p CommitDedupeParams)
 }
 
 type DispatchParams struct {
-	ActivityType string                 `json:"activityType"`
-	Config       map[string]interface{} `json:"config"`
-	InputRef     *model.DataRef         `json:"inputRef,omitempty"`
-	TenantID     string                 `json:"tenantId"`
-	ExecutionID  string                 `json:"executionId"`
-	NodeID       string                 `json:"nodeId"`
-	EncryptedDEK string                 `json:"encryptedDek,omitempty"`
+	ActivityType    string                 `json:"activityType"`
+	Config          map[string]interface{} `json:"config"`
+	InputRef        *model.DataRef         `json:"inputRef,omitempty"`
+	TenantID        string                 `json:"tenantId"`
+	ExecutionID     string                 `json:"executionId"`
+	NodeID          string                 `json:"nodeId"`
+	PipelineVersion int                    `json:"pipelineVersion,omitempty"`
+	EncryptedDEK    string                 `json:"encryptedDek,omitempty"`
 }
 
 func (a *Activities) DispatchNode(ctx context.Context, p DispatchParams) (model.NodeResult, error) {
+	activity.RecordHeartbeat(ctx)
 	started := time.Now()
 	if err := a.requireEntitlement(ctx, p.TenantID, p.ActivityType, p.Config); err != nil {
 		return model.NodeResult{}, err
@@ -211,7 +214,7 @@ func (a *Activities) DispatchNode(ctx context.Context, p DispatchParams) (model.
 			return model.NodeResult{}, err
 		}
 	}
-	output, meta, err := a.Runtime.Handle(ctx, p.ActivityType, input, p.Config, connectors.HandlerContext{TenantID: p.TenantID, ExecutionID: p.ExecutionID, NodeID: p.NodeID})
+	output, meta, err := a.Runtime.Handle(ctx, p.ActivityType, input, p.Config, connectors.HandlerContext{TenantID: p.TenantID, ExecutionID: p.ExecutionID, NodeID: p.NodeID, PipelineVersion: p.PipelineVersion})
 	if err == nil && p.ActivityType == "transform.dedupe" && p.Config["scope"] == "pipeline" {
 		output, meta, err = a.filterCrossRunDedupe(ctx, output, p, meta)
 	}
@@ -255,7 +258,7 @@ func (a *Activities) requireEntitlement(ctx context.Context, tenantID, activityT
 	if activityType == "transform.dedupe" && stringValue(config["scope"]) == "pipeline" {
 		feature = "statefulProcessing"
 	}
-	for _, advanced := range []string{"sftp.fetch", "sink.sftp", "snowflake.fetch", "sink.snowflake", "iceberg.fetch"} {
+	for _, advanced := range []string{"sftp.fetch", "sink.sftp", "snowflake.fetch", "sink.snowflake", "iceberg.fetch", "sink.iceberg"} {
 		if activityType == advanced {
 			feature = "advancedConnectors"
 		}
@@ -477,5 +480,13 @@ func Register(worker interface {
 	worker.RegisterActivityWithOptions(a.MergeRefs, activity.RegisterOptions{Name: "mergeRefs"})
 	worker.RegisterActivityWithOptions(a.EvalEdgeCondition, activity.RegisterOptions{Name: "evalEdgeCondition"})
 	worker.RegisterActivityWithOptions(a.MarkExecution, activity.RegisterOptions{Name: "markExecution"})
+	worker.RegisterActivityWithOptions(a.SubmitSparkJob, activity.RegisterOptions{Name: "submitSparkJob"})
+	worker.RegisterActivityWithOptions(a.SparkJobStatus, activity.RegisterOptions{Name: "sparkJobStatus"})
+	worker.RegisterActivityWithOptions(a.CancelSparkJob, activity.RegisterOptions{Name: "cancelSparkJob"})
+	worker.RegisterActivityWithOptions(a.CommitSparkJob, activity.RegisterOptions{Name: "commitSparkJob"})
+	worker.RegisterActivityWithOptions(a.DeployFlinkJob, activity.RegisterOptions{Name: "deployFlinkJob"})
+	worker.RegisterActivityWithOptions(a.FlinkJobStatus, activity.RegisterOptions{Name: "flinkJobStatus"})
+	worker.RegisterActivityWithOptions(a.FlinkJobAction, activity.RegisterOptions{Name: "flinkJobAction"})
+	worker.RegisterActivityWithOptions(a.RecordFlinkError, activity.RegisterOptions{Name: "recordFlinkError"})
 	slog.Info("registered Temporal activities")
 }

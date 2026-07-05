@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/tls"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -14,12 +15,12 @@ import (
 )
 
 var paidFeatureKeys = map[string]bool{
-	"advancedConnectors": true, "realtime": true, "statefulProcessing": true,
+	"advancedConnectors": true, "realtime": true, "sparkSql": true, "flinkSql": true, "statefulProcessing": true,
 	"deepObservability": true, "governance": true,
 }
 
 func (s *Server) paidFeatures(r *http.Request) (map[string]bool, error) {
-	features := map[string]bool{"advancedConnectors": false, "realtime": false, "statefulProcessing": false, "deepObservability": false, "governance": s.Config.Edition == "enterprise"}
+	features := map[string]bool{"advancedConnectors": false, "realtime": false, "sparkSql": false, "flinkSql": false, "statefulProcessing": false, "deepObservability": false, "governance": s.Config.Edition == "enterprise"}
 	tenant := tenantFrom(r)
 	rows, err := tenantQueryRows(r.Context(), s.DB, tenant.TenantID, `SELECT feature,enabled FROM tenant_feature_entitlements WHERE tenant_id=$1`, tenant.TenantID)
 	if err != nil {
@@ -275,11 +276,54 @@ func (s *Server) inviteCreate(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) sendInvite(email, token, inviter string) error {
 	link := s.Config.AppURL + "/accept-invite?token=" + urlQueryEscape(token)
 	body := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: You're invited to DataFlow\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n<p>%s invited you to DataFlow.</p><p><a href=\"%s\">Accept invitation</a></p>", s.Config.SMTPFrom, email, inviter, link)
+
+	addr := s.Config.SMTPHost + ":" + s.Config.SMTPPort
+
 	var auth smtp.Auth
 	if s.Config.SMTPUser != "" {
 		auth = smtp.PlainAuth("", s.Config.SMTPUser, s.Config.SMTPPass, s.Config.SMTPHost)
 	}
-	return smtp.SendMail(s.Config.SMTPHost+":"+s.Config.SMTPPort, auth, s.Config.SMTPFrom, []string{email}, []byte(body))
+
+	// Port 465 uses implicit TLS (SMTPS); smtp.SendMail only does STARTTLS so
+	// we must dial TLS first and drive the smtp.Client manually.
+	if s.Config.SMTPPort == "465" {
+		tlsCfg := &tls.Config{ServerName: s.Config.SMTPHost}
+		conn, err := tls.Dial("tcp", addr, tlsCfg)
+		if err != nil {
+			return fmt.Errorf("smtp tls dial: %w", err)
+		}
+		defer conn.Close()
+		client, err := smtp.NewClient(conn, s.Config.SMTPHost)
+		if err != nil {
+			return fmt.Errorf("smtp new client: %w", err)
+		}
+		defer client.Close()
+		if auth != nil {
+			if err = client.Auth(auth); err != nil {
+				return fmt.Errorf("smtp auth: %w", err)
+			}
+		}
+		if err = client.Mail(s.Config.SMTPFrom); err != nil {
+			return fmt.Errorf("smtp MAIL FROM: %w", err)
+		}
+		if err = client.Rcpt(email); err != nil {
+			return fmt.Errorf("smtp RCPT TO: %w", err)
+		}
+		w, err := client.Data()
+		if err != nil {
+			return fmt.Errorf("smtp DATA: %w", err)
+		}
+		if _, err = fmt.Fprint(w, body); err != nil {
+			return fmt.Errorf("smtp write body: %w", err)
+		}
+		if err = w.Close(); err != nil {
+			return fmt.Errorf("smtp close data writer: %w", err)
+		}
+		return client.Quit()
+	}
+
+	// Ports 587 / 25 / 1025 — use STARTTLS via smtp.SendMail.
+	return smtp.SendMail(addr, auth, s.Config.SMTPFrom, []string{email}, []byte(body))
 }
 
 func (s *Server) inviteList(w http.ResponseWriter, r *http.Request) error {

@@ -32,6 +32,24 @@ func (s *Server) registerAnalytics(mux *http.ServeMux) {
 }
 
 func sqlString(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
+
+func analyticsTimeRangeClauses(from, to string) ([]string, error) {
+	start, err := time.Parse(time.RFC3339, from)
+	if err != nil {
+		return nil, fmt.Errorf("timeRange.from must be RFC3339")
+	}
+	end, err := time.Parse(time.RFC3339, to)
+	if err != nil {
+		return nil, fmt.Errorf("timeRange.to must be RFC3339")
+	}
+	if !start.Before(end) {
+		return nil, fmt.Errorf("timeRange.from must be before timeRange.to")
+	}
+	return []string{
+		"created_at >= parseDateTimeBestEffort(" + sqlString(start.UTC().Format(time.RFC3339)) + ")",
+		"created_at < parseDateTimeBestEffort(" + sqlString(end.UTC().Format(time.RFC3339)) + ")",
+	}, nil
+}
 func (s *Server) clickhouseQuery(r *http.Request, query string) ([]map[string]interface{}, error) {
 	endpoint := strings.TrimSuffix(s.Config.ClickHouseURL, "/") + "/?database=" + url.QueryEscape(s.Config.ClickHouseDB) + "&default_format=JSONEachRow"
 	request, err := http.NewRequestWithContext(r.Context(), http.MethodPost, endpoint, strings.NewReader(query))
@@ -64,7 +82,7 @@ func (s *Server) clickhouseQuery(r *http.Request, query string) ([]map[string]in
 
 func (s *Server) analyticsDatasets(w http.ResponseWriter, r *http.Request) error {
 	tenant := tenantFrom(r)
-	rows, err := s.clickhouseQuery(r, fmt.Sprintf(`SELECT collection,count() AS row_count FROM sink_records WHERE tenant_id=%s GROUP BY collection ORDER BY collection`, sqlString(tenant.TenantID)))
+	rows, err := s.clickhouseQuery(r, fmt.Sprintf(`SELECT collection,count() AS row_count FROM sink_records FINAL WHERE tenant_id=%s GROUP BY collection ORDER BY collection`, sqlString(tenant.TenantID)))
 	if err != nil {
 		return &HTTPError{Status: http.StatusBadGateway, Message: "clickhouse error"}
 	}
@@ -111,7 +129,7 @@ func inferSchema(rows []map[string]interface{}) []map[string]string {
 }
 func (s *Server) datasetRecords(r *http.Request, name string) ([]map[string]interface{}, error) {
 	tenant := tenantFrom(r)
-	raw, err := s.clickhouseQuery(r, fmt.Sprintf(`SELECT record FROM sink_records WHERE tenant_id=%s AND collection=%s LIMIT 100`, sqlString(tenant.TenantID), sqlString(name)))
+	raw, err := s.clickhouseQuery(r, fmt.Sprintf(`SELECT record FROM sink_records FINAL WHERE tenant_id=%s AND collection=%s LIMIT 100`, sqlString(tenant.TenantID), sqlString(name)))
 	if err != nil {
 		return nil, err
 	}
@@ -138,11 +156,20 @@ func (s *Server) analyticsSchema(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func jsonField(field string) (string, error) {
+func jsonField(field, kind string) (string, error) {
 	if !analyticsField.MatchString(field) {
 		return "", fmt.Errorf("Invalid column name %q", field)
 	}
-	return "JSONExtractRaw(record," + sqlString(field) + ")", nil
+	switch kind {
+	case "number":
+		return "JSONExtract(record," + sqlString(field) + ",'Float64')", nil
+	case "boolean":
+		return "JSONExtract(record," + sqlString(field) + ",'Bool')", nil
+	case "date":
+		return "parseDateTimeBestEffortOrNull(JSONExtractString(record," + sqlString(field) + "))", nil
+	default:
+		return "JSONExtractString(record," + sqlString(field) + ")", nil
+	}
 }
 func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 	var spec struct {
@@ -154,6 +181,7 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 		}
 		Aggregate *struct{ Field, Fn string }
 		OrderBy   *struct{ Field, Dir string }
+		TimeRange *struct{ From, To string }
 		Limit     int
 	}
 	if !decodeJSON(w, r, &spec) {
@@ -166,15 +194,16 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return &HTTPError{Status: http.StatusBadGateway, Message: "clickhouse error fetching schema"}
 	}
-	schema := map[string]bool{}
+	schema := map[string]string{}
 	for _, item := range inferSchema(records) {
-		schema[item["name"]] = true
+		schema[item["name"]] = item["type"]
 	}
 	field := func(name string) (string, error) {
-		if !schema[name] {
+		kind, ok := schema[name]
+		if !ok {
 			return "", fmt.Errorf("Field %q is not in the dataset schema", name)
 		}
-		return jsonField(name)
+		return jsonField(name, kind)
 	}
 	selects := []string{}
 	for _, name := range spec.Select {
@@ -208,6 +237,13 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 	}
 	tenant := tenantFrom(r)
 	where := []string{"tenant_id=" + sqlString(tenant.TenantID), "collection=" + sqlString(spec.Dataset)}
+	if spec.TimeRange != nil {
+		clauses, err := analyticsTimeRangeClauses(spec.TimeRange.From, spec.TimeRange.To)
+		if err != nil {
+			return badRequest(err.Error())
+		}
+		where = append(where, clauses...)
+	}
 	for _, clause := range spec.Where {
 		if !map[string]bool{"=": true, "!=": true, ">": true, "<": true, ">=": true, "<=": true, "LIKE": true, "IN": true}[clause.Op] {
 			return badRequest("invalid operator")
@@ -218,8 +254,8 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 		}
 		if clause.Op == "IN" {
 			values, ok := clause.Value.([]interface{})
-			if !ok {
-				return badRequest("IN value must be an array")
+			if !ok || len(values) == 0 {
+				return badRequest("IN value must be a non-empty array")
 			}
 			parts := []string{}
 			for _, value := range values {
@@ -230,7 +266,7 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 			where = append(where, expr+" "+clause.Op+" "+sqlString(fmt.Sprint(clause.Value)))
 		}
 	}
-	query := `SELECT ` + strings.Join(selects, ",") + ` FROM sink_records WHERE ` + strings.Join(where, " AND ")
+	query := `SELECT ` + strings.Join(selects, ",") + ` FROM sink_records FINAL WHERE ` + strings.Join(where, " AND ")
 	if len(spec.GroupBy) > 0 {
 		parts := []string{}
 		for _, name := range spec.GroupBy {
@@ -340,6 +376,13 @@ func (s *Server) dashboardUpdate(w http.ResponseWriter, r *http.Request) error {
 	}
 	if body.Name == nil && body.Definition == nil {
 		return badRequest("name or definition is required")
+	}
+	if body.Name != nil {
+		trimmed := strings.TrimSpace(*body.Name)
+		if trimmed == "" {
+			return badRequest("name is required")
+		}
+		body.Name = &trimmed
 	}
 	tenant := tenantFrom(r)
 	var row map[string]interface{}

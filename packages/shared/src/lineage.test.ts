@@ -20,6 +20,12 @@ assert.equal(bindings[1].asset.urn, 'postgres://warehouse/bronze.orders');
 assert.equal(bindings[1].asset.layer, 'bronze');
 assert.equal(bindings[2].asset.urn, 's3://lake/bronze/orders.jsonl');
 assert(!bindings[0].asset.urn.includes('secret'));
+const icebergBinding = deriveAssetBindings({
+  ...base,
+  nodes: [{ id: 'lake', type: 'sink', activityType: 'sink.iceberg', config: { connectionId: 'catalog', namespace: 'analytics', table: 'orders' } }],
+})[0];
+assert.equal(icebergBinding.direction, 'output');
+assert.equal(icebergBinding.asset.urn, 'iceberg://catalog/analytics.orders');
 assert.deepEqual(successfulOutputBindings(def, [
   { nodeId: 'sink', status: 'success', recordCount: 12 },
   { nodeId: 'archive', status: 'failed' },

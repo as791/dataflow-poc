@@ -29,9 +29,13 @@ type SourceResult struct {
 	Records    []interface{}
 	NextCursor map[string]interface{}
 	HasMore    bool
+	LagRecords int64
 }
 type Source func(context.Context, SourceParams) (SourceResult, error)
-type HandlerContext struct{ TenantID, ExecutionID, NodeID string }
+type HandlerContext struct {
+	TenantID, ExecutionID, NodeID string
+	PipelineVersion               int
+}
 type Handler func(context.Context, interface{}, map[string]interface{}, HandlerContext) (interface{}, map[string]interface{}, error)
 
 type Runtime struct {

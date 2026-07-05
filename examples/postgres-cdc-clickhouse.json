@@ -1,0 +1,32 @@
+{
+  "id": "00000000-0000-0000-0000-000000000001",
+  "version": 1,
+  "name": "PostgreSQL CDC to ClickHouse",
+  "tenantId": "replace-with-tenant-id",
+  "trigger": { "type": "manual" },
+  "execution": { "engine": "stream-direct" },
+  "nodes": [
+    {
+      "id": "cdc-topic",
+      "type": "source",
+      "activityType": "kafka.fetch",
+      "config": { "connectionId": "redpanda-connection", "topic": "debezium.public.orders", "startPosition": "earliest", "pageSize": 1000 }
+    },
+    {
+      "id": "after-image",
+      "type": "transform",
+      "activityType": "transform.map",
+      "config": { "expression": "{id: r.payload.after.id, status: r.payload.after.status, updated_at: r.payload.after.updated_at}" }
+    },
+    {
+      "id": "clickhouse",
+      "type": "sink",
+      "activityType": "sink.clickhouse",
+      "config": { "connectionId": "clickhouse-connection", "table": "analytics.orders" }
+    }
+  ],
+  "edges": [
+    { "id": "cdc-map", "source": "cdc-topic", "target": "after-image" },
+    { "id": "map-clickhouse", "source": "after-image", "target": "clickhouse" }
+  ]
+}

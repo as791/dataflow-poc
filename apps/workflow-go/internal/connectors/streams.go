@@ -90,6 +90,16 @@ func (r *Runtime) kafkaFetch(ctx context.Context, p SourceParams) (SourceResult,
 	records := []interface{}{}
 	next := map[string]interface{}{"topic": topic, "offsets": map[string]interface{}{}}
 	nextOffsets := next["offsets"].(map[string]interface{})
+	var lagRecords int64
+	fetches.EachPartition(func(partition kgo.FetchTopicPartition) {
+		nextOffset := partition.HighWatermark
+		if len(partition.Records) > 0 {
+			nextOffset = partition.Records[len(partition.Records)-1].Offset + 1
+		}
+		if partition.HighWatermark > nextOffset {
+			lagRecords += partition.HighWatermark - nextOffset
+		}
+	})
 	fetches.EachRecord(func(record *kgo.Record) {
 		var value interface{}
 		if json.Unmarshal(record.Value, &value) != nil {
@@ -103,7 +113,7 @@ func (r *Runtime) kafkaFetch(ctx context.Context, p SourceParams) (SourceResult,
 		records = append(records, value)
 		nextOffsets[strconv.Itoa(int(record.Partition))] = strconv.FormatInt(record.Offset, 10)
 	})
-	return SourceResult{Records: records, NextCursor: next, HasMore: len(records) >= page}, nil
+	return SourceResult{Records: records, NextCursor: next, HasMore: len(records) >= page, LagRecords: lagRecords}, nil
 }
 func (r *Runtime) kafkaSink(ctx context.Context, input interface{}, cfg map[string]interface{}, _ HandlerContext) (interface{}, map[string]interface{}, error) {
 	topic := stringValue(cfg["topic"])

@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/iceberg-go"
 	"github.com/apache/iceberg-go/catalog"
 	icerest "github.com/apache/iceberg-go/catalog/rest"
@@ -33,6 +35,7 @@ func (r *Runtime) registerFiles() {
 	r.Sources["sftp.fetch"] = r.sftpFetch
 	r.Handlers["sink.sftp"] = r.sftpSink
 	r.Sources["iceberg.fetch"] = r.icebergFetch
+	r.Handlers["sink.iceberg"] = r.icebergSink
 }
 func (r *Runtime) s3Client(ctx context.Context, id string) (*s3.Client, error) {
 	row, err := r.credential(ctx, id)
@@ -195,17 +198,17 @@ func (r *Runtime) sftpSink(ctx context.Context, input interface{}, cfg map[strin
 	return nil, nil, err
 }
 
-func (r *Runtime) icebergFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
-	row, err := r.credential(ctx, stringValue(p.Config["connectionId"]))
+func (r *Runtime) icebergTable(ctx context.Context, config map[string]interface{}) (*icetable.Table, error) {
+	row, err := r.credential(ctx, stringValue(config["connectionId"]))
 	if err != nil {
-		return SourceResult{}, err
+		return nil, err
 	}
 	cfg, _ := row["extra"].(map[string]interface{})
 	secret, _ := row["secret_value"].(map[string]interface{})
-	namespace := strings.Split(stringValue(p.Config["namespace"]), ".")
-	tableName := stringValue(p.Config["table"])
+	namespace := strings.Split(stringValue(config["namespace"]), ".")
+	tableName := stringValue(config["table"])
 	if len(namespace) == 0 || namespace[0] == "" || tableName == "" {
-		return SourceResult{}, fmt.Errorf("iceberg.fetch: namespace and table are required")
+		return nil, fmt.Errorf("iceberg: namespace and table are required")
 	}
 	properties := iceberg.Properties{}
 	if value := stringValue(secret["accessKeyId"]); value != "" {
@@ -229,9 +232,20 @@ func (r *Runtime) icebergFetch(ctx context.Context, p SourceParams) (SourceResul
 	}
 	iceCatalog, err := icerest.NewCatalog(ctx, "dataflow", stringValue(cfg["url"]), options...)
 	if err != nil {
-		return SourceResult{}, err
+		return nil, err
 	}
-	loaded, err := iceCatalog.LoadTable(ctx, catalog.ToIdentifier(append(namespace, tableName)...))
+	return iceCatalog.LoadTable(ctx, catalog.ToIdentifier(append(namespace, tableName)...))
+}
+
+func (r *Runtime) IcebergCurrentSnapshot(ctx context.Context, config map[string]interface{}) (string, error) {
+	tbl, err := r.icebergTable(ctx, config)
+	if err != nil { return "", err }
+	if snapshot := tbl.CurrentSnapshot(); snapshot != nil { return strconv.FormatInt(snapshot.SnapshotID, 10), nil }
+	return "", nil
+}
+
+func (r *Runtime) icebergFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
+	loaded, err := r.icebergTable(ctx, p.Config)
 	if err != nil {
 		return SourceResult{}, err
 	}
@@ -297,4 +311,103 @@ func (r *Runtime) icebergFetch(ctx context.Context, p SourceParams) (SourceResul
 		next = map[string]interface{}{"snapshotId": p.Cursor["snapshotId"], "pendingSnapshotId": snapshotID, "rowOffset": start + len(records), "totalRecords": totalRecords}
 	}
 	return SourceResult{Records: records, NextCursor: next, HasMore: hasMore}, nil
+}
+
+const (
+	icebergExecutionID     = "dataflow.execution-id"
+	icebergNodeID          = "dataflow.node-id"
+	icebergPipelineVersion = "dataflow.pipeline-version"
+	icebergRecordCount     = "dataflow.record-count"
+)
+
+func committedIcebergSnapshot(tbl *icetable.Table, executionID, nodeID string) (*icetable.Snapshot, bool) {
+	return findCommittedIcebergSnapshot(tbl.Metadata().Snapshots(), executionID, nodeID)
+}
+
+func findCommittedIcebergSnapshot(snapshots []icetable.Snapshot, executionID, nodeID string) (*icetable.Snapshot, bool) {
+	for i := len(snapshots) - 1; i >= 0; i-- {
+		snapshot := &snapshots[i]
+		if snapshot.Summary != nil && snapshot.Summary.Properties[icebergExecutionID] == executionID && snapshot.Summary.Properties[icebergNodeID] == nodeID {
+			return snapshot, true
+		}
+	}
+	return nil, false
+}
+
+func icebergArrowReader(rows []interface{}, schema *iceberg.Schema) (array.RecordReader, error) {
+	arrowSchema, err := icetable.SchemaToArrowSchema(schema, nil, true, false)
+	if err != nil {
+		return nil, err
+	}
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer builder.Release()
+	fields := make(map[string]bool, arrowSchema.NumFields())
+	for _, field := range arrowSchema.Fields() {
+		fields[field.Name] = field.Nullable
+	}
+	for rowIndex, value := range rows {
+		row, ok := value.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("iceberg row %d must be an object", rowIndex)
+		}
+		for key := range row {
+			if _, ok := fields[key]; !ok {
+				return nil, fmt.Errorf("iceberg row %d: unknown field %q", rowIndex, key)
+			}
+		}
+		for name, nullable := range fields {
+			value, ok := row[name]
+			if (!ok || value == nil) && !nullable {
+				return nil, fmt.Errorf("iceberg row %d: required field %q is missing", rowIndex, name)
+			}
+		}
+		encoded, err := json.Marshal(row)
+		if err != nil {
+			return nil, err
+		}
+		if err := builder.UnmarshalJSON(encoded); err != nil {
+			return nil, fmt.Errorf("iceberg row %d: %w", rowIndex, err)
+		}
+	}
+	record := builder.NewRecordBatch()
+	defer record.Release()
+	return array.NewRecordReader(arrowSchema, []arrow.RecordBatch{record})
+}
+
+func (r *Runtime) icebergSink(ctx context.Context, input interface{}, cfg map[string]interface{}, handler HandlerContext) (interface{}, map[string]interface{}, error) {
+	rows, err := records(input)
+	if err != nil {
+		return nil, nil, err
+	}
+	tbl, err := r.icebergTable(ctx, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	return appendIcebergTable(ctx, tbl, rows, handler)
+}
+
+func appendIcebergTable(ctx context.Context, tbl *icetable.Table, rows []interface{}, handler HandlerContext) (interface{}, map[string]interface{}, error) {
+	if snapshot, ok := committedIcebergSnapshot(tbl, handler.ExecutionID, handler.NodeID); ok {
+		count, _ := strconv.Atoi(snapshot.Summary.Properties[icebergRecordCount])
+		return nil, map[string]interface{}{"snapshotId": strconv.FormatInt(snapshot.SnapshotID, 10), "recordCount": count, "idempotent": true}, nil
+	}
+	reader, err := icebergArrowReader(rows, tbl.Schema())
+	if err != nil {
+		return nil, nil, err
+	}
+	defer reader.Release()
+	updated, err := tbl.Append(ctx, reader, iceberg.Properties{
+		icebergExecutionID:     handler.ExecutionID,
+		icebergNodeID:          handler.NodeID,
+		icebergPipelineVersion: strconv.Itoa(handler.PipelineVersion),
+		icebergRecordCount:     strconv.Itoa(len(rows)),
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	snapshot := updated.CurrentSnapshot()
+	if snapshot == nil {
+		return nil, nil, fmt.Errorf("iceberg append committed without a snapshot")
+	}
+	return nil, map[string]interface{}{"snapshotId": strconv.FormatInt(snapshot.SnapshotID, 10), "recordCount": len(rows)}, nil
 }

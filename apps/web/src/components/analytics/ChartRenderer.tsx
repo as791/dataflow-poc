@@ -10,14 +10,14 @@ const COLORS = [
 ];
 
 const CHART_STYLE = { background: 'transparent' };
-const AXIS_STYLE = { fill: 'rgba(255,255,255,0.5)', fontSize: 11 };
-const GRID_STYLE = { stroke: 'rgba(255,255,255,0.08)' };
+const AXIS_STYLE = { fill: 'var(--chart-muted)', fontSize: 11 };
+const GRID_STYLE = { stroke: 'var(--chart-grid)' };
 const TOOLTIP_STYLE = {
-  contentStyle: { background: 'rgba(15,12,41,0.9)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8 },
-  labelStyle: { color: 'rgba(255,255,255,0.7)' },
+  contentStyle: { background: 'var(--chart-tooltip-bg)', border: '1px solid var(--chart-grid)', borderRadius: 8 },
+  labelStyle: { color: 'var(--chart-text)' },
   itemStyle: { color: '#818cf8' },
 };
-const LEGEND_STYLE = { wrapperStyle: { fontSize: 11, color: 'rgba(255,255,255,0.5)' } };
+const LEGEND_STYLE = { wrapperStyle: { fontSize: 11, color: 'var(--chart-muted)' } };
 
 export function ChartRenderer({ widget }: { widget: WidgetDef }) {
   const data = widget.data ?? [];
@@ -26,7 +26,7 @@ export function ChartRenderer({ widget }: { widget: WidgetDef }) {
 
   if (data.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-white/30 text-xs">No data</div>
+      <div className="flex items-center justify-center h-full text-gray-400 dark:text-white/30 text-xs">No data</div>
     );
   }
 
@@ -34,11 +34,11 @@ export function ChartRenderer({ widget }: { widget: WidgetDef }) {
     const cols = Object.keys(data[0] ?? {});
     return (
       <div className="overflow-auto h-full">
-        <table className="w-full text-xs text-white/80">
+        <table className="w-full text-xs text-gray-700 dark:text-white/80">
           <thead>
             <tr>
               {cols.map(c => (
-                <th key={c} className="text-left py-1 px-2 text-white/50 border-b border-white/10 sticky top-0 bg-white/5">
+                <th key={c} className="text-left py-1 px-2 text-gray-500 dark:text-white/50 border-b border-gray-200 dark:border-white/10 sticky top-0 bg-gray-50 dark:bg-white/5">
                   {c}
                 </th>
               ))}
@@ -46,7 +46,7 @@ export function ChartRenderer({ widget }: { widget: WidgetDef }) {
           </thead>
           <tbody>
             {data.map((row, i) => (
-              <tr key={i} className="border-b border-white/5 hover:bg-white/5">
+              <tr key={i} className="border-b border-gray-100 hover:bg-gray-50 dark:border-white/5 dark:hover:bg-white/5">
                 {cols.map(c => (
                   <td key={c} className="py-1 px-2 truncate max-w-[120px]">{String(row[c] ?? '')}</td>
                 ))}

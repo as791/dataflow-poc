@@ -348,7 +348,7 @@ func (s *Server) executionRetry(w http.ResponseWriter, r *http.Request) error {
 
 func (s *Server) executionSignal(w http.ResponseWriter, r *http.Request) error {
 	action := r.PathValue("action")
-	if !map[string]bool{"pause": true, "resume": true, "cancel": true}[action] {
+	if !map[string]bool{"pause": true, "resume": true, "cancel": true, "rollback": true}[action] {
 		return notFound("not found")
 	}
 	environment, workflowID, runID, _, _, err := s.executionIdentity(r)

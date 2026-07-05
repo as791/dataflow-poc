@@ -9,5 +9,8 @@ swap:
 
 runcmd:
   - curl -fsSL https://get.docker.com | sh
+  - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/arm64/kubectl" && chmod +x kubectl && mv kubectl /usr/local/bin/
+  - curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-arm64 && chmod +x ./kind && mv ./kind /usr/local/bin/kind
+  - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
   - git clone --branch ${branch} ${repo} /opt/dataflow
   - cd /opt/dataflow && ./scripts/bootstrap.sh > /var/log/dataflow-bootstrap.log 2>&1
