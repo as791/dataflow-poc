@@ -164,7 +164,10 @@ func (s *Server) connectorCreate(w http.ResponseWriter, r *http.Request) error {
 		return tx.QueryRow(r.Context(), `INSERT INTO connector_instances (tenant_id,user_id,kind,provider,provider_account_email,secret,extra) VALUES ($1,$2,'credential',$3,$4,$5,$6) RETURNING id`, tenant.TenantID, tenant.UserID, body.Provider, body.Name, encrypted, body.Config).Scan(&id)
 	})
 	if err != nil {
-		return err
+		if strings.Contains(err.Error(), "duplicate key value") {
+			return badRequest("A connector with this name already exists")
+		}
+		return fmt.Errorf("failed to insert connector: %w", err)
 	}
 	s.audit(r.Context(), tenant, "connector.created", id, map[string]string{"provider": body.Provider, "kind": "credential"}, r)
 	jsonResponse(w, http.StatusOK, map[string]string{"id": id})

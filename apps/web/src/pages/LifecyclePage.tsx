@@ -69,9 +69,18 @@ function BackfillPanel({ pipeline, close }: { pipeline: Pipeline; close: () => v
     } catch (e: any) { setError(e.message ?? 'Failed to load backfills'); }
   }, [pipeline.id]);
   useEffect(() => {
-    loadJobs();
-    const timer = setInterval(loadJobs, 5000);
-    return () => clearInterval(timer);
+    let mounted = true;
+    const loadJobsIfMounted = async () => {
+      if (mounted) {
+        await loadJobs();
+      }
+    };
+    loadJobsIfMounted();
+    const timer = setInterval(loadJobsIfMounted, 5000);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
   }, [loadJobs]);
 
   const body = () => ({

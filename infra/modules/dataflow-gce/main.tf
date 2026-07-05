@@ -17,7 +17,7 @@ resource "google_compute_firewall" "dataflow_sg" {
 
   allow {
     protocol = "tcp"
-    ports    = ["22", "3002", "8080", "8082", "8084-8088"]
+    ports    = ["22", "80", "443", "3002", "8080", "8082", "8084-8088"]
   }
 
   source_ranges = ["0.0.0.0/0"]
@@ -28,6 +28,7 @@ resource "google_compute_instance" "this" {
   name         = var.name
   machine_type = var.instance_type
   zone         = var.zone
+  allow_stopping_for_update = true
 
   tags = ["${var.name}"]
 
@@ -44,6 +45,10 @@ resource "google_compute_instance" "this" {
     access_config {
       # Ephemeral public IP
     }
+  }
+
+  service_account {
+    scopes = ["cloud-platform"]
   }
 
   metadata = {

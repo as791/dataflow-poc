@@ -22,3 +22,5 @@ graphify-out/
 .terraform/
 *.tfstate*
 .terraform.lock.hcl
+*.tfvars
+*.tfvars.json
