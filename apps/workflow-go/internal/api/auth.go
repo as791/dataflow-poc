@@ -83,14 +83,14 @@ func (s *Server) protected(next http.Handler) http.Handler {
 		if err != nil {
 			var clientErr *HTTPError
 			if errors.As(err, &clientErr) {
-				jsonError(w, clientErr.Status, clientErr.Message)
+				jsonError(w, clientErr.Status, clientErr.Code, clientErr.Message, clientErr.Details)
 			} else {
-				jsonError(w, http.StatusUnauthorized, "invalid token")
+				jsonError(w, http.StatusUnauthorized, ErrUnauthorized, "invalid token", nil)
 			}
 			return
 		}
 		if !tenant.EmailVerified {
-			jsonError(w, http.StatusForbidden, "email not verified")
+			jsonError(w, http.StatusForbidden, ErrForbidden, "email not verified", nil)
 			return
 		}
 		next.ServeHTTP(w, withTenant(r, tenant))
@@ -100,7 +100,7 @@ func (s *Server) protected(next http.Handler) http.Handler {
 func owner(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if tenantFrom(r).Role != "owner" {
-			jsonError(w, http.StatusForbidden, "owner role required")
+			jsonError(w, http.StatusForbidden, ErrForbidden, "owner role required", nil)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -121,7 +121,7 @@ func (s *Server) pipelineAccess(minimum string, next http.Handler) http.Handler 
         LEFT JOIN pipeline_access pa ON pa.pipeline_id=p.id AND pa.user_id=$2
         WHERE p.id=$1 AND p.tenant_id=$3 LIMIT 1`, rowID, tenant.UserID, tenant.TenantID).Scan(&createdBy, &role)
 		if err != nil {
-			jsonError(w, http.StatusNotFound, "not found")
+			jsonError(w, http.StatusNotFound, ErrNotFound, "not found", nil)
 			return
 		}
 		if createdBy != nil && *createdBy == tenant.UserID {
@@ -129,14 +129,14 @@ func (s *Server) pipelineAccess(minimum string, next http.Handler) http.Handler 
 			return
 		}
 		if role == nil {
-			jsonError(w, http.StatusNotFound, "not found")
+			jsonError(w, http.StatusNotFound, ErrNotFound, "not found", nil)
 			return
 		}
 		if rank[*role] >= rank[minimum] {
 			next.ServeHTTP(w, r)
 			return
 		}
-		jsonError(w, http.StatusForbidden, "pipeline access requires "+minimum+" role")
+		jsonError(w, http.StatusForbidden, ErrForbidden, "pipeline access requires "+minimum+" role", nil)
 	})
 }
 

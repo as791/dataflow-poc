@@ -11,6 +11,9 @@ stringData:
   googleClientSecret: {{ default "" .Values.secrets.googleClientSecret | quote }}
   azureClientId: {{ default "" .Values.secrets.azureClientId | quote }}
   azureClientSecret: {{ default "" .Values.secrets.azureClientSecret | quote }}
+  smtpFrom: {{ default "" .Values.secrets.smtpFrom | quote }}
+  smtpUser: {{ default "" .Values.secrets.smtpUser | quote }}
+  smtpPass: {{ default "" .Values.secrets.smtpPass | quote }}
   appUrl: {{ default "http://localhost:3002" .Values.secrets.appUrl | quote }}
   databaseUrl: {{ default "postgres://dataflow:dataflow@postgres:5432/dataflow?sslmode=disable" .Values.secrets.databaseUrl | quote }}
   appDatabaseUrl: {{ default "postgres://dataflow_app:dataflow_app@postgres:5432/dataflow?sslmode=disable" .Values.secrets.appDatabaseUrl | quote }}

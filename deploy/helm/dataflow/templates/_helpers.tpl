@@ -21,9 +21,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 - name: CLICKHOUSE_DB
   value: dataflow
 - name: SMTP_HOST
-  value: email-smtp.us-east-1.amazonaws.com
+  value: {{ .Values.smtp.host | quote }}
 - name: SMTP_PORT
-  value: "465"
+  value: {{ .Values.smtp.port | quote }}
 - name: SMTP_FROM
   valueFrom: {secretKeyRef: {name: dataflow-secrets, key: smtpFrom, optional: true}}
 - name: SMTP_USER
@@ -31,7 +31,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 - name: SMTP_PASS
   valueFrom: {secretKeyRef: {name: dataflow-secrets, key: smtpPass, optional: true}}
 - name: APP_URL
-  value: http://localhost:3002
+  valueFrom: {secretKeyRef: {name: dataflow-secrets, key: appUrl}}
 - name: JWT_ACCESS_SECRET
   valueFrom: {secretKeyRef: {name: dataflow-secrets, key: jwt}}
 - name: OAUTH_TOKEN_ENCRYPTION_KEY
