@@ -65,11 +65,11 @@ func (s *Server) executionList(w http.ResponseWriter, r *http.Request) error {
 	if cursor := q.Get("cursor"); cursor != "" {
 		decoded, err := base64.RawURLEncoding.DecodeString(cursor)
 		if err != nil {
-			return badRequest("invalid execution cursor")
+			return badRequest(ErrInvalidRequest, "invalid execution cursor")
 		}
 		var value struct{ StartedAt, ID string }
 		if json.Unmarshal(decoded, &value) != nil || value.StartedAt == "" || value.ID == "" {
-			return badRequest("invalid execution cursor")
+			return badRequest(ErrInvalidRequest, "invalid execution cursor")
 		}
 		args = append(args, value.StartedAt, value.ID)
 		where = append(where, fmt.Sprintf("(e.started_at,e.id)<($%d::timestamptz,$%d)", len(args)-1, len(args)))
@@ -173,7 +173,7 @@ func (s *Server) executionLogs(w http.ResponseWriter, r *http.Request) error {
 		level = "all"
 	}
 	if level != "all" && level != "info" && level != "error" {
-		return badRequest("level must be all, info, or error")
+		return badRequest(ErrInvalidRequest, "level must be all, info, or error")
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit < 1 {
@@ -266,7 +266,7 @@ func (s *Server) executionGet(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if response == nil {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	jsonResponse(w, http.StatusOK, response)
 	return nil
@@ -292,7 +292,7 @@ func (s *Server) executionIdentity(r *http.Request) (environment, workflowID, ru
 func (s *Server) executionStatus(w http.ResponseWriter, r *http.Request) error {
 	environment, workflowID, runID, phase, nodeRuns, err := s.executionIdentity(r)
 	if err != nil {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	phaseString := stringValue(phase)
 	if map[string]bool{"completed": true, "failed": true, "cancelled": true}[phaseString] {
@@ -319,7 +319,7 @@ func (s *Server) executionRetry(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if len(rows) == 0 {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	previous := rows[0]
 	if previous["trigger_type"] == "backfill" {
@@ -349,11 +349,11 @@ func (s *Server) executionRetry(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) executionSignal(w http.ResponseWriter, r *http.Request) error {
 	action := r.PathValue("action")
 	if !map[string]bool{"pause": true, "resume": true, "cancel": true, "rollback": true}[action] {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	environment, workflowID, runID, _, _, err := s.executionIdentity(r)
 	if err != nil {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	if err = s.Temporal[environment].SignalWorkflow(r.Context(), workflowID, runID, action, nil); err != nil {
 		return err
@@ -365,7 +365,7 @@ func (s *Server) executionSignal(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) executionTrace(w http.ResponseWriter, r *http.Request) error {
 	environment, workflowID, runID, _, _, err := s.executionIdentity(r)
 	if err != nil {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	iterator := s.Temporal[environment].GetWorkflowHistory(r.Context(), workflowID, runID, false, 0)
 	events := []map[string]interface{}{}

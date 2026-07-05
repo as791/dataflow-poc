@@ -29,7 +29,7 @@ func (s *Server) aiGenerate(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	if strings.TrimSpace(body.Prompt) == "" {
-		return badRequest("prompt required")
+		return badRequest(ErrInvalidRequest, "prompt required")
 	}
 	result, err := s.buildPipeline(r, body.Prompt)
 	if err != nil {
@@ -47,7 +47,7 @@ func (s *Server) aiRefine(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	if strings.TrimSpace(body.Prompt) == "" {
-		return badRequest("prompt required")
+		return badRequest(ErrInvalidRequest, "prompt required")
 	}
 	prompt := body.Prompt
 	if body.Definition != nil {
