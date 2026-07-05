@@ -1,4 +1,5 @@
 #cloud-config
+# Trigger recreation for HTTPS
 package_update: true
 packages: [git, nodejs]
 
