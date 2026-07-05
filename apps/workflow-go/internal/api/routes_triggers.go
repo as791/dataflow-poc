@@ -42,14 +42,14 @@ func (s *Server) serviceOpenLineage(w http.ResponseWriter, r *http.Request) erro
 		environment = "prod"
 	}
 	if environment != "test" && environment != "prod" {
-		return badRequest("environment must be test or prod")
+		return badRequest(ErrInvalidRequest, "environment must be test or prod")
 	}
 	var event map[string]interface{}
 	if !decodeJSON(w, r, &event) {
 		return nil
 	}
 	if err := s.storeOpenLineage(r, tenantID, environment, event); err != nil {
-		return badRequest(err.Error())
+		return badRequest(ErrInvalidRequest, err.Error())
 	}
 	jsonResponse(w, http.StatusCreated, map[string]bool{"ok": true})
 	return nil
@@ -77,7 +77,7 @@ func (s *Server) webhookTrigger(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if len(values) == 0 {
-		return notFound("no active pipeline on this hook")
+		return notFound(ErrNotFound, "no active pipeline on this hook")
 	}
 	row := values[0]
 	body := map[string]interface{}{}

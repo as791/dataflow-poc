@@ -61,13 +61,13 @@ func (s *Server) pipelineCreate(w http.ResponseWriter, r *http.Request) error {
 	}
 	id, err := pipelineID(def.ID)
 	if err != nil {
-		return badRequest(err.Error())
+		return badRequest(ErrInvalidRequest, err.Error())
 	}
 	tenant := tenantFrom(r)
 	def.ID = id
 	def.TenantID = tenant.TenantID
 	if err := validatePipeline(def); err != nil {
-		return badRequest(err.Error())
+		return badRequest(ErrInvalidRequest, err.Error())
 	}
 	if err := s.enforcePipelineFeatures(r, def); err != nil {
 		return err
@@ -108,7 +108,7 @@ func (s *Server) pipelineActivate(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	if row == nil {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	if err := s.enforcePipelineFeatures(r, def); err != nil {
 		return err
@@ -142,7 +142,7 @@ func (s *Server) pipelineRun(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if row == nil {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	if err := s.enforcePipelineFeatures(r, def); err != nil {
 		return err
@@ -183,7 +183,7 @@ func (s *Server) pipelineGet(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if row == nil {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	jsonResponse(w, http.StatusOK, row)
 	return nil
@@ -349,7 +349,7 @@ func (s *Server) pipelinePromote(w http.ResponseWriter, r *http.Request, allowBr
 		return err
 	}
 	if row == nil {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	if err = s.enforcePipelineFeatures(r, def); err != nil {
 		return err
@@ -376,14 +376,14 @@ func (s *Server) pipelineStage(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	if body.To != "testing" && body.To != "production" {
-		return badRequest(`body.to must be "testing" or "production"`)
+		return badRequest(ErrInvalidRequest, `body.to must be "testing" or "production"`)
 	}
 	row, _, err := s.loadPipeline(r, r.PathValue("rowId"))
 	if err != nil {
 		return err
 	}
 	if row == nil {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	from := deriveStage(stringValue(row["status"]), stringValue(row["environment"]))
 	if from == "draft" && body.To == "testing" {
@@ -416,7 +416,7 @@ func (s *Server) backfillPlanRoute(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	if err = validateBackfillSources(def); err != nil {
-		return badRequest(err.Error())
+		return badRequest(ErrInvalidRequest, err.Error())
 	}
 	body := map[string]interface{}{}
 	if !decodeJSON(w, r, &body) {
@@ -424,7 +424,7 @@ func (s *Server) backfillPlanRoute(w http.ResponseWriter, r *http.Request) error
 	}
 	plan, err := planBackfill(body)
 	if err != nil {
-		return badRequest(err.Error())
+		return badRequest(ErrInvalidRequest, err.Error())
 	}
 	jsonResponse(w, http.StatusOK, plan)
 	return nil
@@ -436,17 +436,17 @@ func (s *Server) backfillCreate(w http.ResponseWriter, r *http.Request) error {
 	}
 	plan, err := planBackfill(body)
 	if err != nil {
-		return badRequest(err.Error())
+		return badRequest(ErrInvalidRequest, err.Error())
 	}
 	row, def, err := s.loadPipeline(r, r.PathValue("rowId"))
 	if err != nil {
 		return err
 	}
 	if row == nil {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	if err = validateBackfillSources(def); err != nil {
-		return badRequest(err.Error())
+		return badRequest(ErrInvalidRequest, err.Error())
 	}
 	tenant := tenantFrom(r)
 	var jobID, status string
@@ -495,7 +495,7 @@ func (s *Server) backfillCancel(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if !changed {
-		return notFound("not found or already terminal")
+		return notFound(ErrNotFound, "not found or already terminal")
 	}
 	jsonResponse(w, http.StatusOK, map[string]bool{"ok": true})
 	return nil
@@ -536,13 +536,13 @@ func (s *Server) pipelineAccessGrant(w http.ResponseWriter, r *http.Request) err
 		return nil
 	}
 	if body.UserID == "" || !map[string]bool{"viewer": true, "editor": true, "admin": true}[body.Role] {
-		return badRequest("userId and role (viewer|editor|admin) required")
+		return badRequest(ErrInvalidRequest, "userId and role (viewer|editor|admin) required")
 	}
 	tenant := tenantFrom(r)
 	err := s.DB.TenantTx(r.Context(), tenant.TenantID, func(tx pgx.Tx) error {
 		var one int
 		if err := tx.QueryRow(r.Context(), `SELECT 1 FROM users WHERE id=$1 AND tenant_id=$2`, body.UserID, tenant.TenantID).Scan(&one); err != nil {
-			return notFound("user not found in tenant")
+			return notFound(ErrNotFound, "user not found in tenant")
 		}
 		_, err := tx.Exec(r.Context(), `INSERT INTO pipeline_access (pipeline_id,user_id,role,granted_by) VALUES ($1,$2,$3,$4) ON CONFLICT(pipeline_id,user_id) DO UPDATE SET role=EXCLUDED.role,granted_by=EXCLUDED.granted_by`, r.PathValue("rowId"), body.UserID, body.Role, tenant.UserID)
 		return err
@@ -597,7 +597,7 @@ func (s *Server) openLineageIngest(w http.ResponseWriter, r *http.Request) error
 		environment = "prod"
 	}
 	if environment != "test" && environment != "prod" {
-		return badRequest("environment must be test or prod")
+		return badRequest(ErrInvalidRequest, "environment must be test or prod")
 	}
 	var event map[string]interface{}
 	if !decodeJSON(w, r, &event) {
@@ -613,7 +613,7 @@ func (s *Server) openLineageIngest(w http.ResponseWriter, r *http.Request) error
 		return err
 	})
 	if err != nil {
-		return badRequest(err.Error())
+		return badRequest(ErrInvalidRequest, err.Error())
 	}
 	jsonResponse(w, http.StatusCreated, map[string]bool{"ok": true})
 	return nil
@@ -622,7 +622,7 @@ func (s *Server) openLineageIngest(w http.ResponseWriter, r *http.Request) error
 func (s *Server) lineageChanges(w http.ResponseWriter, r *http.Request) error {
 	environment := r.URL.Query().Get("environment")
 	if environment != "" && environment != "test" && environment != "prod" {
-		return badRequest("environment must be test or prod")
+		return badRequest(ErrInvalidRequest, "environment must be test or prod")
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit < 1 {
@@ -657,7 +657,7 @@ func (s *Server) lineageChanges(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) lineageWorkspace(w http.ResponseWriter, r *http.Request) error {
 	environment := r.URL.Query().Get("environment")
 	if environment != "" && environment != "test" && environment != "prod" {
-		return badRequest("environment must be test or prod")
+		return badRequest(ErrInvalidRequest, "environment must be test or prod")
 	}
 	tenant := tenantFrom(r)
 	rows, err := tenantQueryRows(r.Context(), s.DB, tenant.TenantID, `WITH ranked AS (SELECT id,pipeline_key,version,name,status,environment,definition,row_number() OVER(PARTITION BY pipeline_key,environment ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,version DESC) rank FROM pipelines WHERE ($1::text IS NULL OR environment=$1)) SELECT * FROM ranked WHERE rank=1 ORDER BY environment,name`, nullString(environment))

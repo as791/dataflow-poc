@@ -79,7 +79,7 @@ func (s *Server) editionPut(w http.ResponseWriter, r *http.Request) error {
 	}
 	enabled, ok := body.Enabled.(bool)
 	if !paidFeatureKeys[feature] || !ok {
-		return badRequest("valid feature and boolean enabled are required")
+		return badRequest(ErrInvalidRequest, "valid feature and boolean enabled are required")
 	}
 	tenant := tenantFrom(r)
 	err := s.DB.TenantTx(r.Context(), tenant.TenantID, func(tx pgx.Tx) error {
@@ -140,7 +140,7 @@ func (s *Server) alertsList(w http.ResponseWriter, r *http.Request) error {
 	}
 	valid := map[string]bool{"active": true, "open": true, "acknowledged": true, "resolved": true, "all": true}
 	if !valid[status] {
-		return badRequest("invalid alert status")
+		return badRequest(ErrInvalidRequest, "invalid alert status")
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit < 1 {
@@ -190,9 +190,9 @@ func (s *Server) updateAlert(w http.ResponseWriter, r *http.Request, action stri
 	}
 	if row == nil {
 		if action == "acknowledge" {
-			return notFound("open alert not found")
+			return notFound(ErrNotFound, "open alert not found")
 		}
-		return notFound("active alert not found")
+		return notFound(ErrNotFound, "active alert not found")
 	}
 	s.audit(r.Context(), tenant, "pipeline_alert."+map[string]string{"acknowledge": "acknowledged", "resolve": "resolved"}[action], stringValue(row["id"]), map[string]interface{}{"pipelineId": row["pipeline_id"], "kind": row["kind"]}, r)
 	jsonResponse(w, http.StatusOK, row)
@@ -219,7 +219,7 @@ func (s *Server) alertRetryNotification(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 	if !changed {
-		return notFound("failed or pending notification not found")
+		return notFound(ErrNotFound, "failed or pending notification not found")
 	}
 	s.audit(r.Context(), tenant, "pipeline_alert.notification_retried", r.PathValue("id"), nil, r)
 	jsonResponse(w, http.StatusOK, map[string]bool{"ok": true})
@@ -242,7 +242,7 @@ func (s *Server) inviteCreate(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	if body.Email == "" {
-		return badRequest("email required")
+		return badRequest(ErrInvalidRequest, "email required")
 	}
 	var existing int
 	if err := s.DB.Pool.QueryRow(r.Context(), `SELECT 1 FROM users WHERE email=$1`, body.Email).Scan(&existing); err == nil {
@@ -373,7 +373,7 @@ func (s *Server) tokenCreate(w http.ResponseWriter, r *http.Request) error {
 	}
 	body.Name = strings.TrimSpace(body.Name)
 	if body.Name == "" {
-		return badRequest("name required")
+		return badRequest(ErrInvalidRequest, "name required")
 	}
 	role := "member"
 	if body.Role == "owner" {
@@ -424,7 +424,7 @@ func (s *Server) tokenDelete(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if !changed {
-		return notFound("token not found or already revoked")
+		return notFound(ErrNotFound, "token not found or already revoked")
 	}
 	s.audit(r.Context(), tenant, "team.token_revoked", r.PathValue("id"), nil, r)
 	jsonResponse(w, http.StatusOK, map[string]bool{"ok": true})
