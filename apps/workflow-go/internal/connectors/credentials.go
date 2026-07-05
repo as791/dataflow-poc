@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -39,6 +41,28 @@ func (r *Runtime) AlertDestination(ctx context.Context, tenantID, id string) (st
 		return "", "", fmt.Errorf("notification URL must use http or https")
 	}
 	return endpoint, stringValue(secret["apiKey"]), nil
+}
+
+func (r *Runtime) encryptValue(value string) (string, error) {
+	key, err := hex.DecodeString(r.Config.OAuthTokenEncryptionKey)
+	if err != nil || len(key) != 32 {
+		return "", fmt.Errorf("OAUTH_TOKEN_ENCRYPTION_KEY must be 64 hex chars")
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	iv := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return "", err
+	}
+	sealed := gcm.Seal(nil, iv, []byte(value), nil)
+	tagStart := len(sealed) - gcm.Overhead()
+	return strings.Join([]string{base64.StdEncoding.EncodeToString(iv), base64.StdEncoding.EncodeToString(sealed[tagStart:]), base64.StdEncoding.EncodeToString(sealed[:tagStart])}, ":"), nil
 }
 
 func (r *Runtime) decryptValue(value string) (string, error) {
@@ -103,6 +127,12 @@ func (r *Runtime) credential(ctx context.Context, id string) (map[string]interfa
 	}
 	if encrypted := stringValue(row["access_token"]); encrypted != "" {
 		row["access_value"], err = r.decryptValue(encrypted)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if encrypted := stringValue(row["refresh_token"]); encrypted != "" {
+		row["refresh_value"], err = r.decryptValue(encrypted)
 		if err != nil {
 			return nil, err
 		}
