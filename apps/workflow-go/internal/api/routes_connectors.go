@@ -141,10 +141,10 @@ func (s *Server) connectorCreate(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	if body.Provider == "" || body.Name == "" {
-		return badRequest("provider and name are required")
+		return badRequest(ErrInvalidRequest, "provider and name are required")
 	}
 	if err := validateCredential(body.Provider, body.Config, body.Secret); err != nil {
-		return badRequest(err.Error())
+		return badRequest(ErrInvalidRequest, err.Error())
 	}
 	features, _ := s.paidFeatures(r)
 	if body.Provider == "kafka" && !features["realtime"] {
@@ -165,7 +165,7 @@ func (s *Server) connectorCreate(w http.ResponseWriter, r *http.Request) error {
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key value") {
-			return badRequest("A connector with this name already exists")
+			return badRequest(ErrInvalidRequest, "A connector with this name already exists")
 		}
 		return fmt.Errorf("failed to insert connector: %w", err)
 	}
@@ -185,7 +185,7 @@ func (s *Server) connectorDelete(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if !changed {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	jsonResponse(w, http.StatusOK, map[string]bool{"ok": true})
 	return nil
@@ -196,7 +196,7 @@ func (s *Server) connectorTest(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if row == nil {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	if row["kind"] == "oauth" {
 		if _, err = s.liveToken(r, row); err != nil {
@@ -233,7 +233,7 @@ func (s *Server) connectorCDCEnable(w http.ResponseWriter, r *http.Request) erro
 		return err
 	}
 	if row == nil {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	var body struct {
 		Resources []string `json:"resources"`
@@ -242,17 +242,17 @@ func (s *Server) connectorCDCEnable(w http.ResponseWriter, r *http.Request) erro
 		return nil
 	}
 	if len(body.Resources) == 0 || len(body.Resources) > 100 {
-		return badRequest("at least one and at most 100 tables or collections are required")
+		return badRequest(ErrInvalidRequest, "at least one and at most 100 tables or collections are required")
 	}
 	valid := regexp.MustCompile(`^[A-Za-z0-9_$-]+(?:\.[A-Za-z0-9_$-]+){1,2}$`)
 	for _, resource := range body.Resources {
 		if !valid.MatchString(resource) {
-			return badRequest("invalid table or collection " + resource)
+			return badRequest(ErrInvalidRequest, "invalid table or collection " + resource)
 		}
 	}
 	provider := stringValue(row["provider"])
 	if !map[string]bool{"postgres": true, "mysql": true, "mongodb": true}[provider] {
-		return badRequest("CDC is not supported for provider " + provider)
+		return badRequest(ErrInvalidRequest, "CDC is not supported for provider " + provider)
 	}
 	name := cdcName(tenantFrom(r).TenantID, stringValue(row["id"]))
 	config := map[string]string{"name": name, "connector.class": map[string]string{"postgres": "io.debezium.connector.postgresql.PostgresConnector", "mysql": "io.debezium.connector.mysql.MySqlConnector", "mongodb": "io.debezium.connector.mongodb.MongoDbConnector"}[provider], "topic.prefix": name, "tasks.max": "1"}
@@ -291,7 +291,7 @@ func (s *Server) connectorCDCGet(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if row == nil {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	extra, _ := row["extra"].(map[string]interface{})
 	cdc, _ := extra["cdc"].(map[string]interface{})
@@ -317,7 +317,7 @@ func (s *Server) connectorCDCDelete(w http.ResponseWriter, r *http.Request) erro
 		return err
 	}
 	if row == nil {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	extra, _ := row["extra"].(map[string]interface{})
 	cdc, _ := extra["cdc"].(map[string]interface{})
@@ -372,7 +372,7 @@ func (s *Server) googleConnectorStart(w http.ResponseWriter, r *http.Request) er
 func (s *Server) googleConnectorCallback(w http.ResponseWriter, r *http.Request) error {
 	state, err := s.consumeOAuthState(r, r.URL.Query().Get("state"), "google")
 	if err != nil {
-		return badRequest("invalid state")
+		return badRequest(ErrInvalidRequest, "invalid state")
 	}
 	values := url.Values{"code": {r.URL.Query().Get("code")}, "client_id": {os.Getenv("GOOGLE_CLIENT_ID")}, "client_secret": {os.Getenv("GOOGLE_CLIENT_SECRET")}, "redirect_uri": {s.Config.AppURL + "/api/connectors/google/callback"}, "grant_type": {"authorization_code"}}
 	var token map[string]interface{}
@@ -381,7 +381,7 @@ func (s *Server) googleConnectorCallback(w http.ResponseWriter, r *http.Request)
 	}
 	access, refresh := stringValue(token["access_token"]), stringValue(token["refresh_token"])
 	if access == "" || refresh == "" {
-		return badRequest("Google did not return a refresh token. Revoke the existing grant and retry.")
+		return badRequest(ErrInvalidRequest, "Google did not return a refresh token. Revoke the existing grant and retry.")
 	}
 	request, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
 	request.Header.Set("Authorization", "Bearer "+access)
@@ -410,7 +410,7 @@ func (s *Server) microsoftConnectorStart(w http.ResponseWriter, r *http.Request)
 func (s *Server) microsoftConnectorCallback(w http.ResponseWriter, r *http.Request) error {
 	state, err := s.consumeOAuthState(r, r.URL.Query().Get("state"), "microsoft")
 	if err != nil {
-		return badRequest("invalid state")
+		return badRequest(ErrInvalidRequest, "invalid state")
 	}
 	tenant := env("AZURE_TENANT_ID", "common")
 	values := url.Values{"client_id": {os.Getenv("AZURE_CLIENT_ID")}, "client_secret": {os.Getenv("AZURE_CLIENT_SECRET")}, "code": {r.URL.Query().Get("code")}, "redirect_uri": {s.Config.AppURL + "/api/connectors/microsoft/callback"}, "grant_type": {"authorization_code"}, "scope": {strings.Join(microsoftScopes, " ")}}
@@ -446,7 +446,7 @@ func (s *Server) zendeskStart(w http.ResponseWriter, r *http.Request) error {
 	}
 	body.Subdomain = strings.ToLower(strings.TrimSpace(body.Subdomain))
 	if !regexp.MustCompile(`^[a-z0-9-]+$`).MatchString(body.Subdomain) {
-		return badRequest("invalid subdomain")
+		return badRequest(ErrInvalidRequest, "invalid subdomain")
 	}
 	state, err := s.mintOAuthState(r, "zendesk", map[string]interface{}{"subdomain": body.Subdomain})
 	if err != nil {
@@ -459,7 +459,7 @@ func (s *Server) zendeskStart(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) zendeskCallback(w http.ResponseWriter, r *http.Request) error {
 	state, err := s.consumeOAuthState(r, r.URL.Query().Get("state"), "zendesk")
 	if err != nil {
-		return badRequest("invalid state")
+		return badRequest(ErrInvalidRequest, "invalid state")
 	}
 	subdomain := stringValue(state.Extra["subdomain"])
 	payload, _ := json.Marshal(map[string]string{"grant_type": "authorization_code", "code": r.URL.Query().Get("code"), "client_id": os.Getenv("ZENDESK_OAUTH_CLIENT_ID"), "client_secret": os.Getenv("ZENDESK_OAUTH_CLIENT_SECRET"), "redirect_uri": s.Config.AppURL + "/api/connectors/zendesk/callback", "scope": "read"})
@@ -551,7 +551,7 @@ func (s *Server) connectorRefresh(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	if row == nil {
-		return notFound("not found")
+		return notFound(ErrNotFound, "not found")
 	}
 	token, err := s.liveToken(r, row)
 	if err != nil {
@@ -580,7 +580,7 @@ func (s *Server) pickOAuth(r *http.Request, provider string) (map[string]interfa
 func (s *Server) providerGet(r *http.Request, provider, path string, target interface{}) error {
 	row, err := s.pickOAuth(r, provider)
 	if err != nil || row == nil {
-		return notFound("no " + provider + " connection")
+		return notFound(ErrNotFound, "no " + provider + " connection")
 	}
 	token, err := s.liveToken(r, row)
 	if err != nil {
@@ -674,7 +674,7 @@ func (s *Server) microsoftItems(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) microsoftSheets(w http.ResponseWriter, r *http.Request) error {
 	drive := r.URL.Query().Get("driveId")
 	if drive == "" {
-		return badRequest("driveId required")
+		return badRequest(ErrInvalidRequest, "driveId required")
 	}
 	var data map[string]interface{}
 	if err := s.graphGet(r, "/drives/"+url.PathEscape(drive)+"/items/"+url.PathEscape(r.PathValue("itemId"))+"/workbook/worksheets", &data); err != nil {
@@ -686,7 +686,7 @@ func (s *Server) microsoftSheets(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) microsoftPreview(w http.ResponseWriter, r *http.Request) error {
 	drive := r.URL.Query().Get("driveId")
 	if drive == "" {
-		return badRequest("driveId required")
+		return badRequest(ErrInvalidRequest, "driveId required")
 	}
 	var data map[string]interface{}
 	path := "/drives/" + url.PathEscape(drive) + "/items/" + url.PathEscape(r.PathValue("itemId")) + "/workbook/worksheets('" + url.PathEscape(r.PathValue("name")) + "')/usedRange(valuesOnly=true)"
