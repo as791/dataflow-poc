@@ -30,7 +30,10 @@ storage:
 #     --from-literal=jwt=<JWT_SECRET> \
 #     --from-literal=smtpUser=<SES_SMTP_ACCESS_KEY_ID> \
 #     --from-literal=smtpPass=<SES_SMTP_SECRET_ACCESS_KEY> \
-#     --from-literal=smtpFrom=<VERIFIED_SENDER_EMAIL>
+#     --from-literal=smtpFrom=<VERIFIED_SENDER_EMAIL> \
+#     --from-literal=appUrl=<PUBLIC_GCP_APP_URL>
 smtp:
   host: email-smtp.us-east-1.amazonaws.com
   port: "465"
+
+secrets: {}

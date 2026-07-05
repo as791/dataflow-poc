@@ -39,7 +39,7 @@ func (s *Server) requireFeature(feature string, next http.Handler) http.Handler 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		features, err := s.paidFeatures(r)
 		if err != nil {
-			jsonError(w, http.StatusInternalServerError, "internal error")
+			jsonError(w, http.StatusInternalServerError, ErrInternal, "internal error", nil)
 			return
 		}
 		if !features[feature] {
