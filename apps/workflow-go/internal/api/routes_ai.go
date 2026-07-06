@@ -74,9 +74,26 @@ func (s *Server) buildPipeline(r *http.Request, prompt string) (map[string]inter
 		byType[entry.ActivityType] = entry
 	}
 	lines = append(lines,
-		`RULES:`,
+		`ROLE: You are a strict data-pipeline planner for non-expert users. Translate intent into the smallest executable catalog DAG.`,
+		`USER BEHAVIOR: Users describe business intent, not node names. Infer source/transform/sink roles from verbs and destinations, but do not invent missing credentials or external resources.`,
+		`SYSTEM RULES:`,
 		`- Node "id" must be a short lowercase alphanumeric string like n1, n2, n3.`,
 		`- Every edge "source" and "target" MUST exactly match one of the node "id" values you defined above.`,
+		`- A pipeline starts with source nodes, applies transforms in request order, and ends with sink nodes.`,
+		`- Plan as a symbolic operator chain first; do not generate code. Each natural-language action must map to one catalog activityType.`,
+		`- Ground parameters in the user's words and available schemas/columns when named. Do not invent column names, buckets, paths, URLs, or table names.`,
+		`- Keep operator order semantically valid: filtering/renaming/casting happens before downstream aggregations, sinks, and exports that depend on those fields.`,
+		`CONNECTOR/SINK INTENT RULES:`,
+		`- Verbs like read, fetch, import, ingest, pull, consume, listen, stream from mean a source/fetch connector.`,
+		`- Verbs like write, save, export, load, sync to, send, publish, notify, upsert mean a sink connector.`,
+		`- For the same system, direction decides the activityType: from S3/Sheets/Drive/Postgres/MySQL/MongoDB/Kafka/SFTP/Snowflake/Iceberg means the matching *.fetch source; to those systems means sink.* when available.`,
+		`- HTTP/API as an input means http.fetch. Webhook as an output/alert/callback means sink.webhook.`,
+		`- Never use a source activityType as a destination and never use a sink activityType as an input.`,
+		`CONFIG RULES:`,
+		`- Copy user-supplied connector parameters into node config using obvious keys from the wording.`,
+		`- Known config keys: http.fetch uses url and recordsPath; transform.filter uses predicate; transform.dedupe uses key and keep; sink.s3 uses bucket, key, and format.`,
+		`- For other connectors/sinks, preserve named fields such as table, database, collection, topic, path, file, sheetId, spreadsheetId, worksheet, schema, warehouse, endpoint, method, headers, format, and mode.`,
+		`- When refining, preserve existing nodes, IDs, edges, and config unless the requested change requires modifying them.`,
 		`- Always include a "trigger" with at least {"type":"manual"}.`,
 		`Respond with ONLY valid JSON (no markdown, no explanation):`,
 		`{"suggestedName":string,"trigger":{"type":string},"nodes":[{"id":string,"label":string,"activityType":string,"config":{}}],"edges":[{"source":string,"target":string}]}`,
@@ -169,8 +186,12 @@ func (s *Server) buildPipeline(r *http.Request, prompt string) (map[string]inter
 		// Check endpoints are known.
 		srcKnown, tgtKnown := false, false
 		for _, n := range def.Nodes {
-			if n.ID == src { srcKnown = true }
-			if n.ID == tgt { tgtKnown = true }
+			if n.ID == src {
+				srcKnown = true
+			}
+			if n.ID == tgt {
+				tgtKnown = true
+			}
 		}
 		if !srcKnown || !tgtKnown {
 			warnings = append(warnings, fmt.Sprintf("dropped edge %d: %s→%s (unknown node)", i+1, src, tgt))
@@ -181,9 +202,14 @@ func (s *Server) buildPipeline(r *http.Request, prompt string) (map[string]inter
 	if err := validatePipeline(def); err != nil {
 		return nil, err
 	}
-	mermaid := []string{"flowchart TD"}
+	mermaidLabel := func(s string) string {
+		s = strings.ReplaceAll(s, `\`, `\\`)
+		s = strings.ReplaceAll(s, `"`, `\"`)
+		return strings.ReplaceAll(s, "\n", " ")
+	}
+	mermaid := []string{"flowchart LR"}
 	for _, node := range def.Nodes {
-		mermaid = append(mermaid, fmt.Sprintf("  %s[%q]", node.ID, node.Label))
+		mermaid = append(mermaid, fmt.Sprintf(`  %s["%s"]`, node.ID, mermaidLabel(node.Label)))
 	}
 	for _, edge := range def.Edges {
 		mermaid = append(mermaid, fmt.Sprintf("  %s --> %s", edge.Source, edge.Target))

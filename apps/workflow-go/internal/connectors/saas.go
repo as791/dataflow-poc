@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -340,6 +341,9 @@ func (r *Runtime) googleSheetsSink(ctx context.Context, input interface{}, cfg m
 	if err != nil {
 		return nil, nil, err
 	}
+	// ponytail: records are map[string]interface{} (Go maps have randomized
+	// iteration order), so column order must be sorted to be deterministic —
+	// matches the convention already used by the postgres/mysql sinks.
 	columns := []string{}
 	seen := map[string]bool{}
 	for _, dataRow := range rows {
@@ -350,6 +354,7 @@ func (r *Runtime) googleSheetsSink(ctx context.Context, input interface{}, cfg m
 			}
 		}
 	}
+	sort.Strings(columns)
 	values := make([][]interface{}, 0, len(rows)+1)
 	for _, dataRow := range rows {
 		values = append(values, func() []interface{} {
@@ -384,6 +389,23 @@ func (r *Runtime) googleSheetsSink(ctx context.Context, input interface{}, cfg m
 		}
 		_, err = r.oauthJSON(ctx, http.MethodPut, base+"?valueInputOption=RAW", row, map[string]interface{}{"values": values}, &map[string]interface{}{})
 	} else {
+		if cfg["includeHeader"] == true {
+			var existing struct {
+				Values [][]interface{} `json:"values"`
+			}
+			if _, err = r.oauthJSON(ctx, http.MethodGet, base, row, nil, &existing); err != nil {
+				return nil, nil, err
+			}
+			if len(existing.Values) == 0 {
+				values = append([][]interface{}{func() []interface{} {
+					out := make([]interface{}, len(columns))
+					for i := range columns {
+						out[i] = columns[i]
+					}
+					return out
+				}()}, values...)
+			}
+		}
 		_, err = r.oauthJSON(ctx, http.MethodPost, base+":append?valueInputOption=RAW", row, map[string]interface{}{"values": values}, &map[string]interface{}{})
 	}
 	return nil, nil, err

@@ -1,7 +1,17 @@
 import { expect, type APIRequestContext } from '@playwright/test';
 
 export type Connection = { id: string; provider: string; name?: string };
-export type Node = { id: string; type: string; activityType: string; config: Record<string, unknown>; ingestion?: Record<string, unknown> };
+export type Node = {
+  id: string;
+  type: string;
+  activityType: string;
+  config: Record<string, unknown>;
+  ingestion?: Record<string, unknown>;
+  timeoutSec?: number;
+  retry?: { maximumAttempts?: number };
+  mergeStrategy?: string;
+  joinKey?: string;
+};
 
 // ponytail: login is rate-limited to 10/min per IP and Playwright restarts the
 // worker process after every test failure, so an in-memory cache re-logins on
@@ -14,6 +24,19 @@ import { createHash } from 'node:crypto';
 
 function tokenCachePath(email: string) {
   return join(tmpdir(), `dataflow-qa-token-${createHash('sha256').update(email).digest('hex').slice(0, 12)}.json`);
+}
+
+// ponytail: password-login is rate-limited server-side (10/min per IP), shared
+// with any other activity from this IP (manual curl, other test runs, other
+// accounts). Retry with backoff instead of failing the test on a transient 429.
+export async function postWithRateLimitRetry(request: APIRequestContext, path: string, data: Record<string, unknown>, attempts = 5) {
+  for (let i = 0; i < attempts; i++) {
+    const response = await request.post(path, { data });
+    if (response.status() !== 429) return response;
+    const retryAfter = Number(response.headers()['retry-after']) || 15;
+    await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+  }
+  return request.post(path, { data });
 }
 
 export class DeployedAPI {
@@ -37,9 +60,7 @@ export class DeployedAPI {
     } catch {
       // no cache yet
     }
-    const login = await this.request.post('/api/auth/login', {
-      data: { email, password: required('QA_PASSWORD') },
-    });
+    const login = await postWithRateLimitRetry(this.request, '/api/auth/login', { email, password: required('QA_PASSWORD') });
     expect(login.ok(), await login.text()).toBeTruthy();
     const refresh = await this.request.post('/api/auth/refresh');
     expect(refresh.ok(), await refresh.text()).toBeTruthy();
@@ -65,16 +86,51 @@ export class DeployedAPI {
     return this.request.get(path, { headers: this.headers() });
   }
 
+  async post(path: string, data?: Record<string, unknown>) {
+    return this.request.post(path, { headers: this.headers(), data });
+  }
+
+  async put(path: string, data: Record<string, unknown>) {
+    return this.request.put(path, { headers: this.headers(), data });
+  }
+
+  async delete(path: string) {
+    return this.request.delete(path, { headers: this.headers() });
+  }
+
   async create(body: Record<string, unknown>) {
     const response = await this.request.post('/api/pipelines', { headers: this.headers(), data: body });
     expect(response.ok(), await response.text()).toBeTruthy();
-    return response.json() as Promise<{ rowId: string }>;
+    return response.json() as Promise<{ rowId: string; pipelineKey: string; version: number }>;
   }
 
   async start(rowId: string) {
     const response = await this.request.post(`/api/pipelines/${rowId}/run`, { headers: this.headers() });
     expect(response.ok(), await response.text()).toBeTruthy();
     return response.json() as Promise<{ executionId: string }>;
+  }
+
+  async status(executionId: string) {
+    const response = await this.request.get(`/api/executions/${executionId}/status`, { headers: this.headers() });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    return response.json();
+  }
+
+  async wait(executionId: string, terminal: string[] = ['completed', 'failed', 'cancelled']) {
+    for (let i = 0; i < 90; i++) {
+      const status = await this.status(executionId);
+      if (terminal.includes(status.phase)) return status;
+      await new Promise(resolve => setTimeout(resolve, 2_000));
+    }
+    throw new Error(`execution ${executionId} timed out`);
+  }
+
+  async runDefinition(body: Record<string, unknown>) {
+    const { rowId } = await this.create(body);
+    const { executionId } = await this.start(rowId);
+    const status = await this.wait(executionId);
+    if (status.phase !== 'completed') throw new Error(JSON.stringify(status));
+    return { rowId, executionId, status };
   }
 
   async signal(executionId: string, action: 'pause' | 'resume' | 'cancel') {

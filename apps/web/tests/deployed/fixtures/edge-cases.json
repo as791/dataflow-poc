@@ -1,0 +1,4 @@
+[
+  {"id":1,"text":"नमस्ते 🌍","nullable":null,"nested":{"region":"IN","tags":["a","b"]},"payload":"{\"valid\":true,\"count\":2}"},
+  {"id":2,"text":"O'Reilly","nullable":"value","nested":{"region":"US","tags":[]},"payload":"not-json"}
+]
