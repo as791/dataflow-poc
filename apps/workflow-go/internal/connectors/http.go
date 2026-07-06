@@ -279,3 +279,7 @@ func firstNumber(values ...interface{}) float64 {
 	}
 	return 0
 }
+func truthy(value interface{}) bool {
+	b, _ := value.(bool)
+	return b
+}

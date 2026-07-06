@@ -3,6 +3,19 @@ import { expect, type APIRequestContext } from '@playwright/test';
 export type Connection = { id: string; provider: string; name?: string };
 export type Node = { id: string; type: string; activityType: string; config: Record<string, unknown>; ingestion?: Record<string, unknown> };
 
+// ponytail: login is rate-limited to 10/min per IP and Playwright restarts the
+// worker process after every test failure, so an in-memory cache re-logins on
+// each failed test. Persist the token to tmpdir instead; re-login only when it
+// nears the 15-minute access-token TTL.
+import { readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+
+function tokenCachePath(email: string) {
+  return join(tmpdir(), `dataflow-qa-token-${createHash('sha256').update(email).digest('hex').slice(0, 12)}.json`);
+}
+
 export class DeployedAPI {
   private token = '';
 
@@ -13,13 +26,25 @@ export class DeployedAPI {
   }
 
   async login() {
+    const email = required('QA_EMAIL');
+    const cachePath = tokenCachePath(email);
+    try {
+      const cached = JSON.parse(readFileSync(cachePath, 'utf8')) as { token: string; at: number };
+      if (Date.now() - cached.at < 10 * 60_000) {
+        this.token = cached.token;
+        return;
+      }
+    } catch {
+      // no cache yet
+    }
     const login = await this.request.post('/api/auth/login', {
-      data: { email: required('QA_EMAIL'), password: required('QA_PASSWORD') },
+      data: { email, password: required('QA_PASSWORD') },
     });
     expect(login.ok(), await login.text()).toBeTruthy();
     const refresh = await this.request.post('/api/auth/refresh');
     expect(refresh.ok(), await refresh.text()).toBeTruthy();
-    this.token = (await refresh.json()).accessToken;
+    this.token = (await refresh.json()).accessToken as string;
+    writeFileSync(cachePath, JSON.stringify({ token: this.token, at: Date.now() }));
   }
 
   async connection(provider: string, name = process.env[`QA_${provider.toUpperCase()}_CONNECTION`]) {
