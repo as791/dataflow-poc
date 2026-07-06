@@ -376,7 +376,14 @@ func (r *Runtime) mongoClient(ctx context.Context, id string) (*mongo.Client, st
 	if cfg["user"] != nil {
 		auth = url.QueryEscape(stringValue(cfg["user"])) + ":" + url.QueryEscape(stringValue(secret["password"])) + "@"
 	}
-	uri := fmt.Sprintf("mongodb://%s%s:%d/?authSource=%s", auth, stringValue(cfg["host"]), int(firstNumber(cfg["port"], 27017)), url.QueryEscape(firstString(cfg["authSource"], "admin")))
+	authSource := url.QueryEscape(firstString(cfg["authSource"], "admin"))
+	var uri string
+	if truthy(cfg["tls"]) {
+		// Atlas and most managed Mongo only publish SRV records (no port); the driver resolves the replica set.
+		uri = fmt.Sprintf("mongodb+srv://%s%s/?authSource=%s&tls=true", auth, stringValue(cfg["host"]), authSource)
+	} else {
+		uri = fmt.Sprintf("mongodb://%s%s:%d/?authSource=%s", auth, stringValue(cfg["host"]), int(firstNumber(cfg["port"], 27017)), authSource)
+	}
 	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetServerSelectionTimeout(10 * time.Second))
 	if err == nil {
 		err = client.Ping(ctx, nil)
