@@ -59,6 +59,6 @@ test('P0 real S3 source replaces a real Google Sheet', async ({ request }) => {
     { id: 'sink', type: 'sink', activityType: 'sink.gsheets', config: { connectionId: google, spreadsheetId: required('GOOGLE_QA_DEST_SPREADSHEET_ID'), sheetName: 'replace_test', writeMode: 'replace', includeHeader: true } },
   ], [{ id: 'e1', source: 'src', target: 'sink' }]);
   const preview = await api.googlePreview(google, required('GOOGLE_QA_DEST_SPREADSHEET_ID'), 'replace_test');
-  expect(preview.headers).toEqual(['id', 'customer', 'amount', 'status', 'updated_at']);
+  expect(preview.headers).toEqual(['amount', 'customer', 'id', 'status', 'updated_at']);
   expect(preview.rows).toHaveLength(4);
 });

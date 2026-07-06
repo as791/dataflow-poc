@@ -1,0 +1,6 @@
+[
+  {"id":1,"country":"IN","amount":100},
+  {"id":1,"country":"IN","amount":125},
+  {"id":2,"country":"US","amount":200},
+  {"id":2,"country":"CA","amount":300}
+]

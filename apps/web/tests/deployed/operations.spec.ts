@@ -1,5 +1,5 @@
 import { expect, request as requestFactory, test } from '@playwright/test';
-import { DeployedAPI, required } from './deployed-api';
+import { DeployedAPI, postWithRateLimitRetry, required } from './deployed-api';
 import { bucket } from './external';
 
 test('P1 failed execution can be retried', async ({ request }) => {
@@ -23,7 +23,7 @@ test('P1 tenant cannot read another tenant pipeline', async ({ request, baseURL 
     edges: [{ id: 'e1', source: 'src', target: 'sink' }],
   });
   const secondaryContext = await requestFactory.newContext({ baseURL });
-  const login = await secondaryContext.post('/api/auth/login', { data: { email: required('QA_SECONDARY_EMAIL'), password: required('QA_SECONDARY_PASSWORD') } });
+  const login = await postWithRateLimitRetry(secondaryContext, '/api/auth/login', { email: required('QA_SECONDARY_EMAIL'), password: required('QA_SECONDARY_PASSWORD') });
   expect(login.ok()).toBeTruthy();
   const refresh = await secondaryContext.post('/api/auth/refresh');
   const token = (await refresh.json()).accessToken;

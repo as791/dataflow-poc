@@ -245,7 +245,9 @@ func (r *Runtime) recordsSink(ctx context.Context, input interface{}, cfg map[st
 	var body strings.Builder
 	writer := bufio.NewWriter(&body)
 	for _, record := range rows {
-		line, _ := json.Marshal(map[string]interface{}{"tenant_id": handler.TenantID, "collection": collection, "record": record, "ingested_at": time.Now().UTC()})
+		encoded, _ := json.Marshal(record)
+		dedupKey := sha256.Sum256(encoded)
+		line, _ := json.Marshal(map[string]interface{}{"tenant_id": handler.TenantID, "collection": collection, "record": record, "dedup_key": hex.EncodeToString(dedupKey[:]), "ingested_at": time.Now().UTC()})
 		_, _ = writer.Write(line)
 		_ = writer.WriteByte('\n')
 	}
