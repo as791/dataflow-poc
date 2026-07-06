@@ -73,6 +73,12 @@ func (s *Server) buildPipeline(r *http.Request, prompt string) (map[string]inter
 		lines = append(lines, fmt.Sprintf("- %s (%s) %s", entry.ActivityType, entry.NodeType, entry.Label))
 		byType[entry.ActivityType] = entry
 	}
+	if rows, err := tenantQueryRows(r.Context(), s.DB, tenantFrom(r).TenantID, `SELECT id,provider,provider_account_email FROM connector_instances ORDER BY provider,provider_account_email`); err == nil && len(rows) > 0 {
+		lines = append(lines, `AVAILABLE CONNECTOR INSTANCES: use config.connectionId when the user names one of these connections.`)
+		for _, row := range rows {
+			lines = append(lines, fmt.Sprintf("- %s: name=%q id=%q", stringValue(row["provider"]), stringValue(row["provider_account_email"]), stringValue(row["id"])))
+		}
+	}
 	lines = append(lines,
 		`ROLE: You are a strict data-pipeline planner for non-expert users. Translate intent into the smallest executable catalog DAG.`,
 		`USER BEHAVIOR: Users describe business intent, not node names. Infer source/transform/sink roles from verbs and destinations, but do not invent missing credentials or external resources.`,
@@ -91,6 +97,7 @@ func (s *Server) buildPipeline(r *http.Request, prompt string) (map[string]inter
 		`- Never use a source activityType as a destination and never use a sink activityType as an input.`,
 		`CONFIG RULES:`,
 		`- Copy user-supplied connector parameters into node config using obvious keys from the wording.`,
+		`- If the user mentions a listed connector name, put that connector id in config.connectionId on the matching source or sink node.`,
 		`- Known config keys: http.fetch uses url and recordsPath; transform.filter uses predicate; transform.dedupe uses key and keep; sink.s3 uses bucket, key, and format.`,
 		`- For other connectors/sinks, preserve named fields such as table, database, collection, topic, path, file, sheetId, spreadsheetId, worksheet, schema, warehouse, endpoint, method, headers, format, and mode.`,
 		`- When refining, preserve existing nodes, IDs, edges, and config unless the requested change requires modifying them.`,
