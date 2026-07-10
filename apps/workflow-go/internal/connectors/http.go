@@ -112,6 +112,7 @@ func (r *Runtime) fetchManifest(ctx context.Context, m model.ConnectorManifest, 
 	if err != nil {
 		return SourceResult{}, err
 	}
+	request.Header.Set("User-Agent", "DataFlow/1.0")
 	for key, value := range m.Headers {
 		request.Header.Set(key, value)
 	}
@@ -244,7 +245,9 @@ func (r *Runtime) recordsSink(ctx context.Context, input interface{}, cfg map[st
 	var body strings.Builder
 	writer := bufio.NewWriter(&body)
 	for _, record := range rows {
-		line, _ := json.Marshal(map[string]interface{}{"tenant_id": handler.TenantID, "collection": collection, "record": record, "ingested_at": time.Now().UTC()})
+		encoded, _ := json.Marshal(record)
+		dedupKey := sha256.Sum256(encoded)
+		line, _ := json.Marshal(map[string]interface{}{"tenant_id": handler.TenantID, "collection": collection, "record": record, "dedup_key": hex.EncodeToString(dedupKey[:]), "ingested_at": time.Now().UTC()})
 		_, _ = writer.Write(line)
 		_ = writer.WriteByte('\n')
 	}
@@ -277,4 +280,8 @@ func firstNumber(values ...interface{}) float64 {
 		}
 	}
 	return 0
+}
+func truthy(value interface{}) bool {
+	b, _ := value.(bool)
+	return b
 }

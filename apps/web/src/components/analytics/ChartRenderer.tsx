@@ -1,8 +1,9 @@
 import {
-  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
+  BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 import type { WidgetDef } from './types';
+import { chartKeys } from './model';
 
 const COLORS = [
   '#818cf8', '#34d399', '#fbbf24', '#f87171', '#60a5fa',
@@ -21,8 +22,7 @@ const LEGEND_STYLE = { wrapperStyle: { fontSize: 11, color: 'var(--chart-muted)'
 
 export function ChartRenderer({ widget }: { widget: WidgetDef }) {
   const data = widget.data ?? [];
-  const xKey = widget.spec.groupBy?.[0] ?? widget.spec.select?.[0] ?? '';
-  const yKey = widget.spec.aggregate ? 'aggregate_value' : (widget.spec.select?.[1] ?? widget.spec.select?.[0] ?? '');
+  const { xKey, yKey } = chartKeys(widget);
 
   if (data.length === 0) {
     return (
@@ -55,6 +55,33 @@ export function ChartRenderer({ widget }: { widget: WidgetDef }) {
           </tbody>
         </table>
       </div>
+    );
+  }
+
+  if (widget.type === 'stat') {
+    const value = data[0]?.[yKey];
+    const num = typeof value === 'number' ? value : Number(value);
+    return (
+      <div className="flex items-center justify-center h-full">
+        <span className="text-4xl font-semibold text-gray-800 dark:text-white/90">
+          {Number.isFinite(num) ? num.toLocaleString() : String(value ?? '—')}
+        </span>
+      </div>
+    );
+  }
+
+  if (widget.type === 'area') {
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} style={CHART_STYLE}>
+          <CartesianGrid {...GRID_STYLE} />
+          <XAxis dataKey={xKey} tick={AXIS_STYLE} axisLine={false} tickLine={false} />
+          <YAxis tick={AXIS_STYLE} axisLine={false} tickLine={false} />
+          <Tooltip {...TOOLTIP_STYLE} />
+          <Legend {...LEGEND_STYLE} />
+          <Area type="monotone" dataKey={yKey} stroke={COLORS[0]} fill={COLORS[0]} fillOpacity={0.25} strokeWidth={2} />
+        </AreaChart>
+      </ResponsiveContainer>
     );
   }
 

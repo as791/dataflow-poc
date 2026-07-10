@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dataflow-poc/workflow-go/internal/model"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -247,12 +248,12 @@ func (s *Server) connectorCDCEnable(w http.ResponseWriter, r *http.Request) erro
 	valid := regexp.MustCompile(`^[A-Za-z0-9_$-]+(?:\.[A-Za-z0-9_$-]+){1,2}$`)
 	for _, resource := range body.Resources {
 		if !valid.MatchString(resource) {
-			return badRequest(ErrInvalidRequest, "invalid table or collection " + resource)
+			return badRequest(ErrInvalidRequest, "invalid table or collection "+resource)
 		}
 	}
 	provider := stringValue(row["provider"])
 	if !map[string]bool{"postgres": true, "mysql": true, "mongodb": true}[provider] {
-		return badRequest(ErrInvalidRequest, "CDC is not supported for provider " + provider)
+		return badRequest(ErrInvalidRequest, "CDC is not supported for provider "+provider)
 	}
 	name := cdcName(tenantFrom(r).TenantID, stringValue(row["id"]))
 	config := map[string]string{"name": name, "connector.class": map[string]string{"postgres": "io.debezium.connector.postgresql.PostgresConnector", "mysql": "io.debezium.connector.mysql.MySqlConnector", "mongodb": "io.debezium.connector.mongodb.MongoDbConnector"}[provider], "topic.prefix": name, "tasks.max": "1"}
@@ -354,13 +355,16 @@ func (s *Server) consumeOAuthState(r *http.Request, state, provider string) (oau
 		return oauthState{}, fmt.Errorf("invalid state")
 	}
 	var value oauthState
-	if json.Unmarshal(body, &value) != nil || value.Provider != provider || value.TenantID != tenantFrom(r).TenantID || value.UserID != tenantFrom(r).UserID {
+	if json.Unmarshal(body, &value) != nil || value.Provider != provider || value.TenantID == "" || value.UserID == "" {
 		return oauthState{}, fmt.Errorf("invalid state")
 	}
 	return value, nil
 }
 func oauthURL(base string, values url.Values) string { return base + "?" + values.Encode() }
 func (s *Server) googleConnectorStart(w http.ResponseWriter, r *http.Request) error {
+	if os.Getenv("GOOGLE_CLIENT_ID") == "" || os.Getenv("GOOGLE_CLIENT_SECRET") == "" {
+		return &HTTPError{Status: http.StatusServiceUnavailable, Message: "Google OAuth is not configured"}
+	}
 	state, err := s.mintOAuthState(r, "google", nil)
 	if err != nil {
 		return err
@@ -393,7 +397,7 @@ func (s *Server) googleConnectorCallback(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return err
 	}
-	s.audit(r.Context(), tenantFrom(r), "connector.connected", id, map[string]interface{}{"provider": "google", "email": me["email"]}, r)
+	s.audit(r.Context(), model.TenantContext{TenantID: state.TenantID, UserID: state.UserID}, "connector.connected", id, map[string]interface{}{"provider": "google", "email": me["email"]}, r)
 	http.Redirect(w, r, s.Config.AppURL+"/connectors?connected=google", http.StatusFound)
 	return nil
 }
@@ -433,7 +437,7 @@ func (s *Server) microsoftConnectorCallback(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		return err
 	}
-	s.audit(r.Context(), tenantFrom(r), "connector.connected", id, map[string]string{"provider": "microsoft", "email": email}, r)
+	s.audit(r.Context(), model.TenantContext{TenantID: state.TenantID, UserID: state.UserID}, "connector.connected", id, map[string]string{"provider": "microsoft", "email": email}, r)
 	http.Redirect(w, r, s.Config.AppURL+"/connectors?connected=microsoft", http.StatusFound)
 	return nil
 }
@@ -580,7 +584,7 @@ func (s *Server) pickOAuth(r *http.Request, provider string) (map[string]interfa
 func (s *Server) providerGet(r *http.Request, provider, path string, target interface{}) error {
 	row, err := s.pickOAuth(r, provider)
 	if err != nil || row == nil {
-		return notFound(ErrNotFound, "no " + provider + " connection")
+		return notFound(ErrNotFound, "no "+provider+" connection")
 	}
 	token, err := s.liveToken(r, row)
 	if err != nil {

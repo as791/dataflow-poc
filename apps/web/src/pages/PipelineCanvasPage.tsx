@@ -83,6 +83,7 @@ export default function PipelineCanvasPage() {
   const [showLifecycle, setShowLifecycle] = useState(false);
   const [showMermaid, setShowMermaid] = useState(false);
   const [mermaidDraft, setMermaidDraft] = useState('');
+  const [mermaidValid, setMermaidValid] = useState(false);
   const [showAI, setShowAI] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiMessages, setAiMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
@@ -343,6 +344,7 @@ export default function PipelineCanvasPage() {
   };
 
   const applyMermaid = () => {
+    if (!mermaidValid) return setMsg('Fix Mermaid validation errors before applying');
     const { nodes: parsed, edges: pEdges, warnings } = mermaidToDefinition(mermaidDraft, catalog);
     const prevData = new Map(nodes.map(n => [n.id, n.data]));
     const flow = definitionToFlow({ nodes: parsed, edges: pEdges }, byType);
@@ -887,11 +889,11 @@ export default function PipelineCanvasPage() {
                 <>
                   <textarea className="glass-input h-52 w-full font-mono text-[11px]"
                     value={mermaidDraft} onChange={e => setMermaidDraft(e.target.value)} />
-                  <button className="glass-btn-primary mt-3 w-full" onClick={applyMermaid}>
+                  <button className="glass-btn-primary mt-3 w-full disabled:cursor-not-allowed disabled:opacity-50" disabled={!mermaidValid} onClick={applyMermaid}>
                     <Code2 size={15} /> Apply to canvas
                   </button>
                   <div className="mt-4 overflow-hidden rounded-[14px] border border-gray-100 dark:border-white/[0.08] bg-gray-50 dark:bg-black/15 p-2">
-                    <MermaidPreview source={mermaidDraft} />
+                    <MermaidPreview source={mermaidDraft} onValidChange={setMermaidValid} />
                   </div>
                   <p className="mt-2 text-[10px] text-gray-400 dark:text-white/30">Structure only. Node config preserved by matching ID.</p>
                 </>
@@ -1012,9 +1014,9 @@ export default function PipelineCanvasPage() {
               <div className="grid min-h-full gap-3 p-3 md:grid-cols-2">
                 <div className="flex min-h-0 flex-col">
                   <textarea className="glass-input min-h-36 flex-1 font-mono text-[11px]" value={mermaidDraft} onChange={e => setMermaidDraft(e.target.value)} />
-                  <button className="glass-btn-primary mt-2 self-start text-xs" onClick={applyMermaid}><Code2 size={13} /> Apply to DAG</button>
+                  <button className="glass-btn-primary mt-2 self-start text-xs disabled:cursor-not-allowed disabled:opacity-50" disabled={!mermaidValid} onClick={applyMermaid}><Code2 size={13} /> Apply to DAG</button>
                 </div>
-                <div className="min-h-36 overflow-auto rounded-xl border border-gray-200 bg-gray-50 p-2 dark:border-white/[0.07] dark:bg-black/15"><MermaidPreview source={mermaidDraft} /></div>
+                <div className="min-h-36 overflow-auto rounded-xl border border-gray-200 bg-gray-50 p-2 dark:border-white/[0.07] dark:bg-black/15"><MermaidPreview source={mermaidDraft} onValidChange={setMermaidValid} /></div>
               </div>
             )}
           </div>

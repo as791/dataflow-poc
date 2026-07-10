@@ -25,7 +25,7 @@ function escapeLabel(s: string): string {
 }
 
 export function definitionToMermaid(nodes: PipelineNode[], edges: PipelineEdge[]): string {
-  const lines: string[] = ['flowchart TD'];
+  const lines: string[] = ['flowchart LR'];
   for (const n of nodes) {
     const label = escapeLabel(n.label || n.activityType);
     lines.push(`  ${n.id}["${label} (${n.activityType})"]`);

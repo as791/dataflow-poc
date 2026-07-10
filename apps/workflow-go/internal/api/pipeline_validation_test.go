@@ -27,6 +27,20 @@ func TestStreamDirectValidationAndEntitlement(t *testing.T) {
 	}
 }
 
+func TestValidatePipelineRejectsInvalidLakehouseLayer(t *testing.T) {
+	def := model.PipelineDefinition{Name: "layered", Trigger: model.Trigger{Type: "manual"}, Nodes: []model.Node{
+		{ID: "source", Type: "source", ActivityType: "s3.fetch", Config: map[string]interface{}{"layer": "bronze"}},
+		{ID: "sink", Type: "sink", ActivityType: "sink.clickhouse", Config: map[string]interface{}{"layer": "platinum"}},
+	}, Edges: []model.Edge{{ID: "edge", Source: "source", Target: "sink"}}}
+	if err := validatePipeline(def); err == nil {
+		t.Fatal("expected invalid layer error")
+	}
+	def.Nodes[1].Config["layer"] = "gold"
+	if err := validatePipeline(def); err != nil {
+		t.Fatalf("expected valid lakehouse layers, got %v", err)
+	}
+}
+
 func TestSparkSQLValidationAndEntitlement(t *testing.T) {
 	def := model.PipelineDefinition{Name: "spark", Trigger: model.Trigger{Type: "manual"}, Execution: &model.ExecutionConfig{Engine: "spark-sql", TransformSQL: "SELECT id FROM source"}, Nodes: []model.Node{
 		{ID: "source", Type: "source", ActivityType: "s3.fetch"}, {ID: "sink", Type: "sink", ActivityType: "sink.iceberg"},

@@ -106,6 +106,11 @@ func (s *Server) Handler() http.Handler {
 	s.registerTriggers(mux)
 	s.registerBillingWebhook(mux)
 	mux.HandleFunc("GET /api/analytics/shared/{token}", handle(s.analyticsShared))
+	// OAuth providers redirect without an API bearer token. The single-use state
+	// nonce carries and validates the tenant/user identity for these callbacks.
+	mux.HandleFunc("GET /api/connectors/google/callback", handle(s.googleConnectorCallback))
+	mux.HandleFunc("GET /api/connectors/microsoft/callback", handle(s.microsoftConnectorCallback))
+	mux.HandleFunc("GET /api/connectors/zendesk/callback", handle(s.zendeskCallback))
 
 	private := http.NewServeMux()
 	s.registerEdition(private)

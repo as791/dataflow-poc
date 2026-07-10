@@ -8,12 +8,15 @@ export interface SchemaField {
   type: string;
 }
 
+export type BucketInterval = 'minute' | '5 minute' | '15 minute' | 'hour' | 'day' | 'week';
+
 export interface QuerySpec {
   select?: string[];
   where?: Array<{ field: string; op: '=' | '!=' | '>' | '<' | '>=' | '<=' | 'LIKE' | 'IN'; value: unknown }>;
   groupBy?: string[];
   aggregate?: { field: string; fn: 'count' | 'sum' | 'avg' | 'min' | 'max' };
   orderBy?: { field: string; dir: 'ASC' | 'DESC' };
+  bucket?: BucketInterval;
   limit?: number;
 }
 
@@ -26,7 +29,7 @@ export function timeRangeFor(hours: number, now = new Date()): TimeRange {
   return { from: new Date(now.getTime() - hours * 3_600_000).toISOString(), to: now.toISOString() };
 }
 
-export type ChartType = 'bar' | 'line' | 'pie' | 'table';
+export type ChartType = 'bar' | 'line' | 'area' | 'pie' | 'stat' | 'table';
 
 export interface WidgetDef {
   id: string;
@@ -40,7 +43,9 @@ export interface WidgetDef {
 
 export interface DashboardDefinition {
   widgets: WidgetDef[];
-  timeRange?: TimeRange;
+  // Relative window, resolved to absolute at load. Legacy dashboards saved an
+  // absolute `timeRange` which froze the window forever; ignored on load.
+  timeRangeHours?: number;
 }
 
 export interface Dashboard {

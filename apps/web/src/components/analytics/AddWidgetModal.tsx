@@ -1,22 +1,27 @@
 import { useEffect, useState } from 'react';
-import type { Dataset, SchemaField, QuerySpec, ChartType, WidgetDef } from './types';
+import type { Dataset, SchemaField, ChartType, WidgetDef, BucketInterval } from './types';
+import { AGG_OPTIONS, BUCKETS, CHART_TYPES, FILTER_OPS, buildWidgetSpec, editableFilters, type EditableFilterOp, type FilterRow } from './model';
 
 interface Props {
   datasets: Dataset[];
   initialDataset?: string;
+  editing?: WidgetDef;
   onClose: () => void;
   onAdd: (widget: Omit<WidgetDef, 'data'>) => void;
   schema: (name: string) => Promise<SchemaField[]>;
 }
 
-export function AddWidgetModal({ datasets, initialDataset, onClose, onAdd, schema }: Props) {
-  const [title, setTitle] = useState('New Widget');
-  const [dataset, setDataset] = useState(initialDataset ?? datasets[0]?.collection ?? '');
-  const [chartType, setChartType] = useState<ChartType>('bar');
+export function AddWidgetModal({ datasets, initialDataset, editing, onClose, onAdd, schema }: Props) {
+  const [title, setTitle] = useState(editing?.title ?? 'New Widget');
+  const [dataset, setDataset] = useState(editing?.dataset ?? initialDataset ?? datasets[0]?.collection ?? '');
+  const [chartType, setChartType] = useState<ChartType>(editing?.type ?? 'bar');
   const [fields, setFields] = useState<SchemaField[]>([]);
-  const [xCol, setXCol] = useState('');
-  const [yCol, setYCol] = useState('');
-  const [agg, setAgg] = useState<'count' | 'sum' | 'avg' | 'min' | 'max' | 'none'>('count');
+  const [xCol, setXCol] = useState(editing?.spec.groupBy?.[0] ?? editing?.spec.select?.[0] ?? '');
+  const [yCol, setYCol] = useState(editing?.spec.aggregate?.field ?? editing?.spec.select?.[1] ?? '');
+  const [agg, setAgg] = useState<'count' | 'sum' | 'avg' | 'min' | 'max' | 'none'>(
+    editing ? (editing.spec.aggregate?.fn ?? 'none') : 'count');
+  const [bucket, setBucket] = useState<BucketInterval | ''>(editing?.spec.bucket ?? '');
+  const [filters, setFilters] = useState<FilterRow[]>(editableFilters(editing?.spec));
   const [loadingSchema, setLoadingSchema] = useState(false);
   const [schemaErr, setSchemaErr] = useState<string | null>(null);
 
@@ -25,20 +30,20 @@ export function AddWidgetModal({ datasets, initialDataset, onClose, onAdd, schem
     setLoadingSchema(true);
     setSchemaErr(null);
     schema(dataset)
-      .then(s => { setFields(s); setXCol(s[0]?.name ?? ''); setYCol(s[1]?.name ?? s[0]?.name ?? ''); })
+      .then(s => {
+        setFields(s);
+        setXCol(prev => (prev && s.some(f => f.name === prev)) ? prev : (s[0]?.name ?? ''));
+        setYCol(prev => (prev && s.some(f => f.name === prev)) ? prev : (s[1]?.name ?? s[0]?.name ?? ''));
+      })
       .catch(e => setSchemaErr(e.message))
       .finally(() => setLoadingSchema(false));
   }, [dataset, schema]);
 
   const handleAdd = () => {
-    const spec: QuerySpec = chartType === 'table'
-      ? { select: [xCol, ...(yCol ? [yCol] : [])], limit: 50 }
-      : agg === 'none'
-        ? { select: [xCol, yCol], limit: 50 }
-        : { groupBy: [xCol], aggregate: { field: yCol, fn: agg as 'count' | 'sum' | 'avg' | 'min' | 'max' }, limit: 50 };
+    const spec = buildWidgetSpec({ chartType, xCol, yCol, agg, bucket, fields, filters, editingSpec: editing?.spec });
     onAdd({
-      id: `w_${Date.now()}`,
-      layout: { x: 0, y: Infinity, w: 4, h: 4 },
+      id: editing?.id ?? `w_${Date.now()}`,
+      layout: editing?.layout ?? { x: 0, y: Infinity, w: 4, h: 4 },
       type: chartType,
       dataset,
       title,
@@ -47,15 +52,13 @@ export function AddWidgetModal({ datasets, initialDataset, onClose, onAdd, schem
     onClose();
   };
 
-  const chartTypes: ChartType[] = ['bar', 'line', 'pie', 'table'];
-  const aggOptions: Array<'count' | 'sum' | 'avg' | 'min' | 'max' | 'none'> = ['count', 'sum', 'avg', 'min', 'max', 'none'];
   const cols = fields.map(f => f.name);
 
   return (
     <div className="glass-modal-backdrop" onClick={onClose}>
       <div className="glass-modal max-w-lg" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-semibold">Add Widget</h2>
+          <h2 className="text-lg font-semibold">{editing ? 'Edit Widget' : 'Add Widget'}</h2>
           <button className="glass-btn-ghost w-8 h-8 flex items-center justify-center text-lg" onClick={onClose}>×</button>
         </div>
 
@@ -79,7 +82,7 @@ export function AddWidgetModal({ datasets, initialDataset, onClose, onAdd, schem
           <div>
             <label className="glass-label">Chart type</label>
             <div className="flex gap-2">
-              {chartTypes.map(t => (
+              {CHART_TYPES.map(t => (
                 <button key={t}
                   className={`glass-btn flex-1 capitalize ${chartType === t ? 'bg-brand-500/40 border-brand-400/60' : ''}`}
                   onClick={() => setChartType(t)}>
@@ -95,12 +98,14 @@ export function AddWidgetModal({ datasets, initialDataset, onClose, onAdd, schem
             <p className="text-xs text-danger/80">{schemaErr}</p>
           ) : (
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="glass-label">X column</label>
-                <select className="glass-select w-full" value={xCol} onChange={e => setXCol(e.target.value)}>
-                  {cols.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
+              {chartType !== 'stat' && !(bucket && agg !== 'none' && chartType !== 'table' && chartType !== 'pie') && (
+                <div>
+                  <label className="glass-label">X column</label>
+                  <select className="glass-select w-full" value={xCol} onChange={e => setXCol(e.target.value)}>
+                    {cols.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              )}
               {chartType !== 'table' && (
                 <div>
                   <label className="glass-label">Y column</label>
@@ -113,11 +118,50 @@ export function AddWidgetModal({ datasets, initialDataset, onClose, onAdd, schem
           )}
 
           {chartType !== 'table' && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="glass-label">Aggregation</label>
+                <select className="glass-select w-full" value={agg} onChange={e => setAgg(e.target.value as 'count' | 'sum' | 'avg' | 'min' | 'max' | 'none')}>
+                  {AGG_OPTIONS.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+              {chartType !== 'stat' && chartType !== 'pie' && agg !== 'none' && (
+                <div>
+                  <label className="glass-label">Time bucket (X axis)</label>
+                  <select className="glass-select w-full" value={bucket} onChange={e => setBucket(e.target.value as BucketInterval | '')}>
+                    <option value="">none — group by X column</option>
+                    {BUCKETS.map(b => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+
+          {cols.length > 0 && (
             <div>
-              <label className="glass-label">Aggregation</label>
-              <select className="glass-select w-full" value={agg} onChange={e => setAgg(e.target.value as 'count' | 'sum' | 'avg' | 'min' | 'max' | 'none')}>
-                {aggOptions.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
+              <div className="flex items-center justify-between mb-1">
+                <label className="glass-label mb-0">Filters</label>
+                <button className="glass-btn-ghost text-xs px-2 py-1"
+                  onClick={() => setFilters(prev => [...prev, { field: cols[0], op: '=', value: '' }])}>
+                  + Add filter
+                </button>
+              </div>
+              {filters.map((f, i) => (
+                <div key={i} className="flex gap-2 mb-2">
+                  <select className="glass-select flex-1" value={f.field}
+                    onChange={e => setFilters(prev => prev.map((p, pi) => pi === i ? { ...p, field: e.target.value } : p))}>
+                    {cols.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <select className="glass-select w-20" value={f.op}
+                    onChange={e => setFilters(prev => prev.map((p, pi) => pi === i ? { ...p, op: e.target.value as EditableFilterOp } : p))}>
+                    {FILTER_OPS.map(op => <option key={op} value={op}>{op}</option>)}
+                  </select>
+                  <input className="glass-input flex-1" placeholder="value" value={f.value}
+                    onChange={e => setFilters(prev => prev.map((p, pi) => pi === i ? { ...p, value: e.target.value } : p))} />
+                  <button className="glass-btn-ghost px-2" title="Remove filter"
+                    onClick={() => setFilters(prev => prev.filter((_, pi) => pi !== i))}>×</button>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -128,7 +172,7 @@ export function AddWidgetModal({ datasets, initialDataset, onClose, onAdd, schem
             className="glass-btn-primary"
             disabled={!dataset || !title || (!loadingSchema && cols.length === 0)}
             onClick={handleAdd}>
-            Add widget →
+            {editing ? 'Save widget →' : 'Add widget →'}
           </button>
         </div>
       </div>

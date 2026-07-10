@@ -1,6 +1,6 @@
 module github.com/dataflow-poc/workflow-go
 
-go 1.25.11
+go 1.25.12
 
 require (
 	github.com/apache/arrow-go/v18 v18.6.0

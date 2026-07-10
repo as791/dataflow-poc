@@ -19,7 +19,13 @@ import (
 )
 
 func expressionEnv(record interface{}, records []interface{}) map[string]interface{} {
-	return map[string]interface{}{"r": record, "records": records, "abs": func(v interface{}) float64 { return math.Abs(number(v)) }, "round": func(v interface{}) float64 { return math.Round(number(v)) }, "lower": func(v interface{}) string { return strings.ToLower(fmt.Sprint(v)) }, "upper": func(v interface{}) string { return strings.ToUpper(fmt.Sprint(v)) }, "string": fmt.Sprint, "number": number, "length": func(v interface{}) int { return reflect.ValueOf(v).Len() }, "coalesce": func(values ...interface{}) interface{} {
+	return map[string]interface{}{"r": record, "records": records, "abs": func(v interface{}) float64 { return math.Abs(number(v)) }, "round": func(v interface{}, precision ...interface{}) float64 {
+			if len(precision) == 0 {
+				return math.Round(number(v))
+			}
+			scale := math.Pow(10, number(precision[0]))
+			return math.Round(number(v)*scale) / scale
+		}, "lower": func(v interface{}) string { return strings.ToLower(fmt.Sprint(v)) }, "upper": func(v interface{}) string { return strings.ToUpper(fmt.Sprint(v)) }, "string": fmt.Sprint, "number": number, "length": func(v interface{}) int { return reflect.ValueOf(v).Len() }, "coalesce": func(values ...interface{}) interface{} {
 		for _, v := range values {
 			if v != nil {
 				return v
