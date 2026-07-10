@@ -86,8 +86,8 @@ export class DeployedAPI {
     return this.request.get(path, { headers: this.headers() });
   }
 
-  async post(path: string, data?: Record<string, unknown>) {
-    return this.request.post(path, { headers: this.headers(), data });
+  async post(path: string, data?: Record<string, unknown>, timeout?: number) {
+    return this.request.post(path, { headers: this.headers(), data, timeout });
   }
 
   async put(path: string, data: Record<string, unknown>) {

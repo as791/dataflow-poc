@@ -9,8 +9,10 @@ type Definition = {
   edges: Array<{ source: string; target: string }>;
 };
 
+// ponytail: this box runs Ollama on CPU (~4 tok/s) — a generate/refine call can
+// take minutes, well past Playwright's 30s default request timeout.
 async function ai(api: DeployedAPI, path: string, data: Record<string, unknown>) {
-  const response = await api.post(path, data);
+  const response = await api.post(path, data, 290_000);
   expect(response.ok(), await response.text()).toBeTruthy();
   return response.json() as Promise<{ definition: Definition; mermaid: string; warnings: string[] }>;
 }

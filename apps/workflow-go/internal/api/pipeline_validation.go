@@ -40,6 +40,12 @@ func validatePipeline(def model.PipelineDefinition) error {
 		if node.Type != "fork" && node.Type != "merge" && node.ActivityType == "" {
 			return fmt.Errorf("node %s activityType is required", node.ID)
 		}
+		if layer, ok := node.Config["layer"]; ok {
+			validLayers := map[string]bool{"bronze": true, "silver": true, "gold": true}
+			if name, isString := layer.(string); !isString || !validLayers[name] {
+				return fmt.Errorf("node %s has invalid layer %v (must be bronze, silver, or gold)", node.ID, layer)
+			}
+		}
 		ids[node.ID] = true
 		indegree[node.ID] = 0
 	}

@@ -233,7 +233,9 @@ func (s *Server) ollamaJSON(r *http.Request, system, user string, target interfa
 		} `json:"message"`
 	}
 	client := *s.HTTP
-	client.Timeout = 2 * time.Minute
+	// ponytail: CPU-only Ollama on this box runs ~4 tok/s and can take minutes,
+	// especially on a cold model load — give it real headroom.
+	client.Timeout = 4 * time.Minute
 	if err := doJSON(&client, request, &response); err != nil {
 		return fmt.Errorf("AI builder is unavailable")
 	}
