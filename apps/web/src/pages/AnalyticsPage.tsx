@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BarChart3, Pencil, Plus, Save, Share2, Trash2, X } from 'lucide-react';
+import { BarChart3, Download, Pencil, Plus, Save, Share2, Trash2, X } from 'lucide-react';
 import GridLayout, { Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -7,6 +7,8 @@ import { timeRangeFor, type Dataset, type SchemaField, type WidgetDef, type Dash
 import { ChartRenderer } from '../components/analytics/ChartRenderer';
 import { AddWidgetModal } from '../components/analytics/AddWidgetModal';
 import { SaveDashboardModal } from '../components/analytics/SaveDashboardModal';
+import { DatasetPreview } from '../components/analytics/DatasetPreview';
+import { ShareModal } from '../components/analytics/ShareModal';
 import { api } from '../api';
 import { ApiError } from '../components/ApiError';
 
@@ -27,7 +29,9 @@ export function AnalyticsPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [initialDataset, setInitialDataset] = useState<string>();
   const [editingWidget, setEditingWidget] = useState<WidgetDef | undefined>();
-  const [shareInfo, setShareInfo] = useState<string | null>(null);
+  const [previewDataset, setPreviewDataset] = useState<string | null>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [refreshSec, setRefreshSec] = useState(0);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [dirty, setDirty] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -153,16 +157,31 @@ export function AnalyticsPage() {
     widgets.forEach(widget => fetchWidgetData(widget, range));
   };
 
-  const shareDashboard = async () => {
-    if (!activeDashboard) return;
-    try {
-      const { shareUrl, expiresAt } = await api.shareDashboard(activeDashboard.id);
-      const url = `${window.location.origin}${shareUrl}`;
-      try { await navigator.clipboard.writeText(url); } catch { /* clipboard may be unavailable */ }
-      setShareInfo(`Share link copied (expires ${new Date(expiresAt).toLocaleString()}): ${url}`);
-    } catch (e: any) {
-      setError(e.message ?? 'Could not create share link');
-    }
+  useEffect(() => {
+    if (!refreshSec) return;
+    const t = setInterval(() => {
+      const range = timeRangeFor(hours);
+      setTimeRange(range);
+      // read-only peek at current widgets; fetchWidgetData does the real setWidgets
+      setWidgets(current => { current.forEach(w => fetchWidgetData(w, range)); return current; });
+    }, refreshSec * 1000);
+    return () => clearInterval(t);
+  }, [refreshSec, hours, fetchWidgetData]);
+
+  const exportCsv = (widget: WidgetDef) => {
+    const rows = widget.data ?? [];
+    if (!rows.length) return;
+    const cols = Object.keys(rows[0]);
+    const escape = (v: unknown) => {
+      const s = typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v ?? '');
+      return /[",\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
+    };
+    const csv = [cols.join(','), ...rows.map(r => cols.map(c => escape(r[c])).join(','))].join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = `${widget.title.replace(/[^\w-]+/g, '_')}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
   };
 
   const deleteDashboard = async () => {
@@ -215,8 +234,8 @@ export function AnalyticsPage() {
             <li key={d.collection}>
               <button
                 className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/5 transition"
-                title={`Create a widget from ${d.collection}`}
-                onClick={() => { setInitialDataset(d.collection); setShowAddModal(true); }}>
+                title={`Browse ${d.collection}`}
+                onClick={() => setPreviewDataset(d.collection)}>
                 <p className="truncate text-gray-800 dark:text-white/80">{d.collection}</p>
                 <p className="text-xs text-gray-400 dark:text-white/40">{d.row_count.toLocaleString()} rows</p>
               </button>
@@ -261,8 +280,13 @@ export function AnalyticsPage() {
               <option value="0.25">15m</option><option value="1">1h</option><option value="6">6h</option>
               <option value="24">24h</option><option value="168">7d</option>
             </select>
+            <label className="sr-only" htmlFor="analytics-refresh">Auto-refresh interval</label>
+            <select id="analytics-refresh" className="glass-select w-28 py-1.5" value={refreshSec} onChange={e => setRefreshSec(Number(e.target.value))} title="Auto-refresh">
+              <option value="0">No refresh</option><option value="30">30s</option>
+              <option value="60">1m</option><option value="300">5m</option>
+            </select>
             <button className="glass-btn-ghost text-sm" onClick={() => { setInitialDataset(undefined); setEditingWidget(undefined); setShowAddModal(true); }}><Plus size={15} /> Add widget</button>
-            {activeDashboard && <button className="glass-btn-ghost text-sm" onClick={shareDashboard} title="Share dashboard (read-only, 24h)"><Share2 size={15} /></button>}
+            {activeDashboard && <button className="glass-btn-ghost text-sm" onClick={() => setShowShareModal(true)} title="Share dashboard"><Share2 size={15} /></button>}
             {activeDashboard && <button className="glass-btn-danger text-sm" onClick={deleteDashboard} title="Delete dashboard"><Trash2 size={15} /></button>}
             <button
               className={`glass-btn-primary text-sm ${!dirty ? 'opacity-50' : ''}`}
@@ -273,12 +297,6 @@ export function AnalyticsPage() {
           </div>
         </div>
 
-        {shareInfo && (
-          <div className="flex items-center justify-between gap-2 px-5 py-2 text-xs border-b border-gray-200 dark:border-white/10 bg-brand-500/10 text-brand-600 dark:text-brand-300">
-            <span className="truncate">{shareInfo}</span>
-            <button className="glass-btn-ghost px-2 py-0.5 flex-shrink-0" onClick={() => setShareInfo(null)}>Dismiss</button>
-          </div>
-        )}
         <div ref={containerRef} className="flex-1 overflow-auto p-4">
           {widgets.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center space-y-3">
@@ -311,6 +329,13 @@ export function AnalyticsPage() {
                       <button
                         className="glass-btn-ghost w-6 h-6 flex items-center justify-center text-xs text-gray-400 dark:text-white/50 hover:text-brand-400 cursor-pointer"
                         onMouseDown={e => e.stopPropagation()}
+                        onClick={() => exportCsv(widget)}
+                        title="Export CSV">
+                        <Download size={12} />
+                      </button>
+                      <button
+                        className="glass-btn-ghost w-6 h-6 flex items-center justify-center text-xs text-gray-400 dark:text-white/50 hover:text-brand-400 cursor-pointer"
+                        onMouseDown={e => e.stopPropagation()}
                         onClick={() => { setEditingWidget(widget); setShowAddModal(true); }}
                         title="Edit">
                         <Pencil size={12} />
@@ -336,6 +361,16 @@ export function AnalyticsPage() {
         </div>
       </div>
 
+      {showShareModal && activeDashboard && (
+        <ShareModal dashboardId={activeDashboard.id} onClose={() => setShowShareModal(false)} />
+      )}
+      {previewDataset && !showAddModal && (
+        <DatasetPreview
+          dataset={previewDataset}
+          onClose={() => setPreviewDataset(null)}
+          onAddWidget={() => { setInitialDataset(previewDataset); setEditingWidget(undefined); setShowAddModal(true); setPreviewDataset(null); }}
+        />
+      )}
       {showAddModal && (
         <AddWidgetModal
           datasets={datasets}

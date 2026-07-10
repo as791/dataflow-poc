@@ -43,6 +43,30 @@ test('P1 pipeline output is queryable as an analytics dataset', async ({ request
   });
   expect(agg.ok(), await agg.text()).toBeTruthy();
   expect((await agg.json()).rows).toHaveLength(2);
+
+  // Paginated raw-row browse
+  const page1 = await api.get(`/api/analytics/datasets/${collection}/rows?limit=30&offset=0`);
+  expect(page1.ok(), await page1.text()).toBeTruthy();
+  const p1 = await page1.json();
+  expect(p1.total).toBe(100);
+  expect(p1.rows).toHaveLength(30);
+  const page4 = await api.get(`/api/analytics/datasets/${collection}/rows?limit=30&offset=90`);
+  expect((await page4.json()).rows).toHaveLength(10);
+
+  // Time-bucketed aggregate: all rows ingested just now → single hour bucket with count 100
+  const bucketed = await api.post('/api/analytics/query', {
+    dataset: collection, bucket: 'hour', aggregate: { field: 'id', fn: 'count' }, limit: 10,
+  });
+  expect(bucketed.ok(), await bucketed.text()).toBeTruthy();
+  const buckets = (await bucketed.json()).rows;
+  expect(buckets.length).toBeGreaterThanOrEqual(1);
+  expect(buckets.reduce((sum: number, b: { aggregate_value: number }) => sum + Number(b.aggregate_value), 0)).toBe(100);
+  expect(buckets[0].time_bucket).toBeTruthy();
+
+  const badBucket = await api.post('/api/analytics/query', {
+    dataset: collection, bucket: 'fortnight', aggregate: { field: 'id', fn: 'count' },
+  });
+  expect(badBucket.status()).toBe(400);
 });
 
 test('P2 analytics dashboard can be saved, changed, shared read-only, and deleted', async ({ request }) => {
@@ -63,6 +87,17 @@ test('P2 analytics dashboard can be saved, changed, shared read-only, and delete
   const publicView = await request.get(shareUrl);
   expect(publicView.ok(), await publicView.text()).toBeTruthy();
   expect(await publicView.json()).toMatchObject({ readOnly: true, dashboard: { id: dashboard.id, name: 'QA dashboard updated' } });
+
+  // P3: share links are listable and revocable; revoked links stop working
+  const shares = await api.get(`/api/analytics/dashboards/${dashboard.id}/shares`);
+  expect(shares.ok(), await shares.text()).toBeTruthy();
+  const shareList = await shares.json();
+  expect(shareList.length).toBeGreaterThanOrEqual(1);
+
+  const revoked = await api.delete(`/api/analytics/dashboards/${dashboard.id}/shares/${shareList[0].share_token_hash}`);
+  expect(revoked.ok(), await revoked.text()).toBeTruthy();
+  const afterRevoke = await request.get(shareUrl);
+  expect(afterRevoke.status()).toBe(404);
 
   const deleted = await api.delete(`/api/analytics/dashboards/${dashboard.id}`);
   expect(deleted.ok(), await deleted.text()).toBeTruthy();

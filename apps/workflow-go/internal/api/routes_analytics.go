@@ -19,9 +19,13 @@ import (
 
 var analyticsField = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*$`)
 
+// ponytail: flat per-query caps; make per-tenant if a tenant needs more
+const chGuardrails = " SETTINGS max_execution_time=10, max_rows_to_read=10000000"
+
 func (s *Server) registerAnalytics(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/analytics/datasets", handle(s.analyticsDatasets))
 	mux.HandleFunc("GET /api/analytics/datasets/{name}/schema", handle(s.analyticsSchema))
+	mux.HandleFunc("GET /api/analytics/datasets/{name}/rows", handle(s.analyticsRows))
 	mux.HandleFunc("POST /api/analytics/query", handle(s.analyticsQuery))
 	mux.HandleFunc("GET /api/analytics/dashboards", handle(s.dashboardList))
 	mux.HandleFunc("POST /api/analytics/dashboards", handle(s.dashboardCreate))
@@ -29,6 +33,25 @@ func (s *Server) registerAnalytics(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/analytics/dashboards/{id}", handle(s.dashboardUpdate))
 	mux.HandleFunc("DELETE /api/analytics/dashboards/{id}", handle(s.dashboardDelete))
 	mux.HandleFunc("POST /api/analytics/dashboards/{id}/share", handle(s.dashboardShare))
+	mux.HandleFunc("GET /api/analytics/dashboards/{id}/shares", handle(s.dashboardShareList))
+	mux.HandleFunc("DELETE /api/analytics/dashboards/{id}/shares/{hash}", handle(s.dashboardShareRevoke))
+}
+
+// requireDashboardOwnership gates destructive/sharing actions: tenant owners
+// always pass, members only for dashboards they created.
+func (s *Server) requireDashboardOwnership(r *http.Request, dashboardID string) error {
+	tenant := tenantFrom(r)
+	var createdBy *string
+	err := s.DB.TenantTx(r.Context(), tenant.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(r.Context(), `SELECT created_by::text FROM dashboards WHERE id=$1`, dashboardID).Scan(&createdBy)
+	})
+	if err != nil {
+		return notFound(ErrNotFound, "not found")
+	}
+	if tenant.Role == "owner" || (createdBy != nil && *createdBy == tenant.UserID) {
+		return nil
+	}
+	return &HTTPError{Status: http.StatusForbidden, Message: "only the dashboard creator or a workspace owner can do this"}
 }
 
 func sqlString(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
@@ -180,6 +203,46 @@ func (s *Server) analyticsSchema(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+func (s *Server) analyticsRows(w http.ResponseWriter, r *http.Request) error {
+	tenant := tenantFrom(r)
+	name := r.PathValue("name")
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	scope := "tenant_id=" + sqlString(tenant.TenantID) + " AND collection=" + sqlString(name)
+	total, err := s.clickhouseQuery(r, `SELECT count() AS total FROM sink_records FINAL WHERE `+scope)
+	if err != nil {
+		return &HTTPError{Status: http.StatusBadGateway, Message: "clickhouse error"}
+	}
+	raw, err := s.clickhouseQuery(r, `SELECT record,created_at FROM sink_records FINAL WHERE `+scope+
+		` ORDER BY created_at DESC LIMIT `+strconv.Itoa(limit)+` OFFSET `+strconv.Itoa(offset)+chGuardrails)
+	if err != nil {
+		return &HTTPError{Status: http.StatusBadGateway, Message: "clickhouse error"}
+	}
+	rows := make([]map[string]interface{}, 0, len(raw))
+	for _, row := range raw {
+		record := map[string]interface{}{}
+		if text, ok := row["record"].(string); ok {
+			_ = json.Unmarshal([]byte(text), &record)
+		} else if m, ok := row["record"].(map[string]interface{}); ok {
+			record = m
+		}
+		record["_ingested_at"] = row["created_at"]
+		rows = append(rows, record)
+	}
+	count := 0
+	if len(total) > 0 {
+		count = numberInt(total[0]["total"])
+	}
+	jsonResponse(w, http.StatusOK, map[string]interface{}{"rows": rows, "total": count, "limit": limit, "offset": offset})
+	return nil
+}
+
 func jsonField(field, kind string) (string, error) {
 	if !analyticsField.MatchString(field) {
 		return "", fmt.Errorf("Invalid column name %q", field)
@@ -206,6 +269,7 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 		Aggregate *struct{ Field, Fn string }
 		OrderBy   *struct{ Field, Dir string }
 		TimeRange *struct{ From, To string }
+		Bucket    string
 		Limit     int
 	}
 	if !decodeJSON(w, r, &spec) {
@@ -245,6 +309,19 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 			}
 			selects = append(selects, expr+" AS `"+name+"`")
 		}
+	}
+	bucketExpr := ""
+	if spec.Bucket != "" {
+		intervals := map[string]string{
+			"minute": "1 minute", "5 minute": "5 minute", "15 minute": "15 minute",
+			"hour": "1 hour", "day": "1 day", "week": "1 week",
+		}
+		interval, ok := intervals[spec.Bucket]
+		if !ok {
+			return badRequest(ErrInvalidRequest, "invalid bucket; use minute, 5 minute, 15 minute, hour, day, or week")
+		}
+		bucketExpr = "toStartOfInterval(created_at, INTERVAL " + interval + ")"
+		selects = append(selects, bucketExpr+" AS time_bucket")
 	}
 	if spec.Aggregate != nil {
 		if !map[string]bool{"count": true, "sum": true, "avg": true, "min": true, "max": true}[spec.Aggregate.Fn] {
@@ -292,21 +369,27 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	query := `SELECT ` + strings.Join(selects, ",") + ` FROM sink_records FINAL WHERE ` + strings.Join(where, " AND ")
-	if len(spec.GroupBy) > 0 {
+	if len(spec.GroupBy) > 0 || bucketExpr != "" {
 		parts := []string{}
 		for _, name := range spec.GroupBy {
 			expr, _ := field(name)
 			parts = append(parts, expr)
 		}
+		if bucketExpr != "" {
+			parts = append(parts, bucketExpr)
+		}
 		query += " GROUP BY " + strings.Join(parts, ",")
+	}
+	if spec.OrderBy == nil && bucketExpr != "" {
+		query += " ORDER BY time_bucket ASC"
 	}
 	if spec.OrderBy != nil {
 		direction := "ASC"
 		if spec.OrderBy.Dir == "DESC" {
 			direction = "DESC"
 		}
-		if spec.OrderBy.Field == "aggregate_value" {
-			query += " ORDER BY aggregate_value " + direction
+		if spec.OrderBy.Field == "aggregate_value" || spec.OrderBy.Field == "time_bucket" {
+			query += " ORDER BY " + spec.OrderBy.Field + " " + direction
 		} else {
 			expr, err := field(spec.OrderBy.Field)
 			if err != nil {
@@ -321,7 +404,7 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 	if spec.Limit > 10000 {
 		spec.Limit = 10000
 	}
-	query += " LIMIT " + strconv.Itoa(spec.Limit)
+	query += " LIMIT " + strconv.Itoa(spec.Limit) + chGuardrails
 	rows, err := s.clickhouseQuery(r, query)
 	if err != nil {
 		return &HTTPError{Status: http.StatusBadGateway, Message: "clickhouse query failed"}
@@ -429,6 +512,9 @@ func (s *Server) dashboardUpdate(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 func (s *Server) dashboardDelete(w http.ResponseWriter, r *http.Request) error {
+	if err := s.requireDashboardOwnership(r, r.PathValue("id")); err != nil {
+		return err
+	}
 	tenant := tenantFrom(r)
 	changed := false
 	err := s.DB.TenantTx(r.Context(), tenant.TenantID, func(tx pgx.Tx) error {
@@ -446,6 +532,9 @@ func (s *Server) dashboardDelete(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 func (s *Server) dashboardShare(w http.ResponseWriter, r *http.Request) error {
+	if err := s.requireDashboardOwnership(r, r.PathValue("id")); err != nil {
+		return err
+	}
 	tenant := tenantFrom(r)
 	token := hexToken()
 	expires := time.Now().Add(24 * time.Hour)
@@ -463,6 +552,41 @@ func (s *Server) dashboardShare(w http.ResponseWriter, r *http.Request) error {
 	jsonResponse(w, http.StatusOK, map[string]interface{}{"shareToken": token, "expiresAt": expires.UTC().Format(time.RFC3339Nano), "shareUrl": "/api/analytics/shared/" + token})
 	return nil
 }
+func (s *Server) dashboardShareList(w http.ResponseWriter, r *http.Request) error {
+	if err := s.requireDashboardOwnership(r, r.PathValue("id")); err != nil {
+		return err
+	}
+	tenant := tenantFrom(r)
+	rows, err := tenantQueryRows(r.Context(), s.DB, tenant.TenantID,
+		`SELECT share_token_hash,expires_at,created_by,created_at FROM dashboard_shares WHERE dashboard_id=$1 AND tenant_id=$2 AND expires_at > now() ORDER BY created_at DESC`, r.PathValue("id"), tenant.TenantID)
+	if err != nil {
+		return err
+	}
+	jsonResponse(w, http.StatusOK, rows)
+	return nil
+}
+func (s *Server) dashboardShareRevoke(w http.ResponseWriter, r *http.Request) error {
+	if err := s.requireDashboardOwnership(r, r.PathValue("id")); err != nil {
+		return err
+	}
+	tenant := tenantFrom(r)
+	changed := false
+	err := s.DB.TenantTx(r.Context(), tenant.TenantID, func(tx pgx.Tx) error {
+		cmd, err := tx.Exec(r.Context(), `DELETE FROM dashboard_shares WHERE dashboard_id=$1 AND share_token_hash=$2 AND tenant_id=$3`, r.PathValue("id"), r.PathValue("hash"), tenant.TenantID)
+		changed = cmd.RowsAffected() > 0
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return notFound(ErrNotFound, "share not found")
+	}
+	s.audit(r.Context(), tenant, "dashboard.share_revoked", r.PathValue("id"), map[string]string{"share": r.PathValue("hash")}, r)
+	jsonResponse(w, http.StatusOK, map[string]bool{"ok": true})
+	return nil
+}
+
 func hexToken() string {
 	raw, _ := base64.RawURLEncoding.DecodeString(randomToken())
 	return fmt.Sprintf("%x", raw)
