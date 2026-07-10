@@ -40,7 +40,9 @@ export interface WidgetDef {
 
 export interface DashboardDefinition {
   widgets: WidgetDef[];
-  timeRange?: TimeRange;
+  // Relative window, resolved to absolute at load. Legacy dashboards saved an
+  // absolute `timeRange` which froze the window forever; ignored on load.
+  timeRangeHours?: number;
 }
 
 export interface Dashboard {

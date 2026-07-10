@@ -33,6 +33,30 @@ func (s *Server) registerAnalytics(mux *http.ServeMux) {
 
 func sqlString(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
 
+// sqlLiteral renders a filter value typed to match the JSONExtract expression it
+// is compared against — ClickHouse rejects e.g. Float64 > 'string' comparisons.
+func sqlLiteral(kind string, value interface{}) string {
+	switch kind {
+	case "number":
+		if f, ok := value.(float64); ok {
+			return strconv.FormatFloat(f, 'f', -1, 64)
+		}
+		if f, err := strconv.ParseFloat(fmt.Sprint(value), 64); err == nil {
+			return strconv.FormatFloat(f, 'f', -1, 64)
+		}
+	case "boolean":
+		if b, ok := value.(bool); ok {
+			return strconv.FormatBool(b)
+		}
+		if b, err := strconv.ParseBool(fmt.Sprint(value)); err == nil {
+			return strconv.FormatBool(b)
+		}
+	case "date":
+		return "parseDateTimeBestEffort(" + sqlString(fmt.Sprint(value)) + ")"
+	}
+	return sqlString(fmt.Sprint(value))
+}
+
 func analyticsTimeRangeClauses(from, to string) ([]string, error) {
 	start, err := time.Parse(time.RFC3339, from)
 	if err != nil {
@@ -252,6 +276,7 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return badRequest(ErrInvalidRequest, err.Error())
 		}
+		kind := schema[clause.Field]
 		if clause.Op == "IN" {
 			values, ok := clause.Value.([]interface{})
 			if !ok || len(values) == 0 {
@@ -259,11 +284,11 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 			}
 			parts := []string{}
 			for _, value := range values {
-				parts = append(parts, sqlString(fmt.Sprint(value)))
+				parts = append(parts, sqlLiteral(kind, value))
 			}
 			where = append(where, expr+" IN ("+strings.Join(parts, ",")+")")
 		} else {
-			where = append(where, expr+" "+clause.Op+" "+sqlString(fmt.Sprint(clause.Value)))
+			where = append(where, expr+" "+clause.Op+" "+sqlLiteral(kind, clause.Value))
 		}
 	}
 	query := `SELECT ` + strings.Join(selects, ",") + ` FROM sink_records FINAL WHERE ` + strings.Join(where, " AND ")
