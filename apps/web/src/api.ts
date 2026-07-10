@@ -126,6 +126,8 @@ export const api = {
   updateDashboard: (id: string, body: { name?: string; definition?: any }) =>
     request(`/api/analytics/dashboards/${id}`, { method: 'PUT', body: JSON.stringify(body) }).then(j),
   deleteDashboard: (id: string) => request(`/api/analytics/dashboards/${id}`, { method: 'DELETE' }).then(j),
+  shareDashboard: (id: string): Promise<{ shareToken: string; expiresAt: string; shareUrl: string }> =>
+    request(`/api/analytics/dashboards/${id}/share`, { method: 'POST' }).then(j),
 
   // Connectors OAuth start
   startConnectorOAuth: (provider: 'google' | 'microsoft') =>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BarChart3, Plus, Save, Trash2, X } from 'lucide-react';
+import { BarChart3, Pencil, Plus, Save, Share2, Trash2, X } from 'lucide-react';
 import GridLayout, { Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -22,9 +22,12 @@ export function AnalyticsPage() {
   const [loadingData, setLoadingData] = useState<Record<string, boolean>>({});
   const [widgetErrors, setWidgetErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [hours, setHours] = useState(24);
   const [timeRange, setTimeRange] = useState<TimeRange>(() => timeRangeFor(24));
   const [showAddModal, setShowAddModal] = useState(false);
   const [initialDataset, setInitialDataset] = useState<string>();
+  const [editingWidget, setEditingWidget] = useState<WidgetDef | undefined>();
+  const [shareInfo, setShareInfo] = useState<string | null>(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [dirty, setDirty] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -66,7 +69,9 @@ export function AnalyticsPage() {
     const ws = db.definition.widgets ?? [];
     setWidgets(ws);
     setLayout(ws.map(w => ({ i: w.id, x: w.layout.x, y: w.layout.y, w: w.layout.w, h: w.layout.h })));
-    const range = db.definition.timeRange ?? timeRangeFor(24);
+    const h = db.definition.timeRangeHours ?? 24;
+    setHours(h);
+    const range = timeRangeFor(h);
     setTimeRange(range);
     setWidgetErrors({});
     setDirty(false);
@@ -89,8 +94,12 @@ export function AnalyticsPage() {
 
   const addWidget = useCallback(async (def: Omit<WidgetDef, 'data'>) => {
     const widget: WidgetDef = { ...def, data: [] };
-    setWidgets(prev => [...prev, widget]);
-    setLayout(prev => [...prev, { i: widget.id, x: widget.layout.x, y: widget.layout.y, w: widget.layout.w, h: widget.layout.h }]);
+    setWidgets(prev => prev.some(w => w.id === widget.id)
+      ? prev.map(w => w.id === widget.id ? widget : w)
+      : [...prev, widget]);
+    setLayout(prev => prev.some(l => l.i === widget.id)
+      ? prev
+      : [...prev, { i: widget.id, x: widget.layout.x, y: widget.layout.y, w: widget.layout.w, h: widget.layout.h }]);
     setDirty(true);
     await fetchWidgetData(widget, timeRange);
   }, [fetchWidgetData, timeRange]);
@@ -103,18 +112,26 @@ export function AnalyticsPage() {
 
   const handleLayoutChange = useCallback((newLayout: Layout[]) => {
     setLayout(newLayout);
-    setWidgets(prev => prev.map(w => {
-      const l = newLayout.find(n => n.i === w.id);
-      return l ? { ...w, layout: { x: l.x, y: l.y, w: l.w, h: l.h } } : w;
-    }));
-    setDirty(true);
+    setWidgets(prev => {
+      // react-grid-layout fires onLayoutChange on mount; only dirty on real moves
+      const changed = prev.some(w => {
+        const l = newLayout.find(n => n.i === w.id);
+        return l && (l.x !== w.layout.x || l.y !== w.layout.y || l.w !== w.layout.w || l.h !== w.layout.h);
+      });
+      if (!changed) return prev;
+      setDirty(true);
+      return prev.map(w => {
+        const l = newLayout.find(n => n.i === w.id);
+        return l ? { ...w, layout: { x: l.x, y: l.y, w: l.w, h: l.h } } : w;
+      });
+    });
   }, []);
 
   const handleSave = async (name: string, existingId?: string) => {
     const definition: DashboardDefinition = {
       widgets: widgets.map(({ id, layout, type, dataset, title, spec }) =>
         ({ id, layout, type, dataset, title, spec })),
-      timeRange,
+      timeRangeHours: hours,
     };
     let saved: Dashboard;
     if (existingId) {
@@ -128,11 +145,24 @@ export function AnalyticsPage() {
     setDirty(false);
   };
 
-  const changeTimeRange = (hours: number) => {
-    const range = timeRangeFor(hours);
+  const changeTimeRange = (h: number) => {
+    setHours(h);
+    const range = timeRangeFor(h);
     setTimeRange(range);
     setDirty(true);
     widgets.forEach(widget => fetchWidgetData(widget, range));
+  };
+
+  const shareDashboard = async () => {
+    if (!activeDashboard) return;
+    try {
+      const { shareUrl, expiresAt } = await api.shareDashboard(activeDashboard.id);
+      const url = `${window.location.origin}${shareUrl}`;
+      try { await navigator.clipboard.writeText(url); } catch { /* clipboard may be unavailable */ }
+      setShareInfo(`Share link copied (expires ${new Date(expiresAt).toLocaleString()}): ${url}`);
+    } catch (e: any) {
+      setError(e.message ?? 'Could not create share link');
+    }
   };
 
   const deleteDashboard = async () => {
@@ -227,11 +257,12 @@ export function AnalyticsPage() {
           <div className="flex items-center gap-2">
             {error && <ApiError message={error} />}
             <label className="sr-only" htmlFor="analytics-time-range">Dashboard time range</label>
-            <select id="analytics-time-range" className="glass-select w-24 py-1.5" defaultValue="24" onChange={e => changeTimeRange(Number(e.target.value))}>
+            <select id="analytics-time-range" className="glass-select w-24 py-1.5" value={hours} onChange={e => changeTimeRange(Number(e.target.value))}>
               <option value="0.25">15m</option><option value="1">1h</option><option value="6">6h</option>
               <option value="24">24h</option><option value="168">7d</option>
             </select>
-            <button className="glass-btn-ghost text-sm" onClick={() => { setInitialDataset(undefined); setShowAddModal(true); }}><Plus size={15} /> Add widget</button>
+            <button className="glass-btn-ghost text-sm" onClick={() => { setInitialDataset(undefined); setEditingWidget(undefined); setShowAddModal(true); }}><Plus size={15} /> Add widget</button>
+            {activeDashboard && <button className="glass-btn-ghost text-sm" onClick={shareDashboard} title="Share dashboard (read-only, 24h)"><Share2 size={15} /></button>}
             {activeDashboard && <button className="glass-btn-danger text-sm" onClick={deleteDashboard} title="Delete dashboard"><Trash2 size={15} /></button>}
             <button
               className={`glass-btn-primary text-sm ${!dirty ? 'opacity-50' : ''}`}
@@ -242,6 +273,12 @@ export function AnalyticsPage() {
           </div>
         </div>
 
+        {shareInfo && (
+          <div className="flex items-center justify-between gap-2 px-5 py-2 text-xs border-b border-gray-200 dark:border-white/10 bg-brand-500/10 text-brand-600 dark:text-brand-300">
+            <span className="truncate">{shareInfo}</span>
+            <button className="glass-btn-ghost px-2 py-0.5 flex-shrink-0" onClick={() => setShareInfo(null)}>Dismiss</button>
+          </div>
+        )}
         <div ref={containerRef} className="flex-1 overflow-auto p-4">
           {widgets.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center space-y-3">
@@ -270,13 +307,22 @@ export function AnalyticsPage() {
                         {widget.dataset}{loadingData[widget.id] ? ' · loading…' : ''}
                       </p>
                     </div>
-                    <button
-                      className="glass-btn-ghost w-6 h-6 flex items-center justify-center text-xs text-gray-400 dark:text-white/50 hover:text-danger flex-shrink-0 ml-2 cursor-pointer"
-                      onMouseDown={e => e.stopPropagation()}
-                      onClick={() => removeWidget(widget.id)}
-                      title="Remove">
-                      <X size={13} />
-                    </button>
+                    <div className="flex flex-shrink-0 ml-2">
+                      <button
+                        className="glass-btn-ghost w-6 h-6 flex items-center justify-center text-xs text-gray-400 dark:text-white/50 hover:text-brand-400 cursor-pointer"
+                        onMouseDown={e => e.stopPropagation()}
+                        onClick={() => { setEditingWidget(widget); setShowAddModal(true); }}
+                        title="Edit">
+                        <Pencil size={12} />
+                      </button>
+                      <button
+                        className="glass-btn-ghost w-6 h-6 flex items-center justify-center text-xs text-gray-400 dark:text-white/50 hover:text-danger cursor-pointer"
+                        onMouseDown={e => e.stopPropagation()}
+                        onClick={() => removeWidget(widget.id)}
+                        title="Remove">
+                        <X size={13} />
+                      </button>
+                    </div>
                   </div>
                   <div className="flex-1 min-h-0 px-1 pb-2">
                     {widgetErrors[widget.id]
@@ -294,8 +340,9 @@ export function AnalyticsPage() {
         <AddWidgetModal
           datasets={datasets}
           initialDataset={initialDataset}
+          editing={editingWidget}
           schema={async (name: string): Promise<SchemaField[]> => { const r = await api.getAnalyticsSchema(name); return r.schema; }}
-          onClose={() => setShowAddModal(false)}
+          onClose={() => { setShowAddModal(false); setEditingWidget(undefined); }}
           onAdd={addWidget}
         />
       )}

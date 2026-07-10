@@ -27,6 +27,22 @@ test('P1 pipeline output is queryable as an analytics dataset', async ({ request
   const result = await query.json();
   expect(result.count).toBe(10);
   expect(result.rows.map((row: { id: number }) => row.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+  // Typed numeric comparisons (ClickHouse rejects Float64 vs string comparisons)
+  const gt = await api.post('/api/analytics/query', {
+    dataset: collection, select: ['id'], where: [{ field: 'id', op: '>', value: 95 }],
+    orderBy: { field: 'id', dir: 'ASC' }, limit: 100,
+  });
+  expect(gt.ok(), await gt.text()).toBeTruthy();
+  expect((await gt.json()).rows.map((row: { id: number }) => row.id)).toEqual([96, 97, 98, 99, 100]);
+
+  const agg = await api.post('/api/analytics/query', {
+    dataset: collection, groupBy: ['userId'], aggregate: { field: 'id', fn: 'count' },
+    where: [{ field: 'userId', op: '<=', value: 2 }],
+    orderBy: { field: 'aggregate_value', dir: 'DESC' }, limit: 10,
+  });
+  expect(agg.ok(), await agg.text()).toBeTruthy();
+  expect((await agg.json()).rows).toHaveLength(2);
 });
 
 test('P2 analytics dashboard can be saved, changed, shared read-only, and deleted', async ({ request }) => {
