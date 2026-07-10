@@ -8,19 +8,30 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/dataflow-poc/workflow-go/internal/chsql"
 	"github.com/jackc/pgx/v5"
 )
 
-var analyticsField = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*$`)
+var ch = chsql.ClickHouse
 
 // ponytail: flat per-query caps; make per-tenant if a tenant needs more
-const chGuardrails = " SETTINGS max_execution_time=10, max_rows_to_read=10000000"
+const (
+	chMaxExecution = "max_execution_time=10"
+	chMaxRows      = "max_rows_to_read=10000000"
+)
+
+func analyticsScope(tenantID, collection string) []chsql.Expr {
+	exprs := []chsql.Expr{chsql.Raw("tenant_id=") + chsql.String(tenantID)}
+	if collection != "" {
+		exprs = append(exprs, chsql.Raw("collection=")+chsql.String(collection))
+	}
+	return exprs
+}
 
 func (s *Server) registerAnalytics(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/analytics/datasets", handle(s.analyticsDatasets))
@@ -54,33 +65,7 @@ func (s *Server) requireDashboardOwnership(r *http.Request, dashboardID string) 
 	return &HTTPError{Status: http.StatusForbidden, Message: "only the dashboard creator or a workspace owner can do this"}
 }
 
-func sqlString(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
-
-// sqlLiteral renders a filter value typed to match the JSONExtract expression it
-// is compared against — ClickHouse rejects e.g. Float64 > 'string' comparisons.
-func sqlLiteral(kind string, value interface{}) string {
-	switch kind {
-	case "number":
-		if f, ok := value.(float64); ok {
-			return strconv.FormatFloat(f, 'f', -1, 64)
-		}
-		if f, err := strconv.ParseFloat(fmt.Sprint(value), 64); err == nil {
-			return strconv.FormatFloat(f, 'f', -1, 64)
-		}
-	case "boolean":
-		if b, ok := value.(bool); ok {
-			return strconv.FormatBool(b)
-		}
-		if b, err := strconv.ParseBool(fmt.Sprint(value)); err == nil {
-			return strconv.FormatBool(b)
-		}
-	case "date":
-		return "parseDateTimeBestEffort(" + sqlString(fmt.Sprint(value)) + ")"
-	}
-	return sqlString(fmt.Sprint(value))
-}
-
-func analyticsTimeRangeClauses(from, to string) ([]string, error) {
+func analyticsTimeRangeClauses(from, to string) ([]chsql.Expr, error) {
 	start, err := time.Parse(time.RFC3339, from)
 	if err != nil {
 		return nil, fmt.Errorf("timeRange.from must be RFC3339")
@@ -92,9 +77,9 @@ func analyticsTimeRangeClauses(from, to string) ([]string, error) {
 	if !start.Before(end) {
 		return nil, fmt.Errorf("timeRange.from must be before timeRange.to")
 	}
-	return []string{
-		"created_at >= parseDateTimeBestEffort(" + sqlString(start.UTC().Format(time.RFC3339)) + ")",
-		"created_at < parseDateTimeBestEffort(" + sqlString(end.UTC().Format(time.RFC3339)) + ")",
+	return []chsql.Expr{
+		chsql.Raw("created_at >= ") + ch.Literal("date", start.UTC().Format(time.RFC3339)),
+		chsql.Raw("created_at < ") + ch.Literal("date", end.UTC().Format(time.RFC3339)),
 	}, nil
 }
 func (s *Server) clickhouseQuery(r *http.Request, query string) ([]map[string]interface{}, error) {
@@ -129,7 +114,18 @@ func (s *Server) clickhouseQuery(r *http.Request, query string) ([]map[string]in
 
 func (s *Server) analyticsDatasets(w http.ResponseWriter, r *http.Request) error {
 	tenant := tenantFrom(r)
-	rows, err := s.clickhouseQuery(r, fmt.Sprintf(`SELECT collection,count() AS row_count FROM sink_records FINAL WHERE tenant_id=%s GROUP BY collection ORDER BY collection`, sqlString(tenant.TenantID)))
+	query, err := ch.Select().
+		Column(chsql.Raw("collection"), "").
+		Column(chsql.Raw("count()"), "row_count").
+		From("sink_records").Final().
+		Where(analyticsScope(tenant.TenantID, "")...).
+		GroupBy(chsql.Raw("collection")).
+		OrderBy(chsql.Raw("collection"), false).
+		Build()
+	if err != nil {
+		return err
+	}
+	rows, err := s.clickhouseQuery(r, query)
 	if err != nil {
 		return &HTTPError{Status: http.StatusBadGateway, Message: "clickhouse error"}
 	}
@@ -176,7 +172,16 @@ func inferSchema(rows []map[string]interface{}) []map[string]string {
 }
 func (s *Server) datasetRecords(r *http.Request, name string) ([]map[string]interface{}, error) {
 	tenant := tenantFrom(r)
-	raw, err := s.clickhouseQuery(r, fmt.Sprintf(`SELECT record FROM sink_records FINAL WHERE tenant_id=%s AND collection=%s LIMIT 100`, sqlString(tenant.TenantID), sqlString(name)))
+	query, err := ch.Select().
+		Column(chsql.Raw("record"), "").
+		From("sink_records").Final().
+		Where(analyticsScope(tenant.TenantID, name)...).
+		Limit(100).
+		Build()
+	if err != nil {
+		return nil, err
+	}
+	raw, err := s.clickhouseQuery(r, query)
 	if err != nil {
 		return nil, err
 	}
@@ -214,13 +219,32 @@ func (s *Server) analyticsRows(w http.ResponseWriter, r *http.Request) error {
 	if offset < 0 {
 		offset = 0
 	}
-	scope := "tenant_id=" + sqlString(tenant.TenantID) + " AND collection=" + sqlString(name)
-	total, err := s.clickhouseQuery(r, `SELECT count() AS total FROM sink_records FINAL WHERE `+scope)
+	scope := analyticsScope(tenant.TenantID, name)
+	countQuery, err := ch.Select().
+		Column(chsql.Raw("count()"), "total").
+		From("sink_records").Final().
+		Where(scope...).
+		Build()
+	if err != nil {
+		return err
+	}
+	total, err := s.clickhouseQuery(r, countQuery)
 	if err != nil {
 		return &HTTPError{Status: http.StatusBadGateway, Message: "clickhouse error"}
 	}
-	raw, err := s.clickhouseQuery(r, `SELECT record,created_at FROM sink_records FINAL WHERE `+scope+
-		` ORDER BY created_at DESC LIMIT `+strconv.Itoa(limit)+` OFFSET `+strconv.Itoa(offset)+chGuardrails)
+	rowsQuery, err := ch.Select().
+		Column(chsql.Raw("record"), "").
+		Column(chsql.Raw("created_at"), "").
+		From("sink_records").Final().
+		Where(scope...).
+		OrderBy(chsql.Raw("created_at"), true).
+		Limit(limit).Offset(offset).
+		Settings(chMaxExecution).Settings(chMaxRows).
+		Build()
+	if err != nil {
+		return err
+	}
+	raw, err := s.clickhouseQuery(r, rowsQuery)
 	if err != nil {
 		return &HTTPError{Status: http.StatusBadGateway, Message: "clickhouse error"}
 	}
@@ -243,21 +267,6 @@ func (s *Server) analyticsRows(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func jsonField(field, kind string) (string, error) {
-	if !analyticsField.MatchString(field) {
-		return "", fmt.Errorf("Invalid column name %q", field)
-	}
-	switch kind {
-	case "number":
-		return "JSONExtract(record," + sqlString(field) + ",'Float64')", nil
-	case "boolean":
-		return "JSONExtract(record," + sqlString(field) + ",'Bool')", nil
-	case "date":
-		return "parseDateTimeBestEffortOrNull(JSONExtractString(record," + sqlString(field) + "))", nil
-	default:
-		return "JSONExtractString(record," + sqlString(field) + ")", nil
-	}
-}
 func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 	var spec struct {
 		Dataset         string `json:"dataset"`
@@ -286,31 +295,36 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 	for _, item := range inferSchema(records) {
 		schema[item["name"]] = item["type"]
 	}
-	field := func(name string) (string, error) {
+	field := func(name string) (chsql.Expr, error) {
 		kind, ok := schema[name]
 		if !ok {
 			return "", fmt.Errorf("Field %q is not in the dataset schema", name)
 		}
-		return jsonField(name, kind)
+		return ch.JSONField(chsql.Raw("record"), name, kind)
 	}
-	selects := []string{}
+	builder := ch.Select().From("sink_records").Final()
+	hasColumns := false
 	for _, name := range spec.Select {
 		expr, err := field(name)
 		if err != nil {
 			return badRequest(ErrInvalidRequest, err.Error())
 		}
-		selects = append(selects, expr+" AS `"+name+"`")
+		builder.Column(expr, name)
+		hasColumns = true
 	}
+	groupExprs := []chsql.Expr{}
 	for _, name := range spec.GroupBy {
+		expr, err := field(name)
+		if err != nil {
+			return badRequest(ErrInvalidRequest, err.Error())
+		}
+		groupExprs = append(groupExprs, expr)
 		if !contains(spec.Select, name) {
-			expr, err := field(name)
-			if err != nil {
-				return badRequest(ErrInvalidRequest, err.Error())
-			}
-			selects = append(selects, expr+" AS `"+name+"`")
+			builder.Column(expr, name)
+			hasColumns = true
 		}
 	}
-	bucketExpr := ""
+	hasBucket := false
 	if spec.Bucket != "" {
 		intervals := map[string]string{
 			"minute": "1 minute", "5 minute": "5 minute", "15 minute": "15 minute",
@@ -320,8 +334,11 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 		if !ok {
 			return badRequest(ErrInvalidRequest, "invalid bucket; use minute, 5 minute, 15 minute, hour, day, or week")
 		}
-		bucketExpr = "toStartOfInterval(created_at, INTERVAL " + interval + ")"
-		selects = append(selects, bucketExpr+" AS time_bucket")
+		bucketExpr := chsql.Raw("toStartOfInterval(created_at, INTERVAL " + interval + ")")
+		builder.Column(bucketExpr, "time_bucket")
+		groupExprs = append(groupExprs, bucketExpr)
+		hasBucket = true
+		hasColumns = true
 	}
 	if spec.Aggregate != nil {
 		if !map[string]bool{"count": true, "sum": true, "avg": true, "min": true, "max": true}[spec.Aggregate.Fn] {
@@ -331,24 +348,22 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return badRequest(ErrInvalidRequest, err.Error())
 		}
-		selects = append(selects, spec.Aggregate.Fn+"("+expr+") AS aggregate_value")
+		builder.Column(chsql.Raw(spec.Aggregate.Fn+"(")+expr+chsql.Raw(")"), "aggregate_value")
+		hasColumns = true
 	}
-	if len(selects) == 0 {
-		selects = []string{"record"}
+	if !hasColumns {
+		builder.Column(chsql.Raw("record"), "")
 	}
 	tenant := tenantFrom(r)
-	where := []string{"tenant_id=" + sqlString(tenant.TenantID), "collection=" + sqlString(spec.Dataset)}
+	builder.Where(analyticsScope(tenant.TenantID, spec.Dataset)...)
 	if spec.TimeRange != nil {
 		clauses, err := analyticsTimeRangeClauses(spec.TimeRange.From, spec.TimeRange.To)
 		if err != nil {
 			return badRequest(ErrInvalidRequest, err.Error())
 		}
-		where = append(where, clauses...)
+		builder.Where(clauses...)
 	}
 	for _, clause := range spec.Where {
-		if !map[string]bool{"=": true, "!=": true, ">": true, "<": true, ">=": true, "<=": true, "LIKE": true, "IN": true}[clause.Op] {
-			return badRequest(ErrInvalidRequest, "invalid operator")
-		}
 		expr, err := field(clause.Field)
 		if err != nil {
 			return badRequest(ErrInvalidRequest, err.Error())
@@ -359,43 +374,33 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 			if !ok || len(values) == 0 {
 				return badRequest(ErrInvalidRequest, "IN value must be a non-empty array")
 			}
-			parts := []string{}
-			for _, value := range values {
-				parts = append(parts, sqlLiteral(kind, value))
+			literals := make([]chsql.Expr, len(values))
+			for i, value := range values {
+				literals[i] = ch.Literal(kind, value)
 			}
-			where = append(where, expr+" IN ("+strings.Join(parts, ",")+")")
+			builder.Where(chsql.In(expr, literals))
 		} else {
-			where = append(where, expr+" "+clause.Op+" "+sqlLiteral(kind, clause.Value))
+			cond, err := chsql.Compare(expr, clause.Op, ch.Literal(kind, clause.Value))
+			if err != nil {
+				return badRequest(ErrInvalidRequest, "invalid operator")
+			}
+			builder.Where(cond)
 		}
 	}
-	query := `SELECT ` + strings.Join(selects, ",") + ` FROM sink_records FINAL WHERE ` + strings.Join(where, " AND ")
-	if len(spec.GroupBy) > 0 || bucketExpr != "" {
-		parts := []string{}
-		for _, name := range spec.GroupBy {
-			expr, _ := field(name)
-			parts = append(parts, expr)
-		}
-		if bucketExpr != "" {
-			parts = append(parts, bucketExpr)
-		}
-		query += " GROUP BY " + strings.Join(parts, ",")
-	}
-	if spec.OrderBy == nil && bucketExpr != "" {
-		query += " ORDER BY time_bucket ASC"
+	builder.GroupBy(groupExprs...)
+	if spec.OrderBy == nil && hasBucket {
+		builder.OrderBy(chsql.Raw("time_bucket"), false)
 	}
 	if spec.OrderBy != nil {
-		direction := "ASC"
-		if spec.OrderBy.Dir == "DESC" {
-			direction = "DESC"
-		}
+		desc := spec.OrderBy.Dir == "DESC"
 		if spec.OrderBy.Field == "aggregate_value" || spec.OrderBy.Field == "time_bucket" {
-			query += " ORDER BY " + spec.OrderBy.Field + " " + direction
+			builder.OrderBy(chsql.Raw(spec.OrderBy.Field), desc)
 		} else {
 			expr, err := field(spec.OrderBy.Field)
 			if err != nil {
 				return badRequest(ErrInvalidRequest, err.Error())
 			}
-			query += " ORDER BY " + expr + " " + direction
+			builder.OrderBy(expr, desc)
 		}
 	}
 	if spec.Limit < 1 {
@@ -404,7 +409,10 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 	if spec.Limit > 10000 {
 		spec.Limit = 10000
 	}
-	query += " LIMIT " + strconv.Itoa(spec.Limit) + chGuardrails
+	query, err := builder.Limit(spec.Limit).Settings(chMaxExecution).Settings(chMaxRows).Build()
+	if err != nil {
+		return err
+	}
 	rows, err := s.clickhouseQuery(r, query)
 	if err != nil {
 		return &HTTPError{Status: http.StatusBadGateway, Message: "clickhouse query failed"}

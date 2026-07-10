@@ -9,6 +9,7 @@ import { AddWidgetModal } from '../components/analytics/AddWidgetModal';
 import { SaveDashboardModal } from '../components/analytics/SaveDashboardModal';
 import { DatasetPreview } from '../components/analytics/DatasetPreview';
 import { ShareModal } from '../components/analytics/ShareModal';
+import { dashboardDefinition, layoutChanged } from '../components/analytics/model';
 import { api } from '../api';
 import { ApiError } from '../components/ApiError';
 
@@ -118,10 +119,7 @@ export function AnalyticsPage() {
     setLayout(newLayout);
     setWidgets(prev => {
       // react-grid-layout fires onLayoutChange on mount; only dirty on real moves
-      const changed = prev.some(w => {
-        const l = newLayout.find(n => n.i === w.id);
-        return l && (l.x !== w.layout.x || l.y !== w.layout.y || l.w !== w.layout.w || l.h !== w.layout.h);
-      });
+      const changed = layoutChanged(prev, newLayout);
       if (!changed) return prev;
       setDirty(true);
       return prev.map(w => {
@@ -132,11 +130,7 @@ export function AnalyticsPage() {
   }, []);
 
   const handleSave = async (name: string, existingId?: string) => {
-    const definition: DashboardDefinition = {
-      widgets: widgets.map(({ id, layout, type, dataset, title, spec }) =>
-        ({ id, layout, type, dataset, title, spec })),
-      timeRangeHours: hours,
-    };
+    const definition: DashboardDefinition = dashboardDefinition(widgets, hours);
     let saved: Dashboard;
     if (existingId) {
       saved = await api.updateDashboard(existingId, { name, definition });
