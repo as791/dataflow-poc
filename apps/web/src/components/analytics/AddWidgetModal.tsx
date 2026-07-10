@@ -1,9 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { Dataset, SchemaField, QuerySpec, ChartType, WidgetDef, BucketInterval } from './types';
-
-type FilterOp = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'LIKE';
-interface FilterRow { field: string; op: FilterOp; value: string }
-const FILTER_OPS: FilterOp[] = ['=', '!=', '>', '<', '>=', '<=', 'LIKE'];
+import type { Dataset, SchemaField, ChartType, WidgetDef, BucketInterval } from './types';
+import { AGG_OPTIONS, BUCKETS, CHART_TYPES, FILTER_OPS, buildWidgetSpec, editableFilters, type EditableFilterOp, type FilterRow } from './model';
 
 interface Props {
   datasets: Dataset[];
@@ -24,8 +21,7 @@ export function AddWidgetModal({ datasets, initialDataset, editing, onClose, onA
   const [agg, setAgg] = useState<'count' | 'sum' | 'avg' | 'min' | 'max' | 'none'>(
     editing ? (editing.spec.aggregate?.fn ?? 'none') : 'count');
   const [bucket, setBucket] = useState<BucketInterval | ''>(editing?.spec.bucket ?? '');
-  const [filters, setFilters] = useState<FilterRow[]>(
-    (editing?.spec.where ?? []).filter(w => w.op !== 'IN').map(w => ({ field: w.field, op: w.op as FilterOp, value: String(w.value) })));
+  const [filters, setFilters] = useState<FilterRow[]>(editableFilters(editing?.spec));
   const [loadingSchema, setLoadingSchema] = useState(false);
   const [schemaErr, setSchemaErr] = useState<string | null>(null);
 
@@ -44,27 +40,7 @@ export function AddWidgetModal({ datasets, initialDataset, editing, onClose, onA
   }, [dataset, schema]);
 
   const handleAdd = () => {
-    const fieldType = (name: string) => fields.find(f => f.name === name)?.type;
-    // IN clauses aren't editable in this UI (API-authored) — carry them through untouched
-    const inClauses = (editing?.spec.where ?? []).filter(w => w.op === 'IN');
-    const where = [...inClauses, ...filters
-      .filter(f => f.field && f.value !== '')
-      .map(f => ({
-        field: f.field,
-        op: f.op,
-        value: fieldType(f.field) === 'number' && !Number.isNaN(Number(f.value)) ? Number(f.value) : f.value as unknown,
-      }))];
-    const fn = (agg === 'none' ? 'count' : agg) as 'count' | 'sum' | 'avg' | 'min' | 'max';
-    const base: QuerySpec = chartType === 'table'
-      ? { select: [xCol, ...(yCol ? [yCol] : [])], limit: 50 }
-      : chartType === 'stat'
-        ? { aggregate: { field: yCol, fn }, limit: 1 }
-        : agg === 'none'
-          ? { select: [xCol, yCol], limit: 50 }
-          : bucket && chartType !== 'pie'
-            ? { bucket, aggregate: { field: yCol, fn }, limit: 500 }
-            : { groupBy: [xCol], aggregate: { field: yCol, fn }, limit: 50 };
-    const spec: QuerySpec = where.length ? { ...base, where } : base;
+    const spec = buildWidgetSpec({ chartType, xCol, yCol, agg, bucket, fields, filters, editingSpec: editing?.spec });
     onAdd({
       id: editing?.id ?? `w_${Date.now()}`,
       layout: editing?.layout ?? { x: 0, y: Infinity, w: 4, h: 4 },
@@ -76,9 +52,6 @@ export function AddWidgetModal({ datasets, initialDataset, editing, onClose, onA
     onClose();
   };
 
-  const chartTypes: ChartType[] = ['bar', 'line', 'area', 'pie', 'stat', 'table'];
-  const buckets: BucketInterval[] = ['minute', '5 minute', '15 minute', 'hour', 'day', 'week'];
-  const aggOptions: Array<'count' | 'sum' | 'avg' | 'min' | 'max' | 'none'> = ['count', 'sum', 'avg', 'min', 'max', 'none'];
   const cols = fields.map(f => f.name);
 
   return (
@@ -109,7 +82,7 @@ export function AddWidgetModal({ datasets, initialDataset, editing, onClose, onA
           <div>
             <label className="glass-label">Chart type</label>
             <div className="flex gap-2">
-              {chartTypes.map(t => (
+              {CHART_TYPES.map(t => (
                 <button key={t}
                   className={`glass-btn flex-1 capitalize ${chartType === t ? 'bg-brand-500/40 border-brand-400/60' : ''}`}
                   onClick={() => setChartType(t)}>
@@ -149,7 +122,7 @@ export function AddWidgetModal({ datasets, initialDataset, editing, onClose, onA
               <div>
                 <label className="glass-label">Aggregation</label>
                 <select className="glass-select w-full" value={agg} onChange={e => setAgg(e.target.value as 'count' | 'sum' | 'avg' | 'min' | 'max' | 'none')}>
-                  {aggOptions.map(a => <option key={a} value={a}>{a}</option>)}
+                  {AGG_OPTIONS.map(a => <option key={a} value={a}>{a}</option>)}
                 </select>
               </div>
               {chartType !== 'stat' && chartType !== 'pie' && agg !== 'none' && (
@@ -157,7 +130,7 @@ export function AddWidgetModal({ datasets, initialDataset, editing, onClose, onA
                   <label className="glass-label">Time bucket (X axis)</label>
                   <select className="glass-select w-full" value={bucket} onChange={e => setBucket(e.target.value as BucketInterval | '')}>
                     <option value="">none — group by X column</option>
-                    {buckets.map(b => <option key={b} value={b}>{b}</option>)}
+                    {BUCKETS.map(b => <option key={b} value={b}>{b}</option>)}
                   </select>
                 </div>
               )}
@@ -180,7 +153,7 @@ export function AddWidgetModal({ datasets, initialDataset, editing, onClose, onA
                     {cols.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                   <select className="glass-select w-20" value={f.op}
-                    onChange={e => setFilters(prev => prev.map((p, pi) => pi === i ? { ...p, op: e.target.value as FilterOp } : p))}>
+                    onChange={e => setFilters(prev => prev.map((p, pi) => pi === i ? { ...p, op: e.target.value as EditableFilterOp } : p))}>
                     {FILTER_OPS.map(op => <option key={op} value={op}>{op}</option>)}
                   </select>
                   <input className="glass-input flex-1" placeholder="value" value={f.value}

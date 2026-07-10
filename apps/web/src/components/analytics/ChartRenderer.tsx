@@ -3,6 +3,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 import type { WidgetDef } from './types';
+import { chartKeys } from './model';
 
 const COLORS = [
   '#818cf8', '#34d399', '#fbbf24', '#f87171', '#60a5fa',
@@ -21,8 +22,7 @@ const LEGEND_STYLE = { wrapperStyle: { fontSize: 11, color: 'var(--chart-muted)'
 
 export function ChartRenderer({ widget }: { widget: WidgetDef }) {
   const data = widget.data ?? [];
-  const xKey = widget.spec.bucket ? 'time_bucket' : (widget.spec.groupBy?.[0] ?? widget.spec.select?.[0] ?? '');
-  const yKey = widget.spec.aggregate ? 'aggregate_value' : (widget.spec.select?.[1] ?? widget.spec.select?.[0] ?? '');
+  const { xKey, yKey } = chartKeys(widget);
 
   if (data.length === 0) {
     return (
