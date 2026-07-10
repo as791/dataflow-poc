@@ -118,6 +118,8 @@ export const api = {
   // Analytics
   getAnalyticsDatasets: (): Promise<Dataset[]> => request('/api/analytics/datasets').then(j),
   getAnalyticsSchema: (name: string) => request(`/api/analytics/datasets/${encodeURIComponent(name)}/schema`).then(j),
+  getDatasetRows: (name: string, limit = 50, offset = 0): Promise<{ rows: any[]; total: number; limit: number; offset: number }> =>
+    request(`/api/analytics/datasets/${encodeURIComponent(name)}/rows?limit=${limit}&offset=${offset}`).then(j),
   queryAnalytics: (body: { dataset: string; spec: QuerySpec; timeRange?: TimeRange }) =>
     request('/api/analytics/query', { method: 'POST', body: JSON.stringify({ dataset: body.dataset, ...body.spec, timeRange: body.timeRange }) }).then(j),
   listDashboards: () => request('/api/analytics/dashboards').then(j),
@@ -128,6 +130,10 @@ export const api = {
   deleteDashboard: (id: string) => request(`/api/analytics/dashboards/${id}`, { method: 'DELETE' }).then(j),
   shareDashboard: (id: string): Promise<{ shareToken: string; expiresAt: string; shareUrl: string }> =>
     request(`/api/analytics/dashboards/${id}/share`, { method: 'POST' }).then(j),
+  listDashboardShares: (id: string): Promise<Array<{ share_token_hash: string; expires_at: string; created_at: string }>> =>
+    request(`/api/analytics/dashboards/${id}/shares`).then(j),
+  revokeDashboardShare: (id: string, hash: string) =>
+    request(`/api/analytics/dashboards/${id}/shares/${encodeURIComponent(hash)}`, { method: 'DELETE' }).then(j),
 
   // Connectors OAuth start
   startConnectorOAuth: (provider: 'google' | 'microsoft') =>

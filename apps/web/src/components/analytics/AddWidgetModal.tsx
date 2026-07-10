@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { Dataset, SchemaField, QuerySpec, ChartType, WidgetDef } from './types';
+import type { Dataset, SchemaField, QuerySpec, ChartType, WidgetDef, BucketInterval } from './types';
 
 type FilterOp = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'LIKE';
 interface FilterRow { field: string; op: FilterOp; value: string }
@@ -23,6 +23,7 @@ export function AddWidgetModal({ datasets, initialDataset, editing, onClose, onA
   const [yCol, setYCol] = useState(editing?.spec.aggregate?.field ?? editing?.spec.select?.[1] ?? '');
   const [agg, setAgg] = useState<'count' | 'sum' | 'avg' | 'min' | 'max' | 'none'>(
     editing ? (editing.spec.aggregate?.fn ?? 'none') : 'count');
+  const [bucket, setBucket] = useState<BucketInterval | ''>(editing?.spec.bucket ?? '');
   const [filters, setFilters] = useState<FilterRow[]>(
     (editing?.spec.where ?? []).filter(w => w.op !== 'IN').map(w => ({ field: w.field, op: w.op as FilterOp, value: String(w.value) })));
   const [loadingSchema, setLoadingSchema] = useState(false);
@@ -53,11 +54,16 @@ export function AddWidgetModal({ datasets, initialDataset, editing, onClose, onA
         op: f.op,
         value: fieldType(f.field) === 'number' && !Number.isNaN(Number(f.value)) ? Number(f.value) : f.value as unknown,
       }))];
+    const fn = (agg === 'none' ? 'count' : agg) as 'count' | 'sum' | 'avg' | 'min' | 'max';
     const base: QuerySpec = chartType === 'table'
       ? { select: [xCol, ...(yCol ? [yCol] : [])], limit: 50 }
-      : agg === 'none'
-        ? { select: [xCol, yCol], limit: 50 }
-        : { groupBy: [xCol], aggregate: { field: yCol, fn: agg as 'count' | 'sum' | 'avg' | 'min' | 'max' }, limit: 50 };
+      : chartType === 'stat'
+        ? { aggregate: { field: yCol, fn }, limit: 1 }
+        : agg === 'none'
+          ? { select: [xCol, yCol], limit: 50 }
+          : bucket && chartType !== 'pie'
+            ? { bucket, aggregate: { field: yCol, fn }, limit: 500 }
+            : { groupBy: [xCol], aggregate: { field: yCol, fn }, limit: 50 };
     const spec: QuerySpec = where.length ? { ...base, where } : base;
     onAdd({
       id: editing?.id ?? `w_${Date.now()}`,
@@ -70,7 +76,8 @@ export function AddWidgetModal({ datasets, initialDataset, editing, onClose, onA
     onClose();
   };
 
-  const chartTypes: ChartType[] = ['bar', 'line', 'pie', 'table'];
+  const chartTypes: ChartType[] = ['bar', 'line', 'area', 'pie', 'stat', 'table'];
+  const buckets: BucketInterval[] = ['minute', '5 minute', '15 minute', 'hour', 'day', 'week'];
   const aggOptions: Array<'count' | 'sum' | 'avg' | 'min' | 'max' | 'none'> = ['count', 'sum', 'avg', 'min', 'max', 'none'];
   const cols = fields.map(f => f.name);
 
@@ -118,12 +125,14 @@ export function AddWidgetModal({ datasets, initialDataset, editing, onClose, onA
             <p className="text-xs text-danger/80">{schemaErr}</p>
           ) : (
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="glass-label">X column</label>
-                <select className="glass-select w-full" value={xCol} onChange={e => setXCol(e.target.value)}>
-                  {cols.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
+              {chartType !== 'stat' && !(bucket && agg !== 'none' && chartType !== 'table' && chartType !== 'pie') && (
+                <div>
+                  <label className="glass-label">X column</label>
+                  <select className="glass-select w-full" value={xCol} onChange={e => setXCol(e.target.value)}>
+                    {cols.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              )}
               {chartType !== 'table' && (
                 <div>
                   <label className="glass-label">Y column</label>
@@ -136,11 +145,22 @@ export function AddWidgetModal({ datasets, initialDataset, editing, onClose, onA
           )}
 
           {chartType !== 'table' && (
-            <div>
-              <label className="glass-label">Aggregation</label>
-              <select className="glass-select w-full" value={agg} onChange={e => setAgg(e.target.value as 'count' | 'sum' | 'avg' | 'min' | 'max' | 'none')}>
-                {aggOptions.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="glass-label">Aggregation</label>
+                <select className="glass-select w-full" value={agg} onChange={e => setAgg(e.target.value as 'count' | 'sum' | 'avg' | 'min' | 'max' | 'none')}>
+                  {aggOptions.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+              {chartType !== 'stat' && chartType !== 'pie' && agg !== 'none' && (
+                <div>
+                  <label className="glass-label">Time bucket (X axis)</label>
+                  <select className="glass-select w-full" value={bucket} onChange={e => setBucket(e.target.value as BucketInterval | '')}>
+                    <option value="">none — group by X column</option>
+                    {buckets.map(b => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </div>
+              )}
             </div>
           )}
 
