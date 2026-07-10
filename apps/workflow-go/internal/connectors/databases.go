@@ -378,11 +378,17 @@ func (r *Runtime) mongoClient(ctx context.Context, id string) (*mongo.Client, st
 	}
 	authSource := url.QueryEscape(firstString(cfg["authSource"], "admin"))
 	var uri string
-	if truthy(cfg["tls"]) {
-		// Atlas and most managed Mongo only publish SRV records (no port); the driver resolves the replica set.
+	// SRV is a DNS discovery mode, not a TLS mode: use it when explicitly asked
+	// (srv=true) or for TLS hosts with no configured port (Atlas-style). TLS
+	// deployments with an explicit port (self-managed, DocumentDB) connect via
+	// plain mongodb:// with tls=true.
+	if truthy(cfg["srv"]) || (truthy(cfg["tls"]) && cfg["port"] == nil) {
 		uri = fmt.Sprintf("mongodb+srv://%s%s/?authSource=%s&tls=true", auth, stringValue(cfg["host"]), authSource)
 	} else {
 		uri = fmt.Sprintf("mongodb://%s%s:%d/?authSource=%s", auth, stringValue(cfg["host"]), int(firstNumber(cfg["port"], 27017)), authSource)
+		if truthy(cfg["tls"]) {
+			uri += "&tls=true"
+		}
 	}
 	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetServerSelectionTimeout(10 * time.Second))
 	if err == nil {

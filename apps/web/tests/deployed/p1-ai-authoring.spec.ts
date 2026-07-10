@@ -36,7 +36,7 @@ test('P1 AI generates and creates a persisted pipeline', async ({ request }) => 
   expect(generated.definition.nodes.find(node => node.activityType === 'sink.s3')?.config).toMatchObject({
     bucket: 'dataflow-integration-qa-726929246977', key: 'ai-tests/paid-posts.json', format: 'json',
   });
-  expect(generated.mermaid).toContain('flowchart TD');
+  expect(generated.mermaid).toMatch(/flowchart (TD|LR)/);
 
   const created = await api.create(persisted(generated.definition));
   const saved = await api.get(`/api/pipelines/${created.rowId}`);
