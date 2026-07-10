@@ -101,6 +101,10 @@ func (r *Runtime) s3Fetch(ctx context.Context, p SourceParams) (SourceResult, er
 		return SourceResult{}, err
 	}
 	defer result.Body.Close()
+	const maxObjectBytes = 25 * 1024 * 1024
+	if result.ContentLength != nil && *result.ContentLength > maxObjectBytes {
+		return SourceResult{}, fmt.Errorf("s3 object exceeds the 25MB connector limit (%d bytes)", *result.ContentLength)
+	}
 	body, err := io.ReadAll(result.Body)
 	if err != nil {
 		return SourceResult{}, err

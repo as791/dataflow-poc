@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"github.com/dataflow-poc/workflow-go/internal/model"
@@ -664,10 +665,147 @@ func (s *Server) lineageWorkspace(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return err
 	}
-	nodes := []map[string]interface{}{}
-	for _, row := range rows {
-		nodes = append(nodes, map[string]interface{}{"id": "pipeline:" + stringValue(row["id"]), "kind": "pipeline", "pipeline": map[string]interface{}{"rowId": row["id"], "pipelineKey": row["pipeline_key"], "name": row["name"], "version": row["version"], "status": row["status"], "environment": row["environment"]}})
-	}
-	jsonResponse(w, http.StatusOK, map[string]interface{}{"nodes": nodes, "edges": []interface{}{}, "columnEdges": []interface{}{}, "stats": map[string]int{"pipelines": len(nodes), "assets": 0, "links": 0, "sharedAssets": 0, "columnLinks": 0, "externalJobs": 0}})
+	jsonResponse(w, http.StatusOK, buildWorkspaceLineage(rows))
 	return nil
+}
+
+type fieldOrigin struct {
+	assetID string
+	field   string
+}
+
+var mapFieldPattern = regexp.MustCompile(`(\w+)\s*:\s*r\.(\w+)`)
+
+func assetURN(cfg map[string]interface{}) (string, string, bool) {
+	bucket, key, layer := stringValue(cfg["bucket"]), stringValue(cfg["key"]), stringValue(cfg["layer"])
+	if bucket == "" || key == "" || layer == "" {
+		return "", "", false
+	}
+	return fmt.Sprintf("s3://%s/%s", bucket, key), layer, true
+}
+
+// buildWorkspaceLineage walks each pipeline's node chain (assumed linear —
+// source → transform* → sink, which is all the DAG shapes this feature
+// currently needs to support) to derive asset nodes, pipeline↔asset edges,
+// and field-level (column) lineage through contract/map transforms.
+func buildWorkspaceLineage(rows []map[string]interface{}) map[string]interface{} {
+	nodes := []map[string]interface{}{}
+	edges := []map[string]interface{}{}
+	columnEdges := []map[string]interface{}{}
+	assetSchemas := map[string]map[string]bool{}
+	assetTouchedBy := map[string]map[string]bool{}
+	assetOrder := []string{}
+
+	ensureAsset := func(urn, layer string) string {
+		id := "asset:" + urn
+		if _, ok := assetSchemas[id]; !ok {
+			assetSchemas[id] = map[string]bool{}
+			assetTouchedBy[id] = map[string]bool{}
+			assetOrder = append(assetOrder, id)
+			nodes = append(nodes, map[string]interface{}{"id": id, "kind": "asset", "asset": map[string]interface{}{"urn": urn, "layer": layer}})
+		}
+		return id
+	}
+
+	for _, row := range rows {
+		rowID := stringValue(row["id"])
+		pipelineNodeID := "pipeline:" + rowID
+		nodes = append(nodes, map[string]interface{}{"id": pipelineNodeID, "kind": "pipeline", "pipeline": map[string]interface{}{"rowId": row["id"], "pipelineKey": row["pipeline_key"], "name": row["name"], "version": row["version"], "status": row["status"], "environment": row["environment"]}})
+
+		raw, _ := json.Marshal(row["definition"])
+		var def model.PipelineDefinition
+		if err := json.Unmarshal(raw, &def); err != nil || len(def.Nodes) == 0 {
+			continue
+		}
+		byID := map[string]model.Node{}
+		indegree := map[string]int{}
+		outgoing := map[string]string{}
+		for _, node := range def.Nodes {
+			byID[node.ID] = node
+			indegree[node.ID] = 0
+		}
+		for _, edge := range def.Edges {
+			indegree[edge.Target]++
+			outgoing[edge.Source] = edge.Target
+		}
+		var current string
+		for _, node := range def.Nodes {
+			if indegree[node.ID] == 0 {
+				current = node.ID
+				break
+			}
+		}
+		schema := map[string]fieldOrigin{}
+		var upstreamAsset string
+		for current != "" {
+			node := byID[current]
+			if node.Type == "source" {
+				if urn, layer, ok := assetURN(node.Config); ok {
+					assetID := ensureAsset(urn, layer)
+					assetTouchedBy[assetID][rowID] = true
+					edges = append(edges, map[string]interface{}{"source": assetID, "target": pipelineNodeID})
+					upstreamAsset = assetID
+				}
+			}
+			if node.ActivityType == "transform.contract" {
+				if schemaJSON, ok := node.Config["schemaJson"].(map[string]interface{}); ok {
+					for field := range schemaJSON {
+						schema[field] = fieldOrigin{assetID: upstreamAsset, field: field}
+					}
+				}
+			}
+			if node.ActivityType == "transform.map" {
+				if expression, ok := node.Config["expression"].(string); ok {
+					next := map[string]fieldOrigin{}
+					for _, match := range mapFieldPattern.FindAllStringSubmatch(expression, -1) {
+						newField, oldField := match[1], match[2]
+						if origin, known := schema[oldField]; known {
+							next[newField] = origin
+						}
+					}
+					if len(next) > 0 {
+						schema = next
+					}
+				}
+			}
+			if node.Type == "sink" {
+				if urn, layer, ok := assetURN(node.Config); ok {
+					assetID := ensureAsset(urn, layer)
+					assetTouchedBy[assetID][rowID] = true
+					edges = append(edges, map[string]interface{}{"source": pipelineNodeID, "target": assetID})
+					for renamed, origin := range schema {
+						assetSchemas[assetID][origin.field] = true
+						if origin.assetID != "" {
+							columnEdges = append(columnEdges, map[string]interface{}{"source": fmt.Sprintf("%s:%s", origin.assetID, origin.field), "target": fmt.Sprintf("%s:%s", assetID, renamed)})
+						}
+					}
+				}
+			}
+			current = outgoing[current]
+		}
+	}
+
+	for _, node := range nodes {
+		if node["kind"] != "asset" {
+			continue
+		}
+		assetID := node["id"].(string)
+		fields := []map[string]interface{}{}
+		for name := range assetSchemas[assetID] {
+			fields = append(fields, map[string]interface{}{"name": name})
+		}
+		if len(fields) > 0 {
+			node["asset"].(map[string]interface{})["schema"] = map[string]interface{}{"fields": fields}
+		}
+	}
+	sharedAssets := 0
+	for _, id := range assetOrder {
+		if len(assetTouchedBy[id]) >= 2 {
+			sharedAssets++
+		}
+	}
+	return map[string]interface{}{
+		"nodes": nodes, "edges": edges, "columnEdges": columnEdges,
+		"stats": map[string]int{"pipelines": len(rows), "assets": len(assetOrder), "links": len(edges), "sharedAssets": sharedAssets, "columnLinks": len(columnEdges), "externalJobs": 0},
+	}
 }

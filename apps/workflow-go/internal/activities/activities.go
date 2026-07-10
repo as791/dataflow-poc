@@ -104,6 +104,7 @@ func (a *Activities) FetchSourcePage(ctx context.Context, p FetchSourceParams) (
 	started := time.Now()
 	result, err := a.Runtime.Fetch(ctx, p.ActivityType, connectors.SourceParams{Config: p.Config, Cursor: p.Cursor, Ingestion: p.Ingestion, TenantID: p.TenantID})
 	if err != nil {
+		_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "failed", time.Since(started), 0, err.Error())
 		return FetchSourceResult{}, err
 	}
 	dek, err := a.dek(p.EncryptedDEK)
@@ -389,29 +390,33 @@ type MergeParams struct {
 
 func (a *Activities) MergeRefs(ctx context.Context, p MergeParams) (model.NodeResult, error) {
 	started := time.Now()
+	fail := func(err error) (model.NodeResult, error) {
+		_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "failed", time.Since(started), 0, err.Error())
+		return model.NodeResult{}, err
+	}
 	dek, err := a.dek(p.EncryptedDEK)
 	if err != nil {
-		return model.NodeResult{}, err
+		return fail(err)
 	}
 	arrays := make([][]interface{}, 0, len(p.InputRefs))
 	for _, ref := range p.InputRefs {
 		value, err := a.Payloads.Read(ctx, ref, dek)
 		if err != nil {
-			return model.NodeResult{}, err
+			return fail(err)
 		}
 		records, ok := value.([]interface{})
 		if !ok {
-			return model.NodeResult{}, fmt.Errorf("merge input must be an array")
+			return fail(fmt.Errorf("merge input must be an array"))
 		}
 		arrays = append(arrays, records)
 	}
 	merged, err := connectors.MergeArrays(p.Strategy, arrays, p.JoinKey)
 	if err != nil {
-		return model.NodeResult{}, err
+		return fail(err)
 	}
 	ref, err := a.Payloads.Write(ctx, merged, p.TenantID, p.ExecutionID, p.NodeID, dek)
 	if err != nil {
-		return model.NodeResult{}, err
+		return fail(err)
 	}
 	_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "success", time.Since(started), len(merged), "")
 	return model.NodeResult{NodeID: p.NodeID, Status: "success", OutputRef: ref, Meta: map[string]interface{}{"durationMs": time.Since(started).Milliseconds(), "recordCount": len(merged)}}, nil
