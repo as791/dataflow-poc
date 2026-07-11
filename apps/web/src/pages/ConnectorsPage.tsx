@@ -160,7 +160,8 @@ function CredentialModal({ onClose, onSaved, realtime, advanced, initialProvider
       if (provider === 'postgres' || provider === 'mysql') {
         body = { provider, name, config: { host: f.host, port: f.port ? +f.port : provider === 'postgres' ? 5432 : 3306, database: f.database, user: f.user, sslMode: f.sslMode ?? 'disable' }, secret: { password: f.password } };
       } else if (provider === 'mongodb') {
-        body = { provider, name, config: { host: f.host, port: f.port ? +f.port : 27017, database: f.database, user: f.user, authSource: f.authSource || 'admin', tls: f.tls === 'true' }, secret: { password: f.password } };
+        const srv = f.srv === 'true';
+        body = { provider, name, config: { host: f.host, ...(srv ? { srv: true } : { port: f.port ? +f.port : 27017 }), database: f.database, user: f.user, authSource: f.authSource || 'admin', tls: srv || f.tls === 'true' }, secret: { password: f.password } };
       } else if (provider === 'clickhouse') {
         body = { provider, name, config: { url: f.url, database: f.database || 'default', username: f.username || 'default' }, secret: { password: f.password } };
       } else if (provider === 's3') {
@@ -222,12 +223,13 @@ function CredentialModal({ onClose, onSaved, realtime, advanced, initialProvider
           ) : provider === 'mongodb' ? (
             <>
               <input className="glass-input" placeholder="host" value={f.host ?? ''} onChange={set('host')} required />
-              <input className="glass-input" placeholder="port (27017)" value={f.port ?? ''} onChange={set('port')} />
+              {f.srv !== 'true' && <input className="glass-input" placeholder="port (27017)" value={f.port ?? ''} onChange={set('port')} />}
               <input className="glass-input" placeholder="database" value={f.database ?? ''} onChange={set('database')} required />
               <input className="glass-input" placeholder="user (optional)" value={f.user ?? ''} onChange={set('user')} />
               <input className="glass-input" type="password" placeholder="password" value={f.password ?? ''} onChange={set('password')} />
               <input className="glass-input" placeholder="auth source (admin)" value={f.authSource ?? ''} onChange={set('authSource')} />
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.tls === 'true'} onChange={e => setF(s => ({ ...s, tls: String(e.target.checked) }))} /> TLS / SRV</label>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.srv === 'true'} onChange={e => setF(s => ({ ...s, srv: String(e.target.checked) }))} /> SRV (Atlas / DNS seedlist — no port)</label>
+              {f.srv !== 'true' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.tls === 'true'} onChange={e => setF(s => ({ ...s, tls: String(e.target.checked) }))} /> TLS</label>}
             </>
           ) : provider === 'clickhouse' ? (
             <>
