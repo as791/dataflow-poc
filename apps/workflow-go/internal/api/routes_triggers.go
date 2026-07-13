@@ -61,8 +61,16 @@ func (s *Server) storeOpenLineage(r *http.Request, tenantID, environment string,
 	if stringValue(job["namespace"]) == "" || stringValue(job["name"]) == "" || stringValue(run["runId"]) == "" {
 		return fmt.Errorf("invalid OpenLineage event")
 	}
+	inputs := event["inputs"]
+	if inputs == nil {
+		inputs = []interface{}{}
+	}
+	outputs := event["outputs"]
+	if outputs == nil {
+		outputs = []interface{}{}
+	}
 	return s.DB.TenantTx(r.Context(), tenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `INSERT INTO external_lineage_events (tenant_id,environment,event_type,event_time,run_id,job_namespace,job_name,inputs,outputs,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, tenantID, environment, event["eventType"], event["eventTime"], run["runId"], job["namespace"], job["name"], event["inputs"], event["outputs"], event)
+		_, err := tx.Exec(r.Context(), `INSERT INTO external_lineage_events (tenant_id,environment,event_type,event_time,run_id,job_namespace,job_name,inputs,outputs,producer,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, tenantID, environment, event["eventType"], event["eventTime"], run["runId"], job["namespace"], job["name"], inputs, outputs, stringValue(event["producer"]), event)
 		return err
 	})
 }
