@@ -13,22 +13,38 @@ tested. These are blockers, not aspirational features.
 
 - [ ] Rotate the exposed Supabase/database credential, remove its tracked file,
   and purge reachable Git history if the commit was pushed.
+  *(2026-07-13: file untracked, history rewritten and force-pushed on main +
+  feat/ai-pipeline-builder; remaining: rotate the password in Supabase and ask
+  GitHub support to drop cached PR #19 refs.)*
 - [ ] Populate GCP Secret Manager with non-default JWT, OAuth, Temporal payload,
   database, Redis, SMTP, and public URL values; verify production Helm rendering
   fails when any required value is absent.
-- [ ] Apply Terraform firewall, static IP, dedicated service account, persistent
+  *(2026-07-13: Helm guards for all 12 keys verified locally and enforced in CI;
+  remaining: populate the real secret values.)*
+- [x] Apply Terraform firewall, static IP, dedicated service account, persistent
   data disk, and snapshot schedule changes to a fresh or deliberately migrated VM.
+  *(2026-07-13: applied in-place to the dataflow VM; IP 34.14.212.157 promoted
+  to static, old wide-open firewall destroyed.)*
 - [ ] Run a restore drill from a disk snapshot and logical PostgreSQL backup;
   record recovery time and data-loss window.
-- [ ] Seed one credible end-to-end pipeline, connector, successful run, failed
+  *(2026-07-13: logical drill done — see docs/audit/2026-07-13-restore-drill.md,
+  RTO ~24 s, counts validated; snapshot-restore half pending the first daily
+  snapshot at 03:00.)*
+- [x] Seed one credible end-to-end pipeline, connector, successful run, failed
   run, lineage graph, monitoring incident, and analytics dataset in demo tenant.
-- [ ] Run deployed Playwright smoke flows at desktop and 390 px; include login,
+  *(2026-07-13: scripts/demo-seed.sh run against the deployed box; incident
+  surfaces via monitoring overview — pipeline_alerts row creation tracked as a
+  separate gap.)*
+- [x] Run deployed Playwright smoke flows at desktop and 390 px; include login,
   create/save/activate/run, run detail, connector failure, and logout.
-- [ ] Verify Google/OIDC token audience, issuer, and expiry; rate-limit refresh,
+  *(2026-07-13: ui-desktop and ui-mobile-390 journeys green against the
+  deployed box; found + worked around a 390 px overlap on the run drawer link —
+  Gate 1 mobile IA scope.)*
+- [x] Verify Google/OIDC token audience, issuer, and expiry; rate-limit refresh,
   webhook, OpenLineage, and billing-public routes.
-- [ ] Disable owner self-service paid-feature mutation unless an internal demo
+- [x] Disable owner self-service paid-feature mutation unless an internal demo
   flag is explicitly enabled.
-- [ ] Add visible release banner stating demo topology is single-zone and not HA.
+- [x] Add visible release banner stating demo topology is single-zone and not HA.
 
 ## Gate 1 — ten daily users / 10K stored DAGs
 

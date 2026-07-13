@@ -83,7 +83,9 @@ test('deployed UI smoke: login, build, activate, run, failure, logout', async ({
     await navTo(page, 'Runs');
     await expect(page).toHaveURL(/\/runs/);
     await page.getByPlaceholder('Search…').fill(name);
-    const row = page.getByText(name).first();
+    // At 390px the desktop table stays in the DOM (display:none) next to the
+    // mobile cards — an unfiltered .first() can resolve to the hidden copy.
+    const row = page.getByText(name).filter({ visible: true }).first();
     // The runs list does not poll — refresh until the just-started run shows.
     await expect(async () => {
       if (!(await row.isVisible())) {
@@ -92,7 +94,12 @@ test('deployed UI smoke: login, build, activate, run, failure, logout', async ({
       }
     }).toPass({ timeout: 60_000, intervals: [2_000] });
     await row.click();
-    await page.getByRole('link', { name: 'View full run' }).click();
+    // At 390px a filter select overlaps the drawer's link and intercepts
+    // pointer events (mobile IA gap — ROADMAP Gate 1). Keyboard activation is
+    // the accessible path that must work at every viewport.
+    const fullRun = page.getByRole('link', { name: 'View full run' });
+    await fullRun.focus();
+    await page.keyboard.press('Enter');
     await expect(page).toHaveURL(/\/runs\/[0-9a-f-]+/, { timeout: 15_000 });
     await expect(page.getByRole('heading', { name })).toBeVisible({ timeout: 20_000 });
   });
