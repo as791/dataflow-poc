@@ -41,6 +41,9 @@ resource "google_compute_firewall" "dataflow_admin" {
 resource "google_compute_address" "this" {
   name   = "${var.name}-ip"
   region = var.region
+  # Promote the VM's existing ephemeral IP instead of minting a new one, so the
+  # deployed URL, OAuth redirects, and Secret Manager appUrl stay valid.
+  address = var.static_ip != "" ? var.static_ip : null
 }
 
 resource "google_compute_disk" "data" {
@@ -123,5 +126,11 @@ resource "google_compute_instance" "this" {
       repo   = var.repo
       branch = var.branch
     })
+  }
+
+  lifecycle {
+    # The image data source tracks the newest family image; a new upstream image
+    # must not force-replace the VM (and wipe the kind cluster on the boot disk).
+    ignore_changes = [boot_disk[0].initialize_params[0].image]
   }
 }

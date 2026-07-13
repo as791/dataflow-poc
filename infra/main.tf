@@ -25,6 +25,7 @@ module "dataflow" {
   branch                = var.branch
   service_account_email = google_service_account.dataflow.email
   data_disk_gb          = var.data_disk_gb
+  static_ip             = var.static_ip
 
   depends_on = [google_secret_manager_secret_iam_member.secret_accessor]
 }

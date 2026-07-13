@@ -58,3 +58,9 @@ variable "branch" {
   type    = string
   default = "main"
 }
+
+variable "static_ip" {
+  description = "Existing ephemeral IP to promote to static (empty = allocate a new address)"
+  type        = string
+  default     = ""
+}
