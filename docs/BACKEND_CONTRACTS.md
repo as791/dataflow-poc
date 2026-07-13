@@ -4,7 +4,9 @@ This inventory is the frozen frontend/POC contract for the Go cutover. Unless a
 route explicitly returns a redirect, successful responses are JSON with
 `Content-Type: application/json; charset=utf-8`. Errors are
 `{"error":"message"}`. JSON request bodies are limited to 5 MiB. Authenticated
-routes accept `Authorization: Bearer <JWT-or-API-token>`; browser refresh auth
+Errors use `{"error":"message","code":"ERR_*","details":{...}}`; `code` and
+`details` are omitted when not applicable, and unexpected server details are
+never returned. Routes accept `Authorization: Bearer <JWT-or-API-token>`; browser refresh auth
 uses the existing HttpOnly refresh cookie. CORS permits the configured
 `APP_URL`, credentials, `Authorization`, and `Content-Type`. OAuth callbacks
 validate signed state and redirect to the existing frontend connector routes.
@@ -34,7 +36,7 @@ Authenticated control-plane routes:
 - `GET /api/connectors/google/auth`, `GET /api/connectors/google/callback`, `GET /api/connectors/google/spreadsheets`, `GET /api/connectors/google/spreadsheets/{id}/sheets`, `GET /api/connectors/google/spreadsheets/{id}/sheets/{name}/preview`, `GET /api/connectors/google/drive/folders`, `GET /api/connectors/google/drive/files/{id}/preview`
 - `GET /api/connectors/microsoft/auth`, `GET /api/connectors/microsoft/callback`, `GET /api/connectors/microsoft/drives`, `GET /api/connectors/microsoft/drives/{driveId}/items`, `GET /api/connectors/microsoft/workbooks/{itemId}/sheets`, `GET /api/connectors/microsoft/workbooks/{itemId}/sheets/{name}/preview`
 - `POST /api/connectors/zendesk/auth`, `GET /api/connectors/zendesk/callback`, `GET /api/connectors/zendesk/resources`
-- `GET /api/analytics/datasets`, `GET /api/analytics/datasets/{name}/schema`, `POST /api/analytics/query`, `GET|POST /api/analytics/dashboards`, `GET|PUT|DELETE /api/analytics/dashboards/{id}`, `POST /api/analytics/dashboards/{id}/share`
+- `GET /api/analytics/datasets`, `GET /api/analytics/datasets/{name}/schema`, `GET /api/analytics/datasets/{name}/rows`, `POST /api/analytics/query`, `GET|POST /api/analytics/dashboards`, `GET|PUT|DELETE /api/analytics/dashboards/{id}`, `POST /api/analytics/dashboards/{id}/share`, `GET /api/analytics/dashboards/{id}/shares`, `DELETE /api/analytics/dashboards/{id}/shares/{hash}`
 - `POST /api/ai/generate`, `POST /api/ai/refine`
 - `GET /api/billing/usage`, `POST /api/billing/orders`, `GET /api/billing/history`
 

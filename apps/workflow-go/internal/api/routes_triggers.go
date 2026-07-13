@@ -20,8 +20,8 @@ import (
 )
 
 func (s *Server) registerTriggers(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/openlineage", handle(s.serviceOpenLineage))
-	mux.HandleFunc("POST /api/hooks/{path}", handle(s.webhookTrigger))
+	mux.Handle("POST /api/openlineage", s.rateLimit("openlineage", 120, time.Minute, handle(s.serviceOpenLineage)))
+	mux.Handle("POST /api/hooks/{path}", s.rateLimit("webhook-trigger", 120, time.Minute, handle(s.webhookTrigger)))
 }
 
 func (s *Server) serviceOpenLineage(w http.ResponseWriter, r *http.Request) error {
@@ -234,7 +234,9 @@ func (s *Server) consumePipelineEventStream(ctx context.Context) {
 				field := func(name string) string { return stringValue(item.Values[name]) }
 				ok := s.deliverEvent(ctx, field("tenantId"), model.Environment(field("environment")), field("topic"), field("payload"), field("eventId"), true)
 				if ok {
-					_ = s.Redis.XAck(ctx, stream, group, item.ID).Err()
+					if ackErr := s.Redis.XAck(ctx, stream, group, item.ID).Err(); ackErr == nil {
+						_ = s.Redis.XDel(ctx, stream, item.ID).Err()
+					}
 				} else {
 					retry = true
 				}

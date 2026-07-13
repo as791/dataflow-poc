@@ -3,9 +3,10 @@ import {
 } from 'lucide-react';
 import { AtomMark } from './AtomMark';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { RouteErrorBoundary } from './RouteErrorBoundary';
 
 const NAV = [
   { to: '/pipelines',  label: 'Pipelines',  icon: Workflow,  end: false },
@@ -39,6 +40,7 @@ export function AppShell() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(false); // ponytail: session-only dismiss, reappears on reload by design
   const meta = PAGE_META[pathname] ?? PAGE_META[Object.keys(PAGE_META).find(k => pathname.startsWith(k + '/')) ?? ''] ?? PAGE_META['/pipelines'];
   const initials = user?.email?.slice(0, 2).toUpperCase() ?? 'DF';
 
@@ -143,6 +145,17 @@ export function AppShell() {
 
       {/* ── content ── */}
       <div className="flex flex-1 flex-col min-w-0 min-h-0">
+        {!bannerDismissed && (
+          <div role="status" className="flex items-center justify-center gap-2 px-4 py-1.5 shrink-0
+            border-b border-amber-300 dark:border-amber-400/25
+            bg-amber-100 dark:bg-amber-500/15 text-[11px] font-medium text-amber-900 dark:text-amber-200">
+            <span>Pre-release demo — single-zone deployment, not highly available. Data may be reset.</span>
+            <button onClick={() => setBannerDismissed(true)} aria-label="Dismiss demo notice"
+              className="flex h-5 w-5 items-center justify-center rounded hover:bg-amber-200 dark:hover:bg-amber-400/20">
+              <X size={12} />
+            </button>
+          </div>
+        )}
         <header className="flex items-center px-4 sm:px-6 h-14 border-b border-gray-200 dark:border-white/[0.06]
           bg-white/90 dark:bg-black/20 backdrop-blur-lg shrink-0">
           <button className="flex sm:hidden h-8 w-8 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.08] mr-2" onClick={() => setSidebarOpen(true)} aria-label="Menu">
@@ -161,7 +174,13 @@ export function AppShell() {
             {dark ? <Sun size={15} /> : <Moon size={15} />}
           </button>
         </header>
-        <main className="flex-1 overflow-y-auto"><Outlet /></main>
+        <main className="flex-1 overflow-y-auto">
+          <RouteErrorBoundary key={pathname}>
+            <Suspense fallback={<div role="status" aria-live="polite" className="flex h-32 items-center justify-center text-xs text-gray-400 dark:text-white/40">Loading page…</div>}>
+              <Outlet />
+            </Suspense>
+          </RouteErrorBoundary>
+        </main>
       </div>
     </div>
   );

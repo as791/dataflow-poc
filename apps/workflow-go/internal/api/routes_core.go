@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/smtp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	smtp "github.com/wneessen/go-mail/smtp"
 )
 
 var paidFeatureKeys = map[string]bool{
@@ -70,6 +70,9 @@ func (s *Server) editionGet(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) editionPut(w http.ResponseWriter, r *http.Request) error {
+	if !s.Config.InternalDemoFeatures {
+		return &HTTPError{Status: http.StatusForbidden, Code: ErrForbidden, Message: "feature entitlements are managed by your plan; self-service changes require INTERNAL_DEMO_FEATURES"}
+	}
 	feature := r.PathValue("feature")
 	var body struct {
 		Enabled interface{} `json:"enabled"`
@@ -281,7 +284,7 @@ func (s *Server) sendInvite(email, token, inviter string) error {
 
 	var auth smtp.Auth
 	if s.Config.SMTPUser != "" {
-		auth = smtp.PlainAuth("", s.Config.SMTPUser, s.Config.SMTPPass, s.Config.SMTPHost)
+		auth = smtp.PlainAuth("", s.Config.SMTPUser, s.Config.SMTPPass, s.Config.SMTPHost, false)
 	}
 
 	// Port 465 uses implicit TLS (SMTPS); smtp.SendMail only does STARTTLS so

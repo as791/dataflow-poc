@@ -4,7 +4,8 @@ import {
   ChevronRight, Clock, Play, RefreshCw, RotateCcw, Search, X,
 } from 'lucide-react';
 import { api } from '../api';
-import { deriveStage, type Stage } from './LifecyclePage';
+import { deriveStage, type Stage } from '../utils/pipelineStage';
+import { ApiError } from '../components/ApiError';
 import { useCatalog } from '../context/CatalogContext';
 import { ActivityIcon } from '../components/canvas/FlowNode';
 
@@ -297,6 +298,7 @@ export default function PipelinesPage() {
   const navigate = useNavigate();
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterType>('all');
   const [triggerFilter, setTriggerFilter] = useState<TriggerFilter>('all');
   const [failedOnly, setFailedOnly] = useState(false);
@@ -304,10 +306,10 @@ export default function PipelinesPage() {
   const [selected, setSelected] = useState<Pipeline | null>(null);
 
   const load = () => {
-    setLoading(true);
+    setLoading(true); setError(null);
     api.listPipelines()
       .then((d: Pipeline[]) => { setPipelines(d); setLoading(false); })
-      .catch(() => setLoading(false));
+      .catch((e: Error) => { setError(e.message); setLoading(false); });
   };
 
   useEffect(() => { load(); }, []);
@@ -375,13 +377,23 @@ export default function PipelinesPage() {
         {/* rows */}
         <div className="flex-1 overflow-y-auto">
           {loading && <div className="flex items-center justify-center h-32 text-[12px] text-gray-400 dark:text-white/25">Loading…</div>}
-          {!loading && visible.length === 0 && (
+          {!loading && error && <div className="p-6"><ApiError message={error} onRetry={load} /></div>}
+          {!loading && !error && visible.length === 0 && (
             <div className="flex h-32 flex-col items-center justify-center gap-2 text-[12px] text-gray-400 dark:text-white/35">
-              <span>No pipelines match these filters.</span>
-              <button className="glass-btn-ghost px-3 py-1 text-xs" onClick={() => { setFilter('all'); setTriggerFilter('all'); setFailedOnly(false); setSearch(''); }}>Clear filters</button>
+              {pipelines.length === 0 ? (
+                <>
+                  <span>No pipelines yet. Create one to run your first data flow.</span>
+                  <button className="glass-btn-primary px-3 py-1 text-xs" onClick={() => navigate('/')}>Create pipeline</button>
+                </>
+              ) : (
+                <>
+                  <span>No pipelines match these filters.</span>
+                  <button className="glass-btn-ghost px-3 py-1 text-xs" onClick={() => { setFilter('all'); setTriggerFilter('all'); setFailedOnly(false); setSearch(''); }}>Clear filters</button>
+                </>
+              )}
             </div>
           )}
-          {visible.map(p => {
+          {!error && visible.map(p => {
             const stage = stageOf(p);
             const cfg = STAGE_CFG[stage];
             const sel = selected?.id === p.id;

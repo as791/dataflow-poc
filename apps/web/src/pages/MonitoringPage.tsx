@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, AlertTriangle, CheckCircle2, Clock3, RefreshCw } from 'lucide-react';
 import { api } from '../api';
-import { displayEnvironment } from './LifecyclePage';
+import { displayEnvironment } from '../utils/pipelineStage';
 import { ApiError } from '../components/ApiError';
 
 interface MonitoringData {

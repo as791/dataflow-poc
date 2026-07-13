@@ -39,6 +39,7 @@ type Config struct {
 	OpenLineageURL               string
 	OpenLineageAPIKey            string
 	Edition                      string
+	InternalDemoFeatures         bool
 	AuditRetentionDays           int
 	BackfillDispatchInterval     time.Duration
 }
@@ -76,6 +77,7 @@ func Load() Config {
 		OpenLineageURL:               os.Getenv("OPENLINEAGE_URL"),
 		OpenLineageAPIKey:            os.Getenv("OPENLINEAGE_API_KEY"),
 		Edition:                      env("EDITION", "community"),
+		InternalDemoFeatures:         boolEnv("INTERNAL_DEMO_FEATURES"),
 		AuditRetentionDays:           intEnv("AUDIT_RETENTION_DAYS", 90),
 		BackfillDispatchInterval:     time.Duration(intEnv("BACKFILL_DISPATCH_INTERVAL_MS", 5000)) * time.Millisecond,
 	}

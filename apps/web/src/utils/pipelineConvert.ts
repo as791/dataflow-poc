@@ -36,7 +36,7 @@ export function flowToDefinition(
 ) {
   return {
     id: meta.pipelineKey ?? '', version: 0, name: meta.name, tenantId: 'default', trigger: meta.trigger,
-    metadata: meta.metadata, slo: meta.slo, execution: meta.execution,
+    metadata: meta.metadata, slo: meta.slo, notifications: meta.notifications, execution: meta.execution,
     nodes: nodes.map(n => {
       const cfg = { ...n.data.config };
       return {

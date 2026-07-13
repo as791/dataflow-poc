@@ -26,7 +26,7 @@ import { ConfigPanel } from '../components/canvas/ConfigPanel';
 import { ExecutionMonitor } from '../components/canvas/ExecutionMonitor';
 import { definitionToFlow, flowToDefinition } from '../utils/pipelineConvert';
 import { validatePipeline } from '../utils/validatePipeline';
-import { deriveStage, displayEnvironment, type Stage } from './LifecyclePage';
+import { deriveStage, displayEnvironment, type Stage } from '../utils/pipelineStage';
 
 const TOOLBAR_CATS = [
   { id: 'source',    label: 'Sources',    icon: Database,         color: '#1D9E75' },
@@ -60,6 +60,8 @@ export default function PipelineCanvasPage() {
   const connectSource = useRef<string | null>(null);
   const connected = useRef(false);
   const fitPending = useRef(false);
+  const resizeHandlers = useRef<{ move?: (event: PointerEvent) => void; stop?: () => void }>({});
+  const cleanAfterHydration = useRef(false);
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -76,6 +78,13 @@ export default function PipelineCanvasPage() {
   const [pipelineStage, setPipelineStage] = useState<Stage>('draft');
   const [executionId, setExecutionId] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
+  const [savedFingerprint, setSavedFingerprint] = useState<string | null>(null);
+
+  const graphValidationErrors = useMemo(() => validatePipeline(
+    nodes.map(node => ({ id: node.id, type: node.data.nodeType ?? node.type ?? '', label: node.data.label })),
+    edges.map(edge => ({ id: edge.id, source: edge.source, target: edge.target })),
+  ), [nodes, edges]);
+  const graphReady = graphValidationErrors.length === 0;
 
   const [activeCat, setActiveCat] = useState<CatId | null>(null);
   const [workspacePanel, setWorkspacePanel] = useState<WorkspacePanel>(null);
@@ -142,15 +151,17 @@ export default function PipelineCanvasPage() {
 
     if (stateDef) {
       hydrated.current = hydrationKey;
+      setSavedRowId(null); setSavedFingerprint(null);
       hydrateFromDefinition(stateDef, 'Loaded from AI builder — review and Save');
       return;
     }
     if (pipelineId) {
-      setSavedRowId(null); setSelected(null); setSelectedEdge(null);
+      setSavedRowId(null); setSavedFingerprint(null); setSelected(null); setSelectedEdge(null);
       setNodes([]); setEdges([]); setMsg('Loading pipeline…');
       api.getPipeline(pipelineId).then((row: any) => {
         if (cancelled) return;
         hydrated.current = hydrationKey;
+        cleanAfterHydration.current = true;
         hydrateFromDefinition(row.definition, `Loaded v${row.version}`);
         setSavedRowId(row.id);
         setPipelineStage(deriveStage(row.status, row.environment));
@@ -208,6 +219,8 @@ export default function PipelineCanvasPage() {
     fitPending.current = false;
     requestAnimationFrame(() => flow.fitView({ padding: .2, duration: 300 }));
   }, [flow, nodes]);
+
+  useEffect(() => () => resizeHandlers.current.stop?.(), []);
 
   const onConnect = useCallback((c: Connection) => {
     connected.current = true;
@@ -278,6 +291,15 @@ export default function PipelineCanvasPage() {
     } : undefined,
   });
 
+  const definitionFingerprint = JSON.stringify(buildDefinition());
+  const hasUnsavedChanges = savedRowId !== null && savedFingerprint !== definitionFingerprint;
+
+  useEffect(() => {
+    if (!cleanAfterHydration.current) return;
+    cleanAfterHydration.current = false;
+    setSavedFingerprint(definitionFingerprint);
+  }, [definitionFingerprint]);
+
   const validate = () => {
     const def = buildDefinition();
     const errs = validatePipeline(
@@ -290,10 +312,12 @@ export default function PipelineCanvasPage() {
 
   const save = async () => {
     if (!validate()) return;
+    const definition = buildDefinition();
     try {
-      const r = await api.savePipeline(buildDefinition());
+      const r = await api.savePipeline(definition);
       setSavedRowId(r.rowId);
       setPipelineKey(r.pipelineKey);
+      setSavedFingerprint(JSON.stringify({ ...definition, id: r.pipelineKey }));
       setPipelineStage(deriveStage('inactive', 'test'));
       setMsg(`Saved v${r.version}`);
     } catch (e: any) { setMsg(`Save failed: ${e.message}`); }
@@ -301,6 +325,7 @@ export default function PipelineCanvasPage() {
 
   const activate = async () => {
     if (!savedRowId) return setMsg('Save first');
+    if (hasUnsavedChanges) return setMsg('Save changes before activating the pipeline');
     const r = await api.activate(savedRowId);
     setPipelineStage(deriveStage('active', r.environment));
     setMsg(`Activated in ${displayEnvironment(r.environment)}`);
@@ -308,6 +333,7 @@ export default function PipelineCanvasPage() {
 
   const promote = async () => {
     if (!savedRowId) return setMsg('Save first');
+    if (hasUnsavedChanges) return setMsg('Save changes before promoting the pipeline');
     try {
       const r = await api.promote(savedRowId);
       setPipelineStage('production');
@@ -325,6 +351,7 @@ export default function PipelineCanvasPage() {
 
   const run = async () => {
     if (!savedRowId) return setMsg('Save first');
+    if (hasUnsavedChanges) return setMsg('Save changes before running the pipeline');
     if (!validate()) return;
     try {
       const r = await api.run(savedRowId);
@@ -411,6 +438,7 @@ export default function PipelineCanvasPage() {
 
   const startResize = (event: React.PointerEvent) => {
     event.preventDefault();
+    resizeHandlers.current.stop?.();
     const startY = event.clientY;
     const startHeight = drawerExpanded ? window.innerHeight * .52 : drawerHeight;
     setDrawerExpanded(false);
@@ -419,7 +447,9 @@ export default function PipelineCanvasPage() {
     const stop = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', stop);
+      resizeHandlers.current = {};
     };
+    resizeHandlers.current = { move, stop };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', stop);
   };
@@ -797,9 +827,12 @@ export default function PipelineCanvasPage() {
 
       {/* Top right: actions */}
       <div className="absolute top-4 right-4 z-10 flex items-center gap-2 pointer-events-none">
-        {msg && (
-          <span className="pointer-events-auto hidden xl:block rounded-xl border border-gray-200 dark:border-white/[0.09] bg-white/90 dark:bg-[#0d1018]/85 px-3 py-1.5 text-[11px] text-gray-500 dark:text-white/50 backdrop-blur-xl max-w-[200px] truncate shadow-sm">
-            {msg}
+        <span id="pipeline-action-status" role="status" aria-live="polite" className="sr-only">
+          {msg || (!graphReady ? graphValidationErrors[0]?.message : hasUnsavedChanges ? 'Unsaved changes. Save before activating or running.' : '')}
+        </span>
+        {(msg || !graphReady || hasUnsavedChanges) && (
+          <span className="pointer-events-auto hidden xl:block rounded-xl border border-gray-200 dark:border-white/[0.09] bg-white/90 dark:bg-[#0d1018]/85 px-3 py-1.5 text-[11px] text-gray-500 dark:text-white/50 backdrop-blur-xl max-w-[240px] truncate shadow-sm">
+            {msg || (!graphReady ? graphValidationErrors[0]?.message : 'Unsaved changes · save before activate/run')}
           </span>
         )}
         <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-gray-200 dark:border-white/[0.09]
@@ -810,9 +843,9 @@ export default function PipelineCanvasPage() {
 			<option value="spark-sql" disabled={!features.sparkSql}>Spark SQL{!features.sparkSql ? ' · locked' : ''}</option>
 			<option value="flink-sql" disabled={!features.realtime || !features.flinkSql}>Flink SQL{!features.realtime || !features.flinkSql ? ' · locked' : ''}</option>
 		  </select>
-          <button className="glass-btn-ghost border-transparent bg-transparent text-xs" onClick={save}><Save size={14} /> Save</button>
-          <button className="glass-btn-ghost border-transparent bg-transparent text-xs" onClick={activate}><Rocket size={14} /> Activate</button>
-          <button className="glass-btn-primary text-xs" onClick={run}><Play size={13} fill="currentColor" /> Run</button>
+          <button aria-describedby="pipeline-action-status" className="glass-btn-ghost border-transparent bg-transparent text-xs disabled:cursor-not-allowed disabled:opacity-40" disabled={!graphReady} onClick={save}><Save size={14} /> Save</button>
+          <button aria-describedby="pipeline-action-status" className="glass-btn-ghost border-transparent bg-transparent text-xs disabled:cursor-not-allowed disabled:opacity-40" disabled={!savedRowId || !graphReady || hasUnsavedChanges} onClick={activate}><Rocket size={14} /> Activate</button>
+          <button aria-describedby="pipeline-action-status" className="glass-btn-primary text-xs disabled:cursor-not-allowed disabled:opacity-40" disabled={!savedRowId || !graphReady || hasUnsavedChanges} onClick={run}><Play size={13} fill="currentColor" /> Run</button>
         </div>
       </div>
 	  {(execution?.engine === 'spark-sql' || execution?.engine === 'flink-sql') && <div className="pointer-events-auto absolute right-4 top-16 z-10 w-[min(520px,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white/95 p-2 shadow-sm dark:border-white/10 dark:bg-[#0d1018]/95"><input className="glass-input w-full font-mono text-xs" aria-label={`${execution.engine} SELECT`} placeholder="SELECT ... FROM source" value={execution?.transformSql ?? ''} onChange={e => setExecution({ ...execution, transformSql: e.target.value })} /></div>}

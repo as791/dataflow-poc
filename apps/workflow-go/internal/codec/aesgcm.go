@@ -21,6 +21,9 @@ type AESGCMCodec struct {
 func NewDataConverterFromEnv() (converter.DataConverter, error) {
 	raw := os.Getenv("TEMPORAL_PAYLOAD_ENCRYPTION_KEY")
 	if raw == "" {
+		if os.Getenv("NODE_ENV") == "production" {
+			return nil, fmt.Errorf("TEMPORAL_PAYLOAD_ENCRYPTION_KEY is required in production")
+		}
 		return converter.GetDefaultDataConverter(), nil
 	}
 	key, err := base64.StdEncoding.DecodeString(raw)

@@ -5,23 +5,27 @@ metadata:
   labels: {{- include "dataflow.labels" . | nindent 4 }}
 type: Opaque
 stringData:
-  jwt: {{ default "dev-access-secret-change-me" .Values.secrets.jwt | quote }}
-  oauthKey: {{ default "aed60bcbe8b28875348f41d8c400a0632982946414aa2d5b6b0b8811e35cddd1" .Values.secrets.oauthKey | quote }}
-  googleClientId: {{ default "" .Values.secrets.googleClientId | quote }}
-  googleClientSecret: {{ default "" .Values.secrets.googleClientSecret | quote }}
+  jwt: {{ if .Values.runtime.production }}{{ required "secrets.jwt is required when runtime.production=true" .Values.secrets.jwt | quote }}{{ else }}{{ default "dev-access-secret-change-me" .Values.secrets.jwt | quote }}{{ end }}
+  oauthKey: {{ if .Values.runtime.production }}{{ required "secrets.oauthKey is required when runtime.production=true" .Values.secrets.oauthKey | quote }}{{ else }}{{ default "aed60bcbe8b28875348f41d8c400a0632982946414aa2d5b6b0b8811e35cddd1" .Values.secrets.oauthKey | quote }}{{ end }}
+  temporalPayloadKey: {{ if .Values.runtime.production }}{{ required "secrets.temporalPayloadKey is required when runtime.production=true" .Values.secrets.temporalPayloadKey | quote }}{{ else }}{{ default "" .Values.secrets.temporalPayloadKey | quote }}{{ end }}
+  googleClientId: {{ if .Values.runtime.production }}{{ required "secrets.googleClientId is required when runtime.production=true" .Values.secrets.googleClientId | quote }}{{ else }}{{ default "" .Values.secrets.googleClientId | quote }}{{ end }}
+  googleClientSecret: {{ if .Values.runtime.production }}{{ required "secrets.googleClientSecret is required when runtime.production=true" .Values.secrets.googleClientSecret | quote }}{{ else }}{{ default "" .Values.secrets.googleClientSecret | quote }}{{ end }}
   azureClientId: {{ default "" .Values.secrets.azureClientId | quote }}
   azureClientSecret: {{ default "" .Values.secrets.azureClientSecret | quote }}
-  smtpFrom: {{ default "" .Values.secrets.smtpFrom | quote }}
-  smtpUser: {{ default "" .Values.secrets.smtpUser | quote }}
-  smtpPass: {{ default "" .Values.secrets.smtpPass | quote }}
-  appUrl: {{ default "http://localhost:3002" .Values.secrets.appUrl | quote }}
-  databaseUrl: {{ default "postgres://dataflow:dataflow@postgres:5432/dataflow?sslmode=disable" .Values.secrets.databaseUrl | quote }}
-  appDatabaseUrl: {{ default "postgres://dataflow_app:dataflow_app@postgres:5432/dataflow?sslmode=disable" .Values.secrets.appDatabaseUrl | quote }}
-  redisUrl: {{ default "redis://redis:6379" .Values.secrets.redisUrl | quote }}
+  # SMTP is required in production: org invite emails (routes_core.go) send via SES.
+  smtpFrom: {{ if .Values.runtime.production }}{{ required "secrets.smtpFrom is required when runtime.production=true" .Values.secrets.smtpFrom | quote }}{{ else }}{{ default "" .Values.secrets.smtpFrom | quote }}{{ end }}
+  smtpUser: {{ if .Values.runtime.production }}{{ required "secrets.smtpUser is required when runtime.production=true" .Values.secrets.smtpUser | quote }}{{ else }}{{ default "" .Values.secrets.smtpUser | quote }}{{ end }}
+  smtpPass: {{ if .Values.runtime.production }}{{ required "secrets.smtpPass is required when runtime.production=true" .Values.secrets.smtpPass | quote }}{{ else }}{{ default "" .Values.secrets.smtpPass | quote }}{{ end }}
+  appUrl: {{ if .Values.runtime.production }}{{ required "secrets.appUrl is required when runtime.production=true" .Values.secrets.appUrl | quote }}{{ else }}{{ default "http://localhost:3002" .Values.secrets.appUrl | quote }}{{ end }}
+  databaseUrl: {{ if .Values.runtime.production }}{{ required "secrets.databaseUrl is required when runtime.production=true" .Values.secrets.databaseUrl | quote }}{{ else }}{{ default "postgres://dataflow:dataflow@postgres:5432/dataflow?sslmode=disable" .Values.secrets.databaseUrl | quote }}{{ end }}
+  appDatabaseUrl: {{ if .Values.runtime.production }}{{ required "secrets.appDatabaseUrl is required when runtime.production=true" .Values.secrets.appDatabaseUrl | quote }}{{ else }}{{ default "postgres://dataflow_app:dataflow_app@postgres:5432/dataflow?sslmode=disable" .Values.secrets.appDatabaseUrl | quote }}{{ end }}
+  redisUrl: {{ if .Values.runtime.production }}{{ required "secrets.redisUrl is required when runtime.production=true" .Values.secrets.redisUrl | quote }}{{ else }}{{ default "redis://redis:6379" .Values.secrets.redisUrl | quote }}{{ end }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
-metadata: {name: postgres-data}
+metadata:
+  name: postgres-data
+  annotations: {helm.sh/resource-policy: keep}
 spec:
   accessModes: [ReadWriteOnce]
   resources: {requests: {storage: {{ .Values.storage.postgres }}}}
@@ -72,8 +76,13 @@ spec:
         - name: redis
           image: {{ .Values.images.redis }}
           imagePullPolicy: IfNotPresent
+          args: [redis-server, --appendonly, "yes", --appendfsync, everysec]
           ports: [{containerPort: 6379}]
           readinessProbe: {exec: {command: [redis-cli, ping]}, periodSeconds: 3}
+          volumeMounts: [{name: data, mountPath: /data}]
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: redis-data}
 ---
 apiVersion: v1
 kind: Service
@@ -82,7 +91,18 @@ spec: {selector: {app: redis}, ports: [{port: 6379}]}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
-metadata: {name: clickhouse-data}
+metadata:
+  name: redis-data
+  annotations: {helm.sh/resource-policy: keep}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: {{ .Values.storage.redis }}}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: clickhouse-data
+  annotations: {helm.sh/resource-policy: keep}
 spec:
   accessModes: [ReadWriteOnce]
   resources: {requests: {storage: {{ .Values.storage.clickhouse }}}}
@@ -207,7 +227,9 @@ spec:
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
-metadata: {name: ollama-data}
+metadata:
+  name: ollama-data
+  annotations: {helm.sh/resource-policy: keep}
 spec:
   accessModes: [ReadWriteOnce]
   resources: {requests: {storage: {{ .Values.storage.ollama }}}}
@@ -258,7 +280,10 @@ spec:
   replicas: 1
   selector: {matchLabels: {app: api}}
   template:
-    metadata: {labels: {app: api}}
+    metadata:
+      labels: {app: api}
+      annotations:
+        checksum/secrets: {{ toJson .Values.secrets | sha256sum | quote }}
     spec:
       initContainers:
         - name: wait-postgres
@@ -274,6 +299,7 @@ spec:
             - {name: API_PORT, value: "4000"}
             - {name: TEMPORAL_NAMESPACE, value: default}
             - {name: TASK_QUEUE, value: dynamic-dag}
+            - {name: INTERNAL_DEMO_FEATURES, value: {{ .Values.internalDemoFeatures | quote }}}
           ports: [{containerPort: 4000}]
           readinessProbe: {tcpSocket: {port: 4000}, periodSeconds: 5}
           volumeMounts: [{name: connectors, mountPath: /app/connectors/manifests, readOnly: true}]
@@ -294,7 +320,10 @@ spec:
   replicas: 1
   selector: {matchLabels: {app: activity-worker-{{ $env }}}}
   template:
-    metadata: {labels: {app: activity-worker-{{ $env }}}}
+    metadata:
+      labels: {app: activity-worker-{{ $env }}}
+      annotations:
+        checksum/secrets: {{ toJson $.Values.secrets | sha256sum | quote }}
     spec:
       containers:
         - name: worker
@@ -322,7 +351,10 @@ spec:
   replicas: 1
   selector: {matchLabels: {app: workflow-worker-{{ $env }}}}
   template:
-    metadata: {labels: {app: workflow-worker-{{ $env }}}}
+    metadata:
+      labels: {app: workflow-worker-{{ $env }}}
+      annotations:
+        checksum/secrets: {{ toJson $.Values.secrets | sha256sum | quote }}
     spec:
       containers:
         - name: worker
@@ -333,6 +365,9 @@ spec:
             - {name: TEMPORAL_ADDRESS, value: temporal:7233}
             - {name: TEMPORAL_NAMESPACE, value: {{ $env }}}
             - {name: TASK_QUEUE, value: dynamic-dag-{{ $env }}}
+            - {name: NODE_ENV, value: {{ ternary "production" "development" $.Values.runtime.production | quote }}}
+            - name: TEMPORAL_PAYLOAD_ENCRYPTION_KEY
+              valueFrom: {secretKeyRef: {name: dataflow-secrets, key: temporalPayloadKey}}
 ---
 {{- end }}
 apiVersion: apps/v1

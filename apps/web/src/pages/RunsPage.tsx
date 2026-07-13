@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ExternalLink, RefreshCw, Search, X } from 'lucide-react';
 import { api } from '../api';
-import { displayEnvironment } from './LifecyclePage';
+import { displayEnvironment } from '../utils/pipelineStage';
 import { DateTimePicker } from '../components/DateTimePicker';
 import { ApiError } from '../components/ApiError';
 

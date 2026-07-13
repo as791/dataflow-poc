@@ -1,6 +1,7 @@
-# Generated key material — NEVER commit these
-/secrets/*.pem
-/secrets/*.pub
+# Generated key material and local secret files — NEVER commit these
+/secrets/*
+!/secrets/.gitkeep
+gcp-secrets.yaml
 
 # Environment files
 *.env
@@ -11,6 +12,8 @@
 # Dependencies / build output
 node_modules/
 dist/
+*.rdb
+*.zip
 
 # OS cruft
 .DS_Store
@@ -21,6 +24,5 @@ graphify-out/
 # Terraform
 .terraform/
 *.tfstate*
-.terraform.lock.hcl
 *.tfvars
 *.tfvars.json

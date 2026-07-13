@@ -36,6 +36,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   valueFrom: {secretKeyRef: {name: dataflow-secrets, key: jwt}}
 - name: OAUTH_TOKEN_ENCRYPTION_KEY
   valueFrom: {secretKeyRef: {name: dataflow-secrets, key: oauthKey}}
+- name: TEMPORAL_PAYLOAD_ENCRYPTION_KEY
+  valueFrom: {secretKeyRef: {name: dataflow-secrets, key: temporalPayloadKey}}
+- name: NODE_ENV
+  value: {{ ternary "production" "development" .Values.runtime.production | quote }}
 - name: GOOGLE_CLIENT_ID
   valueFrom: {secretKeyRef: {name: dataflow-secrets, key: googleClientId, optional: true}}
 - name: GOOGLE_CLIENT_SECRET

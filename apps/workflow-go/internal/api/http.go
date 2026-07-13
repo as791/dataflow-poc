@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"runtime/debug"
@@ -42,19 +43,19 @@ func jsonResponse(w http.ResponseWriter, status int, value interface{}) {
 type APIErrorCode string
 
 const (
-	ErrInvalidRequest   APIErrorCode = "ERR_INVALID_REQUEST"
-	ErrMissingField     APIErrorCode = "ERR_MISSING_FIELD"
-	ErrNotFound         APIErrorCode = "ERR_NOT_FOUND"
-	ErrRateLimit        APIErrorCode = "ERR_RATE_LIMIT_EXCEEDED"
-	ErrInternal         APIErrorCode = "ERR_INTERNAL"
-	ErrUnauthorized     APIErrorCode = "ERR_UNAUTHORIZED"
-	ErrForbidden        APIErrorCode = "ERR_FORBIDDEN"
-	ErrConflict         APIErrorCode = "ERR_CONFLICT"
-	ErrValidation       APIErrorCode = "ERR_VALIDATION"
+	ErrInvalidRequest     APIErrorCode = "ERR_INVALID_REQUEST"
+	ErrMissingField       APIErrorCode = "ERR_MISSING_FIELD"
+	ErrNotFound           APIErrorCode = "ERR_NOT_FOUND"
+	ErrRateLimit          APIErrorCode = "ERR_RATE_LIMIT_EXCEEDED"
+	ErrInternal           APIErrorCode = "ERR_INTERNAL"
+	ErrUnauthorized       APIErrorCode = "ERR_UNAUTHORIZED"
+	ErrForbidden          APIErrorCode = "ERR_FORBIDDEN"
+	ErrConflict           APIErrorCode = "ERR_CONFLICT"
+	ErrValidation         APIErrorCode = "ERR_VALIDATION"
 	ErrInvalidEnvironment APIErrorCode = "ERR_INVALID_ENVIRONMENT"
-	ErrConnectorExists  APIErrorCode = "ERR_CONNECTOR_EXISTS"
-	ErrOAuthRevoked     APIErrorCode = "ERR_OAUTH_REVOKED"
-	ErrNotSupported     APIErrorCode = "ERR_NOT_SUPPORTED"
+	ErrConnectorExists    APIErrorCode = "ERR_CONNECTOR_EXISTS"
+	ErrOAuthRevoked       APIErrorCode = "ERR_OAUTH_REVOKED"
+	ErrNotSupported       APIErrorCode = "ERR_NOT_SUPPORTED"
 )
 
 type ErrorResponse struct {
@@ -114,10 +115,17 @@ func oneMap(rows pgx.Rows) (map[string]interface{}, error) {
 }
 
 func requestIP(r *http.Request) string {
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		return strings.TrimSpace(strings.Split(forwarded, ",")[0])
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
 	}
-	return strings.Split(r.RemoteAddr, ":")[0]
+	proxyIP := net.ParseIP(host)
+	if proxyIP != nil && (proxyIP.IsPrivate() || proxyIP.IsLoopback()) {
+		if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); net.ParseIP(realIP) != nil {
+			return realIP
+		}
+	}
+	return host
 }
 
 type statusWriter struct {
@@ -187,7 +195,7 @@ func handle(fn func(http.ResponseWriter, *http.Request) error) http.HandlerFunc 
 				return
 			}
 			slog.Error("route failed", "method", r.Method, "path", r.URL.Path, "error", err)
-			jsonError(w, http.StatusInternalServerError, ErrInternal, err.Error(), nil)
+			jsonError(w, http.StatusInternalServerError, ErrInternal, "internal error", nil)
 		}
 	}
 }
@@ -209,8 +217,8 @@ func badRequestWithDetails(code APIErrorCode, message string, details map[string
 	return &HTTPError{Status: http.StatusBadRequest, Code: code, Message: message, Details: details}
 }
 
-func notFound(code APIErrorCode, message string) error { 
-	return &HTTPError{Status: http.StatusNotFound, Code: code, Message: message} 
+func notFound(code APIErrorCode, message string) error {
+	return &HTTPError{Status: http.StatusNotFound, Code: code, Message: message}
 }
 
 func env(name, fallback string) string {

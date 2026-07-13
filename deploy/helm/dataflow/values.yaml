@@ -12,6 +12,8 @@ images:
 hostPath: /workspace
 ollamaModel: llama3.2:3b
 cohestraURL: http://cohestra-control-api.cohestra-system:8080
+# Enables internal demo-only features in the API. Keep false in production.
+internalDemoFeatures: false
 
 web:
   nodePort: 30002
@@ -20,8 +22,14 @@ temporalUI:
 
 storage:
   postgres: 2Gi
+  redis: 2Gi
   clickhouse: 2Gi
   ollama: 8Gi
+
+runtime:
+  # Production mode makes auth cookies Secure and refuses to start without
+  # JWT, OAuth, Temporal encryption, and external data-service secrets.
+  production: false
 
 # SMTP — uses AWS SES by default.
 # Credentials (smtpUser, smtpPass, smtpFrom) must be stored in the

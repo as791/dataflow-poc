@@ -19,9 +19,19 @@ variable "instance_type" {
 }
 
 variable "admin_cidr" {
-  description = "Your IP/32 for SSH; default open"
+  description = "Trusted administrator CIDR for SSH, normally your public IP/32"
   type        = string
-  default     = "0.0.0.0/0"
+
+  validation {
+    condition     = var.admin_cidr != "0.0.0.0/0"
+    error_message = "admin_cidr must not expose SSH to the entire internet."
+  }
+}
+
+variable "data_disk_gb" {
+  description = "Persistent disk for Docker, kind PVCs, and embedded databases"
+  type        = number
+  default     = 200
 }
 
 variable "ssh_public_key_path" {

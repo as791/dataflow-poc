@@ -63,8 +63,8 @@ const OAUTH_ERRORS: Record<string, string> = {
 // Show SSO button only when the API is configured with an OIDC provider.
 // We detect this by checking if VITE_OIDC_ENABLED=true is set at build time.
 const OIDC_ENABLED = import.meta.env.VITE_OIDC_ENABLED === 'true';
-const PASSWORD_AUTH_ENABLED = import.meta.env.VITE_PASSWORD_AUTH_ENABLED === 'true';
-const GOOGLE_AUTH_ENABLED = import.meta.env.VITE_GOOGLE_AUTH_ENABLED === 'true';
+const PASSWORD_AUTH_ENABLED = import.meta.env.VITE_PASSWORD_LOGIN_ENABLED === 'true';
+const GOOGLE_AUTH_ENABLED = import.meta.env.VITE_GOOGLE_LOGIN_ENABLED === 'true';
 
 function PasswordForm({ initialEmail = '', inviteToken }: { initialEmail?: string; inviteToken?: string }) {
   const [mode, setMode] = useState<'login' | 'register'>(inviteToken ? 'register' : 'login');

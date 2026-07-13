@@ -68,20 +68,37 @@ for command in docker kind kubectl helm; do
 done
 
 kind get clusters | grep -qx dataflow || kind create cluster --config <(sed "s|__REPO_ROOT__|$PWD|" deploy/kind/dataflow.yaml)
+for node in $(kind get nodes --name dataflow); do
+  docker update --restart unless-stopped "$node" >/dev/null
+done
 docker build -f apps/workflow-go/Dockerfile -t dataflow-app:local .
 docker build -f apps/web/Dockerfile -t dataflow-web:local .
 kind load docker-image --name dataflow dataflow-app:local dataflow-web:local
-if [ -z "${GCP_SECRET_MANAGER_NAME:-}" ] && command -v gcloud >/dev/null 2>&1 \
-  && gcloud secrets describe dataflow-secrets >/dev/null 2>&1; then
+
+HELM_VALUES_FILE=$(mktemp "${TMPDIR:-/tmp}/dataflow-helm-secrets.XXXXXX.yaml")
+node scripts/render-helm-secrets.mjs "$ENV_FILE" "$HELM_VALUES_FILE"
+trap 'rm -f "$HELM_VALUES_FILE"' EXIT
+
+PUBLIC_IP=$(curl --connect-timeout 1 --max-time 2 -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip || true)
+if [ -z "${GCP_SECRET_MANAGER_NAME:-}" ] && [ -n "$PUBLIC_IP" ]; then
   GCP_SECRET_MANAGER_NAME=dataflow-secrets
 fi
 if [ -n "${GCP_SECRET_MANAGER_NAME:-}" ]; then
   echo "▶ Fetching secrets from GCP Secret Manager ($GCP_SECRET_MANAGER_NAME)"
-  SECRET_JSON=$(gcloud secrets versions access latest --secret="$GCP_SECRET_MANAGER_NAME" 2>/dev/null)
+  SECRET_JSON=""
+  for attempt in $(seq 1 30); do
+    if command -v gcloud >/dev/null 2>&1; then
+      SECRET_JSON=$(gcloud secrets versions access latest --secret="$GCP_SECRET_MANAGER_NAME" 2>/dev/null || true)
+    else
+      SECRET_JSON=$(node scripts/fetch-gcp-secret.mjs "$GCP_SECRET_MANAGER_NAME" 2>/dev/null || true)
+    fi
+    [ -n "$SECRET_JSON" ] && break
+    [ "$attempt" -lt 30 ] && sleep 10
+  done
   if [ -n "$SECRET_JSON" ]; then
     echo "$SECRET_JSON" | node -e "
 const fs = require('fs');
-let d='';
+const output = process.argv[1]; let d='';
 process.stdin.on('data', c => d+=c);
 process.stdin.on('end', () => {
   const secrets = JSON.parse(d);
@@ -89,16 +106,21 @@ process.stdin.on('end', () => {
   for (const [k, v] of Object.entries(secrets)) {
     yaml += '  ' + k + ': ' + JSON.stringify(v) + '\n';
   }
-  fs.writeFileSync('gcp-secrets.yaml', yaml);
-});"
-    HELM_SECRETS_ARG="-f gcp-secrets.yaml"
-    trap 'rm -f gcp-secrets.yaml' EXIT
+  fs.writeFileSync(output, yaml, { mode: 0o600 });
+});" "$HELM_VALUES_FILE"
   else
     echo "⚠️ Could not fetch secret $GCP_SECRET_MANAGER_NAME"
   fi
 fi
 
-helm upgrade --install dataflow deploy/helm/dataflow --namespace dataflow --create-namespace ${HELM_SECRETS_ARG:-}
+HELM_RUNTIME_ARGS=()
+if [ -n "$PUBLIC_IP" ]; then
+  HELM_RUNTIME_ARGS+=(--set runtime.production=true)
+  HELM_RUNTIME_ARGS+=(--set-string "secrets.appUrl=https://${PUBLIC_IP}.nip.io")
+fi
+
+helm upgrade --install dataflow deploy/helm/dataflow --namespace dataflow --create-namespace \
+  -f "$HELM_VALUES_FILE" "${HELM_RUNTIME_ARGS[@]}"
 
 if [ -f cohestra/deploy/helm/fcp/Chart.yaml ]; then
   kind load docker-image --name dataflow cohestra-control-api:latest cohestra-worker:latest
@@ -111,7 +133,6 @@ if [ -f cohestra/deploy/helm/fcp/Chart.yaml ]; then
     --set 'flink.watchNamespaces[0]=dataflow'
 fi
 
-PUBLIC_IP=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip || true)
 if [ -n "$PUBLIC_IP" ]; then
   docker rm -f caddy >/dev/null 2>&1 || true
   docker run -d --restart unless-stopped --name caddy --network host \

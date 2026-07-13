@@ -1,52 +1,60 @@
-# DataFlow AWS infra
+# DataFlow GCP demo infrastructure
 
-One EC2 instance (t4g.large ARM, 8 GB, ~$50/mo Mumbai) running the whole
-compose stack via cloud-init + `scripts/bootstrap.sh`. Security group allows
-only SSH and the web UI (3002) — the group, not ufw, is the firewall because
-Docker-published ports bypass ufw.
+Terraform provisions one hardened GCE demo host:
 
-## Prereqs
+- static regional public IP;
+- ports 80/443 public, SSH restricted to an explicit administrator CIDR;
+- dedicated `dataflow-runtime` service account;
+- Secret Manager container with runtime-only access;
+- 50 GiB boot disk plus protected persistent data disk for `/var/lib/docker`;
+- daily data-disk snapshots retained for 14 days;
+- cloud-init bootstrap of Docker, Kind, Helm, DataFlow, and HTTPS.
 
-```bash
-brew install terraform awscli
-aws configure          # access key from IAM, region ap-south-1
-ls ~/.ssh/id_ed25519.pub || ssh-keygen -t ed25519
-```
+This is a single-zone pre-release topology, not HA production architecture.
+See [GCP deployment and persistence](../docs/DEPLOYMENT_GCP.md) before applying.
+Existing state may contain the old `dataflow_secrets_json`; follow that guide's
+state-migration steps before any full plan/apply.
 
 ## Deploy
+
+First deployment is two-stage so the secret exists before cloud-init starts the VM:
 
 ```bash
 cd infra
 terraform init
-terraform apply        # ~2 min for infra, then ~10 min first build on the box
+terraform apply \
+  -target=google_secret_manager_secret_iam_member.secret_accessor \
+  -var='project_id=YOUR_PROJECT' \
+  -var='admin_cidr=YOUR_PUBLIC_IP/32'
+gcloud secrets versions add dataflow-secrets --data-file=/secure/path/dataflow-secrets.json
+
+terraform plan \
+  -var='project_id=YOUR_PROJECT' \
+  -var='admin_cidr=YOUR_PUBLIC_IP/32'
+terraform apply \
+  -var='project_id=YOUR_PROJECT' \
+  -var='admin_cidr=YOUR_PUBLIC_IP/32'
 ```
 
-Outputs the IP. Watch first boot:
+Terraform creates the Secret Manager container but no secret version. The
+out-of-band version above keeps secret material out of Terraform state. Later
+rotations need only `gcloud secrets versions add` plus a controlled rollout.
+
+Then follow first-boot progress:
 
 ```bash
-ssh ubuntu@<ip> sudo tail -f /var/log/dataflow-bootstrap.log
+ssh ubuntu@$(terraform output -raw public_ip) \
+  sudo tail -f /var/log/dataflow-bootstrap.log
 ```
 
-Web UI: `http://<ip>:3002`
+The web URL is the `web_url` output. Internal UIs require an SSH tunnel or
+`kubectl port-forward`; their ports are not public.
 
-## Common overrides
+## Persistence warning
 
-```bash
-terraform apply -var instance_type=t4g.xlarge     # 16 GB if 8 is tight
-terraform apply -var admin_cidr=$(curl -s ifconfig.me)/32   # lock SSH to your IP
-terraform apply -var branch=feat/ai-pipeline-builder
-```
+`dataflow-data` has Terraform `prevent_destroy`. Normal instance replacement
+preserves it. A full `terraform destroy` intentionally stops at this disk; data
+destruction requires an explicit, separately reviewed lifecycle change.
 
-## Costs
-
-- t4g.large ~$50/mo + 50 GB gp3 ~$4/mo. Covered ~2 months by the $100 AWS
-  signup credit.
-- Stop when idle: `aws ec2 stop-instances --instance-ids $(terraform output -raw instance_id)`
-  — billing pauses, Elastic IP keeps the address (EIP costs ~$3.6/mo while
-  instance is stopped).
-
-## Teardown
-
-```bash
-terraform destroy
-```
+Snapshots are crash-consistent. Maintain logical PostgreSQL/ClickHouse backups
+and perform restore drills as documented in `docs/DEPLOYMENT_GCP.md`.

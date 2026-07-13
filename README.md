@@ -1,170 +1,101 @@
 <div align="center">
   <h1>DataFlow</h1>
   <p><strong>Visual, durable data pipelines powered by Go and Temporal</strong></p>
-
-  <p>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"></a>
-    <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"></a>
-    <a href="CODE_OF_CONDUCT.md"><img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg" alt="Contributor Covenant"></a>
-    <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+">
-    <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black" alt="React 18">
-    <img src="https://img.shields.io/badge/Temporal-Durable_Workflows-141414" alt="Temporal">
-  </p>
-
-  <p>
-    Build pipelines on a React Flow canvas or draft them from natural language<br/>
-    with a local Ollama model. Run them on a Go backend with durable execution.
-  </p>
 </div>
 
----
+DataFlow is an Apache-2.0 open-core data-pipeline platform in pre-release demo
+stage. A React/Vite editor creates versioned DAGs; Go API and workers execute
+them durably through Temporal. PostgreSQL stores tenant and pipeline state,
+Redis carries bounded events/rate limits, ClickHouse serves analytics, and
+encrypted `DataRef` objects move larger payloads outside workflow history.
 
-DataFlow is an **Apache 2.0-licensed**, open-core data pipeline POC. It combines
-visual and Mermaid-based authoring, pluggable connectors, test and production
-environments, lineage, monitoring, and encrypted payload storage in one local
-Docker Compose stack.
+## Current status
 
-The backend is entirely Go: one module builds the API, Temporal workflow worker,
-and activity worker. React/Vite remains the frontend. Public REST contracts,
-Temporal names and queues, connector manifests, and AES-256-GCM payload formats
-are documented and kept stable.
+Good fit: local development, controlled product demos, architecture and
+connector validation.
 
-## Key Features
+Not yet claimed: production readiness, HA, 10K/1M-DAG capacity, SOC 2/ISO 27001
+compliance, or penetration-test assurance. Release blockers and acceptance
+criteria are explicit in the [roadmap](docs/ROADMAP.md) and
+[pre-release audit](docs/audit/2026-07-10-pre-release-audit.md).
 
-- **Visual and AI authoring** — React Flow and Mermaid stay synchronized; an
-  optional local Ollama model can draft pipeline definitions.
-- **Durable execution** — Temporal provides retries, pause/resume/cancel,
-  schedules, crash-safe backfills, and deterministic workflow replay.
-- **Pluggable data plane** — built-in database, file, SaaS, Kafka, Snowflake,
-  Iceberg, and manifest-driven HTTP connectors.
-- **Incremental state** — cursors, CDC offsets, dedupe state, and execution
-  completion commit only after the full DAG succeeds.
-- **Encrypted payloads** — inline, PostgreSQL, or S3-compatible `DataRef` storage
-  uses AES-256-GCM encryption.
-- **Operational visibility** — lineage, execution monitoring, alerts, audit data,
-  Prometheus metrics, Grafana dashboards, and Jaeger traces.
+## Features
+
+- React Flow canvas with Mermaid round-trip editing and local Ollama drafting.
+- Immutable pipeline versions, Integration/Production lifecycle, backfills,
+  pause/resume/cancel, and Temporal retries.
+- Manifest-driven HTTP connectors plus coded database, SaaS, file, Kafka,
+  Snowflake, ClickHouse, Iceberg, SFTP, Google, Microsoft, and Zendesk paths.
+- Cursor/CDC checkpoints, dedupe state, data contracts, lineage, quality,
+  alerts, analytics dashboards, and OpenLineage import/export.
+- Tenant-aware PostgreSQL RLS, encrypted credentials/payloads, audit events,
+  and owner/member workspace access.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    User["Browser"] --> Web["React / Vite UI<br/>nginx"]
+    Browser --> Web["React/Vite + nginx"]
     Web --> API["Go API"]
-
-    API --> Postgres["PostgreSQL<br/>metadata, RLS, state"]
-    API --> Redis["Redis<br/>events and outbox"]
-    API --> Temporal["Temporal Server"]
-
-    Temporal --> Workflow["Go Workflow Workers<br/>DynamicDAGWorkflow"]
-    Workflow --> Activities["Go Activity Workers"]
-    Activities --> Connectors["Sources and Sinks"]
-    Activities --> Payloads["Encrypted DataRef<br/>inline / PostgreSQL / S3"]
-    Activities --> ClickHouse["ClickHouse Analytics"]
-
-    API -.-> OTel["OpenTelemetry"]
-    Workflow -.-> OTel
-    Activities -.-> OTel
-    OTel --> Observability["Prometheus / Grafana / Jaeger"]
+    API --> PG["PostgreSQL"]
+    API --> Redis
+    API --> Temporal
+    API --> CH["ClickHouse"]
+    Temporal --> Workflow["Go workflow workers"]
+    Workflow --> Activity["Go activity workers"]
+    Activity --> Connectors
+    Activity --> Payloads["Encrypted DataRef storage"]
 ```
 
-The UI emits an immutable `PipelineDefinition`. The API stores a version and
-registers its cron, webhook, or event trigger. Each firing starts
-`DynamicDAGWorkflow`; workflow workers poll `dynamic-dag-<env>` and activity
-workers poll `dynamic-activities-<env>`. The workflow runs independent DAG nodes
-in parallel while the activity workers perform connector I/O and checkpoint
-state only after successful completion.
+The backend remains a modular monolith with three independently scalable
+processes. Microservice and micro-frontend extraction seams are documented in
+[Architecture](docs/ARCHITECTURE.md); premature network splits are deliberate
+non-goals.
 
-## Quick Start
+## Quick start
 
-Requirements: Docker Desktop with at least 8 GB RAM, plus kind, kubectl, and Helm.
-
-```bash
-./scripts/bootstrap.sh          # fresh local kind + Helm; includes Ollama
-./scripts/smoke-test.sh         # run the end-to-end smoke test
-```
-
-| Service | URL |
-|---|---|
-| Pipeline UI | http://localhost:3002 |
-| Cohestra | http://localhost:8080 |
-| Temporal UI | http://localhost:8082 |
-| Grafana | http://localhost:3001 |
-| Jaeger | http://localhost:16686 |
-| Prometheus | http://localhost:9090 |
-
-Stop the stack and delete local data with `kind delete cluster --name dataflow`.
-
-## Local Development
-
-Run the stack in Kubernetes and start Vite locally for frontend hot reload:
+Requirements: Docker Desktop with at least 8 GB RAM, Node.js 20+, Kind,
+`kubectl`, and Helm.
 
 ```bash
 ./scripts/bootstrap.sh
-npm install
-npm run dev:web               # http://localhost:3000
+./scripts/smoke-test.sh
 ```
 
-Vite proxies `/api` to the containerized API on port `4000`. Rebuild the
-affected Compose service after backend changes. See `.env.example` for the
-supported configuration.
+Open `http://localhost:3002`. Bootstrap generates local secrets and installs
+the full Kind/Helm stack. See [Local setup](docs/SETUP.md) for development and
+test commands.
 
-## Repository Layout
+## Repository layout
 
 | Path | Purpose |
-|---|---|
-| `apps/workflow-go` | Go API, workflow worker, activity worker, connectors, and storage |
-| `apps/web` | React Flow pipeline builder, monitoring, lineage, and analytics UI |
-| `packages/shared` | Frontend catalog, Mermaid, lineage, and TypeScript types |
-| `connectors/manifests` | JSON manifests for no-code HTTP connectors |
-| `db` | PostgreSQL schema, RLS policies, and migrations |
-| `observability` | OpenTelemetry, Prometheus, Grafana, and Jaeger configuration |
-| `examples` | Ready-to-import pipeline definitions |
-| `scripts` | Bootstrap, development, backup, and smoke-test commands |
+| --- | --- |
+| `apps/workflow-go` | Go API, Temporal workflow/activity workers, connectors, storage |
+| `apps/web` | React UI, route features, design components, deployed E2E tests |
+| `packages/shared` | Browser pipeline/Mermaid/lineage contracts |
+| `cohestra` | Compute control plane for Flink/Spark execution |
+| `connectors/manifests` | Declarative connector plugins |
+| `db` | PostgreSQL and ClickHouse migrations |
+| `deploy` | Kind and Helm demo deployment |
+| `infra` | GCP demo infrastructure |
+| `docs` | Canonical architecture, operations, security, roadmap, audits |
+| `tests` | Cross-runtime contracts and benchmarks |
 
 ## Documentation
 
-| Resource | Link |
-|---|---|
-| AI pipeline builder | [docs/AI_BUILDER.md](docs/AI_BUILDER.md) |
-| Connector development | [docs/CONNECTORS.md](docs/CONNECTORS.md) |
-| Backend contracts | [docs/BACKEND_CONTRACTS.md](docs/BACKEND_CONTRACTS.md) |
-| Go backend decision | [docs/ADR-002-GO-BACKEND.md](docs/ADR-002-GO-BACKEND.md) |
-| Medallion architecture | [docs/MEDALLION_ARCHITECTURE.md](docs/MEDALLION_ARCHITECTURE.md) |
-| Product roadmap | [docs/PRODUCTROADMAP.md](docs/PRODUCTROADMAP.md) |
-| Governance | [GOVERNANCE.md](GOVERNANCE.md) |
+- [Documentation index](docs/README.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [GCP deployment and persistence](docs/DEPLOYMENT_GCP.md)
+- [Security and compliance readiness](docs/SECURITY_COMPLIANCE.md)
+- [Pending roadmap](docs/ROADMAP.md)
+- [Backend contracts](docs/BACKEND_CONTRACTS.md)
+- [Connector development](docs/CONNECTORS.md)
 
-## Project Status
+## Contributing and security
 
-DataFlow is an unused POC, not a production-ready hosted service. Docker Compose
-is the supported development topology; production deployments still require
-managed secrets/KMS, durable multi-node infrastructure, backups, and an
-operational security review.
+Read [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md),
+and [GOVERNANCE.md](GOVERNANCE.md). Report vulnerabilities privately using
+[SECURITY.md](SECURITY.md). Never commit `.env`, secret files, DB dumps,
+Terraform state, or generated credential values.
 
-## Contributing
-
-Contributions are welcome — bug reports, connector manifests, docs, and code.
-
-- Read [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, commit format, and PR process.
-- Check [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before participating.
-- Read [GOVERNANCE.md](GOVERNANCE.md) for project roles and decision-making.
-- Report security vulnerabilities privately via [SECURITY.md](SECURITY.md).
-
-All contributions are made under the Apache 2.0 license and require a
-[Developer Certificate of Origin](https://developercertificate.org/) sign-off
-(`git commit -s`).
-
-## License
-
-Licensed under the **[Apache License 2.0](LICENSE)**.
-Copyright 2025 DataFlow Contributors. See [NOTICE](NOTICE) for details.
-
----
-
-<div align="center">
-  <a href="docs/AI_BUILDER.md">AI Builder</a> ·
-  <a href="docs/CONNECTORS.md">Connectors</a> ·
-  <a href="docs/BACKEND_CONTRACTS.md">Backend Contracts</a> ·
-  <a href="docs/PRODUCTROADMAP.md">Roadmap</a> ·
-  <a href="CHANGELOG.md">Changelog</a> ·
-  <a href="GOVERNANCE.md">Governance</a>
-</div>
+Licensed under the [Apache License 2.0](LICENSE).

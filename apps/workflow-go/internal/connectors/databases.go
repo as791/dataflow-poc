@@ -24,6 +24,19 @@ import (
 )
 
 var identifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var snowflakePath = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$`)
+
+func boundedPageSize(values ...interface{}) int {
+	values = append(values, 1000)
+	page := int(firstNumber(values...))
+	if page < 1 {
+		return 1
+	}
+	if page > 10000 {
+		return 10000
+	}
+	return page
+}
 
 func quoteIdentifier(value string) (string, error) {
 	if !identifier.MatchString(value) {
@@ -89,15 +102,12 @@ func (r *Runtime) postgresFetch(ctx context.Context, p SourceParams) (SourceResu
 	if err != nil {
 		return SourceResult{}, fmt.Errorf("postgres.fetch: cursorColumn required")
 	}
-	page := int(firstNumber(func() interface{} {
+	page := boundedPageSize(func() interface{} {
 		if p.Ingestion != nil {
 			return p.Ingestion.PageSize
 		}
 		return nil
-	}(), p.Config["pageSize"], 1000))
-	if page > 10000 {
-		page = 10000
-	}
+	}(), p.Config["pageSize"])
 	columns := "*"
 	if value := stringValue(p.Config["columns"]); value != "" && value != "*" {
 		items := []string{}
@@ -252,10 +262,14 @@ func (r *Runtime) mysqlDB(ctx context.Context, id string) (*sql.DB, error) {
 	secret, _ := row["secret_value"].(map[string]interface{})
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true", stringValue(cfg["user"]), stringValue(secret["password"]), stringValue(cfg["host"]), int(firstNumber(cfg["port"], 3306)), stringValue(cfg["database"]))
 	db, err := sql.Open("mysql", dsn)
-	if err == nil {
-		err = db.PingContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return db, err
+	if err = db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
 }
 func (r *Runtime) mysqlFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
 	table := stringValue(p.Config["table"])
@@ -263,7 +277,7 @@ func (r *Runtime) mysqlFetch(ctx context.Context, p SourceParams) (SourceResult,
 	if !identifier.MatchString(table) || !identifier.MatchString(column) {
 		return SourceResult{}, fmt.Errorf("mysql.fetch: invalid table or cursor column")
 	}
-	page := int(firstNumber(p.Config["pageSize"], 1000))
+	page := boundedPageSize(p.Config["pageSize"])
 	query := fmt.Sprintf("SELECT * FROM `%s`", table)
 	args := []interface{}{}
 	if p.Cursor["value"] != nil {
@@ -391,10 +405,14 @@ func (r *Runtime) mongoClient(ctx context.Context, id string) (*mongo.Client, st
 		}
 	}
 	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetServerSelectionTimeout(10 * time.Second))
-	if err == nil {
-		err = client.Ping(ctx, nil)
+	if err != nil {
+		return nil, "", err
 	}
-	return client, stringValue(cfg["database"]), err
+	if err = client.Ping(ctx, nil); err != nil {
+		_ = client.Disconnect(context.Background())
+		return nil, "", err
+	}
+	return client, stringValue(cfg["database"]), nil
 }
 func (r *Runtime) mongoFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
 	client, database, err := r.mongoClient(ctx, stringValue(p.Config["connectionId"]))
@@ -408,7 +426,7 @@ func (r *Runtime) mongoFetch(ctx context.Context, p SourceParams) (SourceResult,
 	if p.Cursor["value"] != nil {
 		filter[field] = bson.M{"$gt": p.Cursor["value"]}
 	}
-	page := int(firstNumber(p.Config["pageSize"], 1000))
+	page := boundedPageSize(p.Config["pageSize"])
 	cursor, err := collection.Find(ctx, filter, options.Find().SetSort(bson.D{{Key: field, Value: 1}}).SetLimit(int64(page+1)))
 	if err != nil {
 		return SourceResult{}, err
@@ -467,20 +485,27 @@ func (r *Runtime) snowflakeDB(ctx context.Context, id string) (*sql.DB, error) {
 		return nil, err
 	}
 	db, err := sql.Open("snowflake", dsn)
-	if err == nil {
-		err = db.PingContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return db, err
+	if err = db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
 }
 func (r *Runtime) snowflakeFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
 	table := stringValue(p.Config["table"])
-	if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*$`).MatchString(table) {
+	if !snowflakePath.MatchString(table) {
 		return SourceResult{}, fmt.Errorf("snowflake.fetch: invalid table")
 	}
-	page := int(firstNumber(p.Config["pageSize"], 1000))
+	page := boundedPageSize(p.Config["pageSize"])
 	query := "SELECT * FROM " + table
 	args := []interface{}{}
 	column := stringValue(p.Config["cursorColumn"])
+	if column != "" && !identifier.MatchString(column) {
+		return SourceResult{}, fmt.Errorf("snowflake.fetch: invalid cursor column")
+	}
 	if column != "" && p.Cursor["value"] != nil {
 		query += " WHERE " + column + ">?"
 		args = append(args, p.Cursor["value"])
@@ -518,10 +543,15 @@ func (r *Runtime) snowflakeSink(ctx context.Context, input interface{}, cfg map[
 		return nil, nil, err
 	}
 	table := stringValue(cfg["table"])
-	if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*$`).MatchString(table) {
+	if !snowflakePath.MatchString(table) {
 		return nil, nil, fmt.Errorf("sink.snowflake: invalid table")
 	}
 	columns := allColumns(rows)
+	for _, column := range columns {
+		if !identifier.MatchString(column) {
+			return nil, nil, fmt.Errorf("sink.snowflake: invalid column")
+		}
+	}
 	db, err := r.snowflakeDB(ctx, stringValue(cfg["connectionId"]))
 	if err != nil {
 		return nil, nil, err

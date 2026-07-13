@@ -6,7 +6,7 @@ import { api } from '../api';
 import { ApiError } from '../components/ApiError';
 import { useCatalog } from '../context/CatalogContext';
 import { buildRunGraph, type NodeRun } from './runGraph';
-import { displayEnvironment } from './LifecyclePage';
+import { displayEnvironment } from '../utils/pipelineStage';
 import { useTheme } from '../context/ThemeContext';
 import { useFeatures } from '../context/FeatureContext';
 

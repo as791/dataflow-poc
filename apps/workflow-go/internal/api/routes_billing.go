@@ -17,7 +17,7 @@ import (
 )
 
 func (s *Server) registerBillingWebhook(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/billing/webhook", handle(s.billingWebhook))
+	mux.Handle("POST /api/billing/webhook", s.rateLimit("billing-webhook", 60, time.Minute, handle(s.billingWebhook)))
 }
 func (s *Server) registerBilling(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/billing/usage", handle(s.billingUsage))

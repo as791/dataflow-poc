@@ -1,9 +1,3 @@
-variable "dataflow_secrets_json" {
-  description = "JSON string containing all secrets"
-  type        = string
-  default     = "{}"
-}
-
 resource "google_project_service" "secretmanager" {
   service            = "secretmanager.googleapis.com"
   disable_on_destroy = false
@@ -17,17 +11,24 @@ resource "google_secret_manager_secret" "dataflow_secrets" {
   depends_on = [google_project_service.secretmanager]
 }
 
-resource "google_secret_manager_secret_version" "dataflow_secrets_version" {
-  secret      = google_secret_manager_secret.dataflow_secrets.id
-  secret_data = var.dataflow_secrets_json
+# Older revisions managed a secret version and stored its plaintext in state.
+# Forget that object without deleting the live GCP version. Keep this migration
+# block until every workspace has applied it.
+removed {
+  from = google_secret_manager_secret_version.dataflow_secrets_version
+
+  lifecycle {
+    destroy = false
+  }
 }
 
-# Grant the default compute service account access to this secret.
-# In production, it is better to create a specific service account for the VM.
-data "google_compute_default_service_account" "default" {}
+resource "google_service_account" "dataflow" {
+  account_id   = "dataflow-runtime"
+  display_name = "DataFlow runtime"
+}
 
 resource "google_secret_manager_secret_iam_member" "secret_accessor" {
   secret_id = google_secret_manager_secret.dataflow_secrets.id
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${data.google_compute_default_service_account.default.email}"
+  member    = "serviceAccount:${google_service_account.dataflow.email}"
 }
