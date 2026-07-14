@@ -13,9 +13,9 @@ tested. These are blockers, not aspirational features.
 
 - [ ] Rotate the exposed Supabase/database credential, remove its tracked file,
   and purge reachable Git history if the commit was pushed.
-  *(2026-07-13: file untracked, history rewritten and force-pushed on main +
-  feat/ai-pipeline-builder; remaining: rotate the password in Supabase and ask
-  GitHub support to drop cached PR #19 refs.)*
+  *(2026-07-14: rotated and verified — old password rejected; file deleted,
+  branch history rewritten and force-pushed. Remaining: GitHub support ticket
+  to drop cached PR #19 refs, which still serve the old commits by SHA.)*
 - [ ] Populate GCP Secret Manager with non-default JWT, OAuth, Temporal payload,
   database, Redis, SMTP, and public URL values; verify production Helm rendering
   fails when any required value is absent.
@@ -25,11 +25,12 @@ tested. These are blockers, not aspirational features.
   data disk, and snapshot schedule changes to a fresh or deliberately migrated VM.
   *(2026-07-13: applied in-place to the dataflow VM; IP 34.14.212.157 promoted
   to static, old wide-open firewall destroyed.)*
-- [ ] Run a restore drill from a disk snapshot and logical PostgreSQL backup;
+- [x] Run a restore drill from a disk snapshot and logical PostgreSQL backup;
   record recovery time and data-loss window.
-  *(2026-07-13: logical drill done — see docs/audit/2026-07-13-restore-drill.md,
-  RTO ~24 s, counts validated; snapshot-restore half pending the first daily
-  snapshot at 03:00.)*
+  *(2026-07-14: both halves drilled — logical 11 s dump / 13 s restore with
+  count validation; snapshot→disk→attach→mount in ~35 s. Caveat recorded:
+  cluster PVs still live on the boot disk, so snapshots capture an empty data
+  disk until storage is migrated — see docs/audit/2026-07-13-restore-drill.md.)*
 - [x] Seed one credible end-to-end pipeline, connector, successful run, failed
   run, lineage graph, monitoring incident, and analytics dataset in demo tenant.
   *(2026-07-13: scripts/demo-seed.sh run against the deployed box; incident

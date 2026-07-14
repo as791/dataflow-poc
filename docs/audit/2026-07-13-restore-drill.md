@@ -23,12 +23,25 @@ on the same instance. Executed remotely via ssh + kubectl exec.
   (manual invocation only). Until a cron/scheduled job is added, the standing
   RPO is the snapshot schedule above.
 
+## Disk-snapshot restore (2026-07-14)
+
+First scheduled snapshot (`dataflow-data-...-20260714031530`, 03:15 UTC,
+READY) drilled end-to-end via the compute API:
+
+| Measure | Result |
+|---|---|
+| New disk from snapshot (`disks.insert` → READY) | 23 s |
+| Attach read-only + visible in VM (`lsblk`) | 12 s |
+| Mount + verify | ext4 mounts clean; contents empty apart from lost+found — expected, cluster storage has not been migrated onto the data disk yet |
+| Cleanup | detached, disk deleted (GET returns 404) |
+| Credential rotation side-check | old Supabase DB password rejected (`password authentication failed`) over IPv6 direct connection |
+
+Standing RPO: daily snapshot at ~03:15 UTC → ≤ 24 h.
+
 ## Outstanding
 
-- **Disk-snapshot restore half:** the snapshot policy was created today; the
-  first snapshot lands at 03:00. Restore-from-snapshot into a fresh VM/disk is
-  still to be drilled once one exists — the ROADMAP Gate 0 checkbox stays
-  unchecked until then.
+- Migrate cluster data (Postgres/ClickHouse PVs) onto the persistent data disk
+  so snapshots actually capture state — today they capture an empty filesystem.
 - Schedule `scripts/db-backup.sh` (cron/K8s CronJob) with S3 upload to tighten
   logical RPO below 24 h.
 - `scripts/db-restore.sh` caveats found during review: DB name parsing breaks
