@@ -38,12 +38,41 @@ READY) drilled end-to-end via the compute API:
 
 Standing RPO: daily snapshot at ~03:15 UTC → ≤ 24 h.
 
+## Storage migration onto the data disk (2026-07-14)
+
+Docker root (and with it the kind cluster, all PVs) moved from the boot disk
+onto the 200G persistent data disk:
+
+| Step | Result |
+|---|---|
+| Stop docker, rsync 19G `/var/lib/docker` → data disk | 2 m 23 s |
+| Remount `LABEL=dataflow-data` at `/var/lib/docker` (fstab) + restart | all 13 pods Running |
+| Data integrity | row counts pipelines 618, executions 537, users 7, connector_instances 10 (drill baseline +2 organic) |
+| Web check | `https://34.14.212.157.nip.io/` → 200 |
+| Snapshot verify | manual snapshot `dataflow-data-postmigration-verify` → new disk → attach RO → contains Postgres 16 data dir (`PG_VERSION`) and ClickHouse data for both PVCs; drill disk deleted after |
+
+The manual snapshot is kept as the first valid restore point; the daily 03:00
+policy now captures real state. Total downtime ≈ 5 min. Rollback copy left at
+`/var/lib/docker.pre-migration` on the boot disk (19G) — delete after 24–48 h
+of stable operation to free the boot disk (78 % full).
+
+Matches the cloud-init template on this branch (`user-data.yml.tpl` mounts the
+data disk at `/var/lib/docker`), so a rebuilt VM lands in the same layout.
+
+## Logical backups (2026-07-14)
+
+`db-backup` CronJob added to the Helm chart: 6-hourly `pg_dump | gzip` into
+`/var/backups/dataflow` inside the kind node (data-disk-backed), 7-day
+retention. The daily disk snapshot therefore carries a ≤6 h-old logical dump
+off-box.
+
 ## Outstanding
 
-- Migrate cluster data (Postgres/ClickHouse PVs) onto the persistent data disk
-  so snapshots actually capture state — today they capture an empty filesystem.
-- Schedule `scripts/db-backup.sh` (cron/K8s CronJob) with S3 upload to tighten
-  logical RPO below 24 h.
+- Off-box upload for sub-24 h off-box RPO (user-only IAM op — runtime SA
+  `dataflow-runtime@` deliberately has no storage role). To enable:
+  `gcloud storage buckets create gs://dataflow-db-backups --location=asia-south1`,
+  grant `roles/storage.objectCreator` on the bucket to the runtime SA, then add
+  an upload step to the `db-backup` CronJob.
 - `scripts/db-restore.sh` caveats found during review: DB name parsing breaks
   on URLs with query params; no forced drop of active connections. This drill
   used direct psql in the pod instead.

@@ -393,3 +393,43 @@ spec:
   type: NodePort
   selector: {app: web}
   ports: [{port: 80, targetPort: 80, nodePort: {{ .Values.web.nodePort }}}]
+---
+# Logical DB backup every 6h (scripts/db-backup.sh as a CronJob). Dumps land on
+# the persistent data disk (kind node /var -> docker volume on /var/lib/docker),
+# so the daily 03:00 disk snapshot carries a <=6h-old dump off-box.
+# ponytail: no GCS/S3 upload yet — runtime SA has no storage role (user-only
+# IAM op); grant bucket access + add an upload step for sub-24h off-box RPO.
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: db-backup}
+spec:
+  schedule: "15 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 900
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: backup
+              image: {{ .Values.images.postgres }}
+              env:
+                - {name: DATABASE_URL, valueFrom: {secretKeyRef: {name: dataflow-secrets, key: databaseUrl}}}
+              command:
+                - sh
+                - -ec
+                - |
+                  STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+                  OUT="/backups/dataflow-backup-${STAMP}.sql.gz"
+                  pg_dump "$DATABASE_URL" | gzip > "$OUT"
+                  gunzip -t "$OUT"
+                  ls -1t /backups/dataflow-backup-*.sql.gz | tail -n +29 | xargs -r rm --
+                  echo "backup OK: $(du -sh "$OUT" | cut -f1) $OUT"
+              volumeMounts: [{name: backups, mountPath: /backups}]
+          volumes:
+            - name: backups
+              hostPath: {path: /var/backups/dataflow, type: DirectoryOrCreate}
