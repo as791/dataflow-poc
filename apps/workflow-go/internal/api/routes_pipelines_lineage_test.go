@@ -160,3 +160,74 @@ func TestBuildWorkspaceLineageMatchesSharedContract(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildWorkspaceLineageContractSchemaRepresentations(t *testing.T) {
+	tests := []struct {
+		name        string
+		schemaJSON  interface{}
+		wantLineage bool
+	}{
+		{name: "decoded object", schemaJSON: map[string]interface{}{"customer_email": "string"}, wantLineage: true},
+		{name: "UI JSON string", schemaJSON: `{"customer_email":"string"}`, wantLineage: true},
+		{name: "invalid JSON string", schemaJSON: `{`, wantLineage: false},
+		{name: "non-object JSON string", schemaJSON: `["string"]`, wantLineage: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			definition := model.PipelineDefinition{
+				ID: "customers", Name: "Customers", Trigger: model.Trigger{Type: "manual"},
+				Nodes: []model.Node{
+					{ID: "source", Type: "source", ActivityType: "s3.fetch", Config: map[string]interface{}{"bucket": "raw", "key": "customers/input.json", "layer": "bronze"}},
+					{ID: "contract", Type: "transform", ActivityType: "transform.contract", Config: map[string]interface{}{"schemaJson": test.schemaJSON}},
+					{ID: "map", Type: "transform", ActivityType: "transform.map", Config: map[string]interface{}{"expression": "{ email: r.customer_email }"}},
+					{ID: "sink", Type: "sink", ActivityType: "sink.s3", Config: map[string]interface{}{"bucket": "curated", "key": "customers/output.json", "layer": "silver"}},
+				},
+				Edges: []model.Edge{
+					{ID: "e1", Source: "source", Target: "contract"},
+					{ID: "e2", Source: "contract", Target: "map"},
+					{ID: "e3", Source: "map", Target: "sink"},
+				},
+			}
+			graph := buildWorkspaceLineage([]map[string]interface{}{{
+				"id": "row-customers", "pipeline_key": "customers", "name": "Customers", "version": 1,
+				"status": "active", "environment": "test", "definition": definition,
+			}})
+
+			var sinkAsset map[string]interface{}
+			for _, node := range graph["nodes"].([]map[string]interface{}) {
+				asset, ok := node["asset"].(map[string]interface{})
+				if ok && asset["urn"] == "s3://curated/customers/output.json" {
+					sinkAsset = asset
+					break
+				}
+			}
+			if sinkAsset == nil {
+				t.Fatal("sink asset missing")
+			}
+
+			columnEdges := graph["columnEdges"].([]map[string]interface{})
+			if !test.wantLineage {
+				if len(columnEdges) != 0 {
+					t.Fatalf("invalid contract produced column lineage: %v", columnEdges)
+				}
+				if _, ok := sinkAsset["schema"]; ok {
+					t.Fatalf("invalid contract produced sink schema: %v", sinkAsset)
+				}
+				return
+			}
+
+			if len(columnEdges) != 1 || columnEdges[0]["sourceField"] != "customer_email" || columnEdges[0]["targetField"] != "email" {
+				t.Fatalf("renamed column lineage is inconsistent: %v", columnEdges)
+			}
+			schema, ok := sinkAsset["schema"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("sink schema missing: %v", sinkAsset)
+			}
+			fields := schema["fields"].([]map[string]interface{})
+			if len(fields) != 1 || fields[0]["name"] != "email" || fields[0]["type"] != "string" {
+				t.Fatalf("sink schema did not use renamed output field: %v", fields)
+			}
+		})
+	}
+}

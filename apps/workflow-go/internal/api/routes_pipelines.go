@@ -798,6 +798,19 @@ func assetURN(cfg map[string]interface{}) (string, string, string, string, bool)
 	return fmt.Sprintf("s3://%s/%s", bucket, key), bucket, key, layer, true
 }
 
+func lineageContractSchema(value interface{}) map[string]interface{} {
+	switch value := value.(type) {
+	case map[string]interface{}:
+		return value
+	case string:
+		var schema map[string]interface{}
+		if err := json.Unmarshal([]byte(value), &schema); err == nil {
+			return schema
+		}
+	}
+	return nil
+}
+
 // buildWorkspaceLineage walks each pipeline's node chain (assumed linear —
 // source → transform* → sink, which is all the DAG shapes this feature
 // currently needs to support) to derive asset nodes, pipeline↔asset edges,
@@ -876,7 +889,7 @@ func buildWorkspaceLineage(rows []map[string]interface{}) map[string]interface{}
 				}
 			}
 			if node.ActivityType == "transform.contract" {
-				if schemaJSON, ok := node.Config["schemaJson"].(map[string]interface{}); ok {
+				if schemaJSON := lineageContractSchema(node.Config["schemaJson"]); schemaJSON != nil {
 					for field, rawType := range schemaJSON {
 						fieldType := stringValue(rawType)
 						nullable := strings.HasSuffix(fieldType, "?")
