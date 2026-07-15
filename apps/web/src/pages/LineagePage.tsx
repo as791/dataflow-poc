@@ -10,10 +10,21 @@ import { api } from '../api';
 import { useTheme } from '../context/ThemeContext';
 import { ApiError } from '../components/ApiError';
 
-const LAYER_X: Record<string, number> = { external: 40, bronze: 520, silver: 1000, gold: 1480 };
-const LAYER_COLOR: Record<string, string> = {
+type LineageLayer = 'external' | 'bronze' | 'silver' | 'gold';
+const LAYER_X: Record<LineageLayer, number> = { external: 40, bronze: 640, silver: 1240, gold: 1840 };
+const LAYER_COLOR: Record<LineageLayer, string> = {
   external: '#64748b', bronze: '#b7791f', silver: '#94a3b8', gold: '#eab308',
 };
+const ASSET_WIDTH = 360;
+const ASSET_HEIGHT = 128;
+const PIPELINE_WIDTH = 200;
+const PIPELINE_HEIGHT = 100;
+const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 0.35 };
+const FIT_VIEW_OPTIONS = { padding: 0.25, minZoom: 0.05, maxZoom: 0.4 };
+const normalizeLayer = (layer: unknown): LineageLayer =>
+  typeof layer === 'string' && Object.prototype.hasOwnProperty.call(LAYER_X, layer)
+    ? layer as LineageLayer
+    : 'external';
 const HEALTH_COLOR: Record<string, string> = {
   healthy: '#10b981', warning: '#f59e0b', critical: '#ef4444', unmonitored: '#94a3b8',
 };
@@ -29,9 +40,9 @@ type LineageHistoryItem = {
 };
 
 const AssetNode = memo(function AssetNode({ data }: NodeProps) {
-  const layer = data.layer ?? 'external';
+  const layer = normalizeLayer(data.layer);
   return (
-    <div className="min-w-[210px] rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm dark:border-white/10 dark:bg-[#12151f]/95">
+    <div className="h-full w-full rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm dark:border-white/10 dark:bg-[#12151f]/95">
       <Handle type="target" position={Position.Left} />
       <div className="flex items-center gap-2">
         <Database size={14} style={{ color: LAYER_COLOR[layer] }} />
@@ -56,7 +67,7 @@ const AssetNode = memo(function AssetNode({ data }: NodeProps) {
 const PipelineNode = memo(function PipelineNode({ data }: NodeProps) {
   const health = data.health ?? 'unmonitored';
   return (
-    <div className="min-w-[190px] rounded-xl border bg-brand-50 px-3 py-2 shadow-md dark:bg-brand-500/10"
+    <div className="h-full w-full rounded-xl border bg-brand-50 px-3 py-2 shadow-md dark:bg-brand-500/10"
       style={{ borderColor: HEALTH_COLOR[health] }}>
       <Handle type="target" position={Position.Left} />
       <div className="flex items-center gap-2">
@@ -90,28 +101,49 @@ function buildFlow(graph: WorkspaceLineage, healthById: Record<string, PipelineH
     if (targetEdges) targetEdges.push(edge.source);
     else edgeByNode.set(edge.target, [edge.source]);
   }
-  const assetLayer = new Map(graph.nodes.filter(n => n.kind === 'asset').map(n => [n.id, n.asset.layer ?? 'external']));
-  const laneCounts: Record<string, number> = { external: 0, bronze: 0, silver: 0, gold: 0 };
-  const pipelineCount = { value: 0 };
+  const assetLayer = new Map<string, LineageLayer>();
+  const assetPosition = new Map<string, { x: number; y: number }>();
+  const laneCounts: Record<LineageLayer, number> = { external: 0, bronze: 0, silver: 0, gold: 0 };
+  for (const node of graph.nodes) if (node.kind === 'asset') {
+    const lane = normalizeLayer(node.asset.layer);
+    assetLayer.set(node.id, lane);
+    assetPosition.set(node.id, { x: LAYER_X[lane], y: 90 + laneCounts[lane]++ * (ASSET_HEIGHT + 24) });
+  }
+  const nextPipelineY = new Map<number, number>();
   const nodes = graph.nodes.map<Node>(node => {
     if (node.kind === 'asset') {
-      const lane = node.asset.layer ?? 'external';
-      const index = laneCounts[lane]++;
+      const lane = assetLayer.get(node.id) ?? 'external';
       return {
-        id: node.id, type: 'asset', position: { x: LAYER_X[lane], y: 90 + index * 125 },
+        id: node.id, type: 'asset', position: assetPosition.get(node.id)!,
+        width: ASSET_WIDTH, height: ASSET_HEIGHT,
         data: { ...node.asset, layer: lane, materialization: node.materialization, quality: node.quality }, draggable: false,
       };
     }
     const neighbours = edgeByNode.get(node.id) ?? [];
-    const xs = neighbours.map(id => LAYER_X[assetLayer.get(id) ?? 'external']);
+    const xs = neighbours.flatMap(id => {
+      const lane = assetLayer.get(id);
+      return lane ? [LAYER_X[lane]] : [];
+    });
     const min = xs.length ? Math.min(...xs) : LAYER_X.external;
     const max = xs.length ? Math.max(...xs) : LAYER_X.bronze;
-    const x = min === max ? min + 250 : (min + max) / 2;
+    const x = min === max
+      ? min + ASSET_WIDTH + 20
+      : (min + ASSET_WIDTH + max - PIPELINE_WIDTH) / 2;
+    const neighbourYs = neighbours.flatMap(id => {
+      const position = assetPosition.get(id);
+      return position ? [position.y + ASSET_HEIGHT / 2] : [];
+    });
+    const preferredY = neighbourYs.length
+      ? neighbourYs.reduce((sum, y) => sum + y, 0) / neighbourYs.length - PIPELINE_HEIGHT / 2
+      : 40;
+    const y = Math.max(40, preferredY, nextPipelineY.get(x) ?? 40);
+    nextPipelineY.set(x, y + PIPELINE_HEIGHT + 24);
     const data = node.kind === 'external-job'
       ? { ...node.externalJob, external: true, status: 'external', health: 'unmonitored' }
       : { ...node.pipeline, ...(healthById[node.pipeline.rowId] ?? { health: 'unmonitored', breaches: [] }) };
     return {
-      id: node.id, type: 'pipeline', position: { x, y: 40 + pipelineCount.value++ * 150 },
+      id: node.id, type: 'pipeline', position: { x, y },
+      width: PIPELINE_WIDTH, height: PIPELINE_HEIGHT,
       data, draggable: false,
     };
   });
@@ -190,8 +222,7 @@ export default function LineagePage() {
     const frame = requestAnimationFrame(() => {
       void flowInstance.fitView({
         nodes: visibleNodeKey.split('\u0000').map(id => ({ id })),
-        padding: 0.15,
-        duration: 250,
+        ...FIT_VIEW_OPTIONS,
       });
     });
     return () => cancelAnimationFrame(frame);
@@ -340,13 +371,15 @@ export default function LineagePage() {
           {selectedColumns.length > 0 && <div className="mt-3"><p className="text-[10px] font-semibold uppercase text-gray-400">Column lineage</p><div className="mt-1 max-h-32 space-y-1 overflow-auto">{selectedColumns.slice(0, 20).map(edge => <p key={edge.id} className="truncate text-[10px] text-gray-600 dark:text-white/55" title={`${edge.sourceAssetUrn}.${edge.sourceField} → ${edge.targetAssetUrn}.${edge.targetField}`}>{edge.sourceField} → {edge.targetField}</p>)}</div></div>}
         </aside>}
         <ReactFlow nodes={impact.nodes} edges={impact.edges} nodeTypes={nodeTypes} fitView
+          fitViewOptions={FIT_VIEW_OPTIONS} defaultViewport={DEFAULT_VIEWPORT} minZoom={0.05}
+          onlyRenderVisibleElements
           onInit={setFlowInstance}
           nodesDraggable={false} nodesConnectable={false} elementsSelectable
           onNodeClick={(_, node) => setSelectedId(node.id)} onPaneClick={() => setSelectedId(null)}>
           <Background variant={BackgroundVariant.Dots} gap={24} size={1} color={dark ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.06)'} />
           <Controls showInteractive={false} />
           <MiniMap className="hidden md:block" pannable zoomable
-            nodeColor={node => node.type === 'pipeline' ? '#7c6cf2' : LAYER_COLOR[node.data.layer ?? 'external']}
+            nodeColor={node => node.type === 'pipeline' ? '#7c6cf2' : LAYER_COLOR[normalizeLayer(node.data.layer)]}
             nodeStrokeColor={dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.3)'}
             nodeStrokeWidth={2}
             maskColor={dark ? 'rgba(8,10,18,0.78)' : 'rgba(235,237,245,0.78)'}
