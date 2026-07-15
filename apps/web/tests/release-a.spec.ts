@@ -5,12 +5,68 @@ type AnalyticsCapture = {
   saved: any[];
 };
 
-async function mockAPI(page: Page, analytics?: AnalyticsCapture) {
+type LineageFixture = {
+  nodes: Array<Record<string, unknown>>;
+  edges: Array<Record<string, unknown>>;
+  columnEdges: Array<Record<string, unknown>>;
+  stats: { pipelines: number; assets: number; links: number; sharedAssets: number; columnLinks: number; externalJobs: number };
+};
+
+const SPARSE_LINEAGE_NODE_COUNT = 1_064;
+const SPARSE_LINEAGE_EDGE_COUNT = 174;
+
+function sparseLineageFixture(): LineageFixture {
+  const linkedPipelineCount = SPARSE_LINEAGE_EDGE_COUNT / 2;
+  const assetCount = SPARSE_LINEAGE_EDGE_COUNT;
+  const pipelineCount = SPARSE_LINEAGE_NODE_COUNT - assetCount;
+  const nodes: Array<Record<string, unknown>> = Array.from({ length: pipelineCount }, (_, index) => ({
+    id: `pipeline:scale-${index}`,
+    kind: 'pipeline',
+    pipeline: {
+      rowId: `scale-${index}`, pipelineKey: `scale-${index}`, name: `Scale pipeline ${index}`,
+      version: 1, status: 'active', environment: 'test', metadata: { domain: index % 2 ? 'finance' : 'sales' },
+    },
+  }));
+  const edges: Array<Record<string, unknown>> = [];
+  for (let index = 0; index < linkedPipelineCount; index++) {
+    const inputId = `asset:s3://scale/bronze/input-${index}.json`;
+    const outputId = `asset:s3://scale/silver/output-${index}.json`;
+    nodes.push(
+      { id: inputId, kind: 'asset', asset: { urn: inputId.slice(6), platform: 's3', namespace: 'scale', name: `input-${index}.json`, type: 'file', layer: 'bronze' } },
+      { id: outputId, kind: 'asset', asset: { urn: outputId.slice(6), platform: 's3', namespace: 'scale', name: `output-${index}.json`, type: 'file', layer: 'silver' } },
+    );
+    edges.push(
+      { id: `scale-in-${index}`, source: inputId, target: `pipeline:scale-${index}`, pipelineRowId: `scale-${index}`, nodeId: 'source' },
+      { id: `scale-out-${index}`, source: `pipeline:scale-${index}`, target: outputId, pipelineRowId: `scale-${index}`, nodeId: 'sink' },
+    );
+  }
+  return {
+    nodes, edges, columnEdges: [],
+    stats: { pipelines: pipelineCount, assets: assetCount, links: edges.length, sharedAssets: 0, columnLinks: 0, externalJobs: 0 },
+  };
+}
+
+async function mockAPI(page: Page, analytics?: AnalyticsCapture, lineage?: LineageFixture) {
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
     if (analytics && path.startsWith('/api/analytics/')) return fulfillAnalytics(route, path, analytics);
     const body = path.endsWith('/auth/refresh') ? { accessToken: 'test', user: { id: 'u1', email: 'qa@example.com', role: 'owner', tenant_id: 't1' } }
       : path.endsWith('/auth/me') ? { user: { id: 'u1', email: 'qa@example.com', role: 'owner', tenant_id: 't1' } }
+      : path.endsWith('/pipelines/lineage/workspace') ? lineage ?? {
+        nodes: [
+          { id: 'asset:s3://qa/bronze/orders.json', kind: 'asset', asset: { urn: 's3://qa/bronze/orders.json', platform: 's3', namespace: 'qa', name: 'orders.json', type: 'file', layer: 'bronze' } },
+          { id: 'pipeline:p1', kind: 'pipeline', pipeline: { rowId: 'p1', pipelineKey: 'orders', name: 'Orders pipeline', version: 1, status: 'active', environment: 'test', metadata: { domain: 'sales' } } },
+          { id: 'asset:postgres://warehouse/silver.orders', kind: 'asset', asset: { urn: 'postgres://warehouse/silver.orders', platform: 'postgres', namespace: 'warehouse', name: 'silver.orders', type: 'table', layer: 'silver' } },
+        ],
+        edges: [
+          { id: 'e1', source: 'asset:s3://qa/bronze/orders.json', target: 'pipeline:p1', pipelineRowId: 'p1', nodeId: 'source' },
+          { id: 'e2', source: 'pipeline:p1', target: 'asset:postgres://warehouse/silver.orders', pipelineRowId: 'p1', nodeId: 'sink' },
+        ],
+        columnEdges: [],
+        stats: { pipelines: 1, assets: 2, links: 2, sharedAssets: 0, columnLinks: 0, externalJobs: 0 },
+      }
+      : path.endsWith('/pipelines/lineage/changes') ? { items: [] }
+      : path.endsWith('/executions/monitoring/overview') ? { pipelines: [] }
       : path.includes('/executions') ? { items: [{ id: 'r1', name: 'Release A run', pipeline_id: 'p1', environment: 'test', phase: 'completed', started_at: '2026-07-05T00:00:00Z', finished_at: '2026-07-05T00:00:01Z' }] }
       : path.includes('/pipelines') ? []
       : path.includes('/dashboards') ? []
@@ -100,6 +156,73 @@ async function fulfillAnalytics(route: Route, path: string, capture: AnalyticsCa
   }
   return json({});
 }
+
+test('cold lineage route loads React Flow structural styles', async ({ page }) => {
+  await mockAPI(page);
+  await page.goto('/lineage');
+
+  await expect(page.locator('.react-flow__node')).toHaveCount(3);
+  const layout = await page.evaluate(() => {
+    const graph = document.querySelector<HTMLElement>('.react-flow')!;
+    const graphRegion = graph.parentElement!;
+    const toolbar = graphRegion.previousElementSibling as HTMLElement;
+    const node = document.querySelector<HTMLElement>('.react-flow__node')!;
+    const controls = document.querySelector<HTMLElement>('.react-flow__controls')!;
+    const rect = (element: HTMLElement) => {
+      const bounds = element.getBoundingClientRect();
+      return { top: bounds.top, right: bounds.right, bottom: bounds.bottom, left: bounds.left, width: bounds.width };
+    };
+    return {
+      nodePosition: getComputedStyle(node).position,
+      controlsPosition: getComputedStyle(controls).position,
+      graph: rect(graph),
+      toolbar: rect(toolbar),
+      node: rect(node),
+      controls: rect(controls),
+    };
+  });
+
+  expect(layout.nodePosition).toBe('absolute');
+  expect(layout.controlsPosition).toBe('absolute');
+  expect(layout.node.width).toBeLessThan(layout.graph.width / 2);
+  expect(layout.graph.top).toBeGreaterThanOrEqual(layout.toolbar.bottom);
+  expect(layout.node.top).toBeGreaterThanOrEqual(layout.graph.top);
+  expect(layout.node.left).toBeGreaterThanOrEqual(layout.graph.left);
+  expect(layout.node.right).toBeLessThanOrEqual(layout.graph.right);
+  expect(layout.node.bottom).toBeLessThanOrEqual(layout.graph.bottom);
+  expect(layout.controls.top).toBeGreaterThanOrEqual(layout.graph.top);
+  expect(layout.controls.left).toBeGreaterThanOrEqual(layout.graph.left);
+  expect(layout.controls.right).toBeLessThanOrEqual(layout.graph.right);
+  expect(layout.controls.bottom).toBeLessThanOrEqual(layout.graph.bottom);
+});
+
+test('actual-scale sparse lineage stays culled and contained on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockAPI(page, undefined, sparseLineageFixture());
+  await page.goto('/lineage');
+
+  await expect(page.getByText(`${SPARSE_LINEAGE_NODE_COUNT}/${SPARSE_LINEAGE_NODE_COUNT} nodes · ${SPARSE_LINEAGE_EDGE_COUNT} links`, { exact: true })).toBeVisible();
+  await expect(page.locator('.react-flow__node').first()).toBeVisible();
+  await expect(page.locator('.react-flow__minimap')).toBeHidden();
+
+  const measurement = await page.evaluate(() => {
+    const graph = document.querySelector<HTMLElement>('.react-flow')!;
+    const bounds = graph.parentElement!.getBoundingClientRect();
+    return {
+      domNodeCount: document.querySelectorAll('.react-flow__node').length,
+      graph: { top: bounds.top, right: bounds.right, bottom: bounds.bottom, left: bounds.left, height: bounds.height },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    };
+  });
+
+  expect(measurement.domNodeCount).toBeGreaterThan(0);
+  expect(measurement.domNodeCount).toBeLessThan(SPARSE_LINEAGE_NODE_COUNT / 2);
+  expect(measurement.graph.top).toBeGreaterThanOrEqual(0);
+  expect(measurement.graph.left).toBeGreaterThanOrEqual(0);
+  expect(measurement.graph.right).toBeLessThanOrEqual(measurement.viewport.width + 1);
+  expect(measurement.graph.bottom).toBeLessThanOrEqual(measurement.viewport.height + 1);
+  expect(measurement.graph.height).toBeGreaterThanOrEqual(measurement.viewport.height * 0.5);
+});
 
 test('AI redirect opens proposal drawer without standalone navigation', async ({ page }) => {
   await mockAPI(page);

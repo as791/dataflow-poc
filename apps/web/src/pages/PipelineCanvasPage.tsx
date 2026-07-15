@@ -4,7 +4,6 @@ import {
   addEdge, useNodesState, useEdgesState,
   type Node, type Connection, type ReactFlowInstance,
 } from 'reactflow';
-import 'reactflow/dist/style.css';
 import { definitionToMermaid, mermaidToDefinition } from '@dataflow/shared';
 import { useCatalog } from '../context/CatalogContext';
 import { useAuth } from '../context/AuthContext';

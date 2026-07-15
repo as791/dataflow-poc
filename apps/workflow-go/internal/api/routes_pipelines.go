@@ -776,18 +776,26 @@ func (s *Server) lineageWorkspace(w http.ResponseWriter, r *http.Request) error 
 }
 
 type fieldOrigin struct {
-	assetID string
-	field   string
+	assetURN        string
+	field           string
+	fieldType       string
+	nullable        bool
+	transformNodeID string
+}
+
+type lineageField struct {
+	fieldType string
+	nullable  bool
 }
 
 var mapFieldPattern = regexp.MustCompile(`(\w+)\s*:\s*r\.(\w+)`)
 
-func assetURN(cfg map[string]interface{}) (string, string, bool) {
+func assetURN(cfg map[string]interface{}) (string, string, string, string, bool) {
 	bucket, key, layer := stringValue(cfg["bucket"]), stringValue(cfg["key"]), stringValue(cfg["layer"])
 	if bucket == "" || key == "" || layer == "" {
-		return "", "", false
+		return "", "", "", "", false
 	}
-	return fmt.Sprintf("s3://%s/%s", bucket, key), layer, true
+	return fmt.Sprintf("s3://%s/%s", bucket, key), bucket, key, layer, true
 }
 
 // buildWorkspaceLineage walks each pipeline's node chain (assumed linear —
@@ -798,17 +806,19 @@ func buildWorkspaceLineage(rows []map[string]interface{}) map[string]interface{}
 	nodes := []map[string]interface{}{}
 	edges := []map[string]interface{}{}
 	columnEdges := []map[string]interface{}{}
-	assetSchemas := map[string]map[string]bool{}
+	assetSchemas := map[string]map[string]lineageField{}
 	assetTouchedBy := map[string]map[string]bool{}
 	assetOrder := []string{}
 
-	ensureAsset := func(urn, layer string) string {
+	ensureAsset := func(urn, bucket, key, layer string) string {
 		id := "asset:" + urn
 		if _, ok := assetSchemas[id]; !ok {
-			assetSchemas[id] = map[string]bool{}
+			assetSchemas[id] = map[string]lineageField{}
 			assetTouchedBy[id] = map[string]bool{}
 			assetOrder = append(assetOrder, id)
-			nodes = append(nodes, map[string]interface{}{"id": id, "kind": "asset", "asset": map[string]interface{}{"urn": urn, "layer": layer}})
+			nodes = append(nodes, map[string]interface{}{"id": id, "kind": "asset", "asset": map[string]interface{}{
+				"urn": urn, "platform": "s3", "namespace": bucket, "name": key, "type": "file", "layer": layer,
+			}})
 		}
 		return id
 	}
@@ -816,11 +826,20 @@ func buildWorkspaceLineage(rows []map[string]interface{}) map[string]interface{}
 	for _, row := range rows {
 		rowID := stringValue(row["id"])
 		pipelineNodeID := "pipeline:" + rowID
-		nodes = append(nodes, map[string]interface{}{"id": pipelineNodeID, "kind": "pipeline", "pipeline": map[string]interface{}{"rowId": row["id"], "pipelineKey": row["pipeline_key"], "name": row["name"], "version": row["version"], "status": row["status"], "environment": row["environment"]}})
-
 		raw, _ := json.Marshal(row["definition"])
 		var def model.PipelineDefinition
-		if err := json.Unmarshal(raw, &def); err != nil || len(def.Nodes) == 0 {
+		definitionErr := json.Unmarshal(raw, &def)
+		pipeline := map[string]interface{}{"rowId": row["id"], "pipelineKey": row["pipeline_key"], "name": row["name"], "version": row["version"], "status": row["status"], "environment": row["environment"]}
+		if definitionErr == nil {
+			if def.Metadata != nil {
+				pipeline["metadata"] = def.Metadata
+			}
+			if def.SLO != nil {
+				pipeline["slo"] = def.SLO
+			}
+		}
+		nodes = append(nodes, map[string]interface{}{"id": pipelineNodeID, "kind": "pipeline", "pipeline": pipeline})
+		if definitionErr != nil || len(def.Nodes) == 0 {
 			continue
 		}
 		byID := map[string]model.Node{}
@@ -842,21 +861,30 @@ func buildWorkspaceLineage(rows []map[string]interface{}) map[string]interface{}
 			}
 		}
 		schema := map[string]fieldOrigin{}
-		var upstreamAsset string
+		var upstreamAssetURN string
 		for current != "" {
 			node := byID[current]
 			if node.Type == "source" {
-				if urn, layer, ok := assetURN(node.Config); ok {
-					assetID := ensureAsset(urn, layer)
+				if urn, bucket, key, layer, ok := assetURN(node.Config); ok {
+					assetID := ensureAsset(urn, bucket, key, layer)
 					assetTouchedBy[assetID][rowID] = true
-					edges = append(edges, map[string]interface{}{"source": assetID, "target": pipelineNodeID})
-					upstreamAsset = assetID
+					edges = append(edges, map[string]interface{}{
+						"id": fmt.Sprintf("edge:%s:%s:source", rowID, node.ID), "source": assetID, "target": pipelineNodeID,
+						"pipelineRowId": rowID, "nodeId": node.ID,
+					})
+					upstreamAssetURN = urn
 				}
 			}
 			if node.ActivityType == "transform.contract" {
 				if schemaJSON, ok := node.Config["schemaJson"].(map[string]interface{}); ok {
-					for field := range schemaJSON {
-						schema[field] = fieldOrigin{assetID: upstreamAsset, field: field}
+					for field, rawType := range schemaJSON {
+						fieldType := stringValue(rawType)
+						nullable := strings.HasSuffix(fieldType, "?")
+						fieldType = strings.TrimSuffix(fieldType, "?")
+						if fieldType == "" {
+							fieldType = "unknown"
+						}
+						schema[field] = fieldOrigin{assetURN: upstreamAssetURN, field: field, fieldType: fieldType, nullable: nullable, transformNodeID: node.ID}
 					}
 				}
 			}
@@ -866,6 +894,7 @@ func buildWorkspaceLineage(rows []map[string]interface{}) map[string]interface{}
 					for _, match := range mapFieldPattern.FindAllStringSubmatch(expression, -1) {
 						newField, oldField := match[1], match[2]
 						if origin, known := schema[oldField]; known {
+							origin.transformNodeID = node.ID
 							next[newField] = origin
 						}
 					}
@@ -875,14 +904,24 @@ func buildWorkspaceLineage(rows []map[string]interface{}) map[string]interface{}
 				}
 			}
 			if node.Type == "sink" {
-				if urn, layer, ok := assetURN(node.Config); ok {
-					assetID := ensureAsset(urn, layer)
+				if urn, bucket, key, layer, ok := assetURN(node.Config); ok {
+					assetID := ensureAsset(urn, bucket, key, layer)
 					assetTouchedBy[assetID][rowID] = true
-					edges = append(edges, map[string]interface{}{"source": pipelineNodeID, "target": assetID})
+					edges = append(edges, map[string]interface{}{
+						"id": fmt.Sprintf("edge:%s:%s:sink", rowID, node.ID), "source": pipelineNodeID, "target": assetID,
+						"pipelineRowId": rowID, "nodeId": node.ID,
+					})
 					for renamed, origin := range schema {
-						assetSchemas[assetID][origin.field] = true
-						if origin.assetID != "" {
-							columnEdges = append(columnEdges, map[string]interface{}{"source": fmt.Sprintf("%s:%s", origin.assetID, origin.field), "target": fmt.Sprintf("%s:%s", assetID, renamed)})
+						assetSchemas[assetID][renamed] = lineageField{fieldType: origin.fieldType, nullable: origin.nullable}
+						if origin.assetURN != "" {
+							columnEdge := map[string]interface{}{
+								"id": fmt.Sprintf("column:%s:%s:%s:%s", rowID, node.ID, origin.field, renamed), "pipelineRowId": rowID,
+								"sourceAssetUrn": origin.assetURN, "sourceField": origin.field, "targetAssetUrn": urn, "targetField": renamed,
+							}
+							if origin.transformNodeID != "" {
+								columnEdge["transformNodeId"] = origin.transformNodeID
+							}
+							columnEdges = append(columnEdges, columnEdge)
 						}
 					}
 				}
@@ -897,8 +936,12 @@ func buildWorkspaceLineage(rows []map[string]interface{}) map[string]interface{}
 		}
 		assetID := node["id"].(string)
 		fields := []map[string]interface{}{}
-		for name := range assetSchemas[assetID] {
-			fields = append(fields, map[string]interface{}{"name": name})
+		for name, field := range assetSchemas[assetID] {
+			item := map[string]interface{}{"name": name, "type": field.fieldType}
+			if field.nullable {
+				item["nullable"] = true
+			}
+			fields = append(fields, item)
 		}
 		if len(fields) > 0 {
 			node["asset"].(map[string]interface{})["schema"] = map[string]interface{}{"fields": fields}
