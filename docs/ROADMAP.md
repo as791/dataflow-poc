@@ -52,9 +52,10 @@ tested. These are blockers, not aspirational features.
 - [x] Replace `GET /api/pipelines` full-definition list with keyset pagination,
   a summary projection, server-side stage/trigger/search filters, and separate
   detail fetch. Acceptance: p95 under 300 ms with 10K definitions.
-  *(2026-07-15: shipped; no composite index on (tenant_id,created_at,id) or
-  executions(pipeline_id,started_at) yet — recommend adding before the p95
-  claim is measured at 10K scale.)*
+  *(2026-07-15: shipped; follow-up composite indexes on pipelines
+  (tenant_id,created_at,id) and executions(pipeline_id,started_at) added same
+  day (db/024) — confirmed via EXPLAIN on the deployed box that both the list
+  scan and its per-row last-run lookup use an Index Scan, not sequential.)*
 - [x] Add pipeline definition limits: nodes, edges, config bytes, fan-out,
   max-parallel, page size, and backfill partitions. Reject before persistence.
 - [x] Cap payload reads and merged refs; stream or spill large merges. Acceptance:
@@ -67,8 +68,9 @@ tested. These are blockers, not aspirational features.
   churn and documented pool caps per tenant/provider.
 - [x] Add lifecycle retention for executions, node runs, payloads, audit data,
   outboxes, object storage, Redis streams, and Temporal histories.
-  *(2026-07-15: S3-backed payload objects have no age index in-app — needs a
-  bucket lifecycle rule at the infra layer, not app code; flagged as follow-up.)*
+  *(2026-07-15: S3-backed payload objects have no age index in-app — closed
+  same day with an S3 bucket lifecycle rule at the infra layer instead
+  (infra/payload-retention.tf), gated no-op until a bucket is configured.)*
 - [ ] Move production metadata to Cloud SQL HA with PITR; Redis to Memorystore or
   replace event delivery with Pub/Sub; payloads to GCS with lifecycle/versioning;
   select a backed-up ClickHouse service.
@@ -86,8 +88,9 @@ tested. These are blockers, not aspirational features.
 - [x] Fix mobile editor information architecture and all WCAG 2.1 AA findings:
   touch targets, contrast, headings, labels, focus, keyboard paths, and screen-reader names.
   *(2026-07-15: review caught the first pass fixed AppShell's touch
-  targets/labels but skipped the actual canvas editor rail — closed; a full
-  responsive collapse of the rail at narrow widths is still a follow-up.)*
+  targets/labels but skipped the actual canvas editor rail — closed; a same-day
+  follow-up rebuilt the rail as a horizontal bottom bar with visible labels
+  below the sm breakpoint instead of a cramped vertical strip.)*
 - [x] Break `PipelineCanvasPage` into feature components and move API state to a
   typed query/cache layer with abortable requests and shared errors.
 - [x] Add CI: deployed E2E smoke, secret scan, CodeQL/SAST, dependency and license
