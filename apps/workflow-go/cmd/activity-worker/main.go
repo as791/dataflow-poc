@@ -40,6 +40,7 @@ func main() {
 	}
 	registry := connectors.Load(cfg.ConnectorsDir)
 	runtime := connectors.NewRuntime(db, store, cfg, &http.Client{Timeout: 30 * time.Second}, registry)
+	defer runtime.CloseConnectorPools()
 	dataConverter, err := codec.NewDataConverterFromEnv()
 	if err != nil {
 		slog.Error("data converter failed", "error", err)
@@ -52,7 +53,7 @@ func main() {
 	}
 	defer temporal.Close()
 	w := worker.New(temporal, cfg.TaskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 20})
-	activities.Register(w, &activities.Activities{DB: db, Payloads: &activities.Payloads{DB: db, Store: store, PlatformKey: platformKey}, Runtime: runtime, PrivateKeyPath: cfg.WorkerPrivateKeyPath})
+	activities.Register(w, &activities.Activities{DB: db, Payloads: &activities.Payloads{DB: db, Store: store, PlatformKey: platformKey, MaxPayloadBytes: cfg.MaxPayloadBytes}, Runtime: runtime, PrivateKeyPath: cfg.WorkerPrivateKeyPath, MaxMergeInMemoryBytes: cfg.MaxMergeInMemoryBytes})
 	group, err := dispatchers.Start(ctx, db, runtime, cfg)
 	if err != nil {
 		slog.Error("dispatchers failed", "error", err)

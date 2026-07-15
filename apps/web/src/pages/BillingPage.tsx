@@ -170,12 +170,12 @@ export function BillingPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-6 px-6 py-10">
       <div>
-        <h1 className="page-heading">Usage & billing</h1>
+        <h2 className="page-heading">Usage & billing</h2>
         <p className="page-subtitle mt-1">Track workflow executions and extend monthly capacity.</p>
       </div>
       <div className="glass-panel p-6">
         <div className="flex items-baseline justify-between mb-4">
-          <h2 className="text-base font-semibold">Usage this month</h2>
+          <h3 className="text-base font-semibold">Usage this month</h3>
           <span className="glass-badge"><Activity size={12} /> live meter</span>
         </div>
 
@@ -229,7 +229,7 @@ export function BillingPage() {
       </div>
 
       <div className="glass-panel p-6">
-        <h2 className="text-lg font-semibold">Feature add-ons</h2>
+        <h3 className="text-lg font-semibold">Feature add-ons</h3>
         <p className="mt-1 text-sm opacity-60">Workspace owners control commercial entitlements. Uninstalled capabilities cannot be enabled.</p>
         <div className="mt-4 divide-y divide-white/5">
           {ADD_ONS.map(addOn => {
@@ -251,7 +251,7 @@ export function BillingPage() {
       </div>
 
       <div className="glass-panel p-6">
-        <h2 className="text-lg font-semibold mb-4">Recent payments</h2>
+        <h3 className="text-lg font-semibold mb-4">Recent payments</h3>
         {history.length === 0 ? (
           <p className="opacity-60 text-sm">No payments yet.</p>
         ) : (

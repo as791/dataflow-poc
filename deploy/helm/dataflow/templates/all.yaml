@@ -41,10 +41,15 @@ spec:
   template:
     metadata: {labels: {app: postgres}}
     spec:
+      securityContext: {fsGroup: 70}
       containers:
         - name: postgres
           image: {{ .Values.images.postgres }}
           imagePullPolicy: IfNotPresent
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 70, runAsGroup: 70, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: 500m, memory: 512Mi}
           env:
             - {name: POSTGRES_USER, value: dataflow}
             - {name: POSTGRES_PASSWORD, valueFrom: {secretKeyRef: {name: dataflow-secrets, key: postgresPassword}}}
@@ -53,12 +58,18 @@ spec:
           readinessProbe: {exec: {command: [pg_isready, -U, dataflow]}, periodSeconds: 3}
           volumeMounts:
             - {name: data, mountPath: /var/lib/postgresql/data}
-            - {name: migrations, mountPath: /docker-entrypoint-initdb.d}
+            - {name: migrations, mountPath: /docker-entrypoint-initdb.d, readOnly: true}
+            - {name: run, mountPath: /var/run/postgresql}
+            - {name: tmp, mountPath: /tmp}
       volumes:
         - name: data
           persistentVolumeClaim: {claimName: postgres-data}
         - name: migrations
           hostPath: {path: {{ printf "%s/db" .Values.hostPath | quote }}, type: Directory}
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -74,10 +85,15 @@ spec:
   template:
     metadata: {labels: {app: redis}}
     spec:
+      securityContext: {fsGroup: 1000}
       containers:
         - name: redis
           image: {{ .Values.images.redis }}
           imagePullPolicy: IfNotPresent
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 999, runAsGroup: 1000, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 250m, memory: 256Mi}
           args: [redis-server, --appendonly, "yes", --appendfsync, everysec, --requirepass, "$(REDIS_PASSWORD)"]
           env:
             - {name: REDIS_PASSWORD, valueFrom: {secretKeyRef: {name: dataflow-secrets, key: redisPassword}}}
@@ -122,10 +138,19 @@ spec:
   template:
     metadata: {labels: {app: clickhouse}}
     spec:
+      securityContext: {fsGroup: 101}
       containers:
         - name: clickhouse
           image: {{ .Values.images.clickhouse }}
           imagePullPolicy: IfNotPresent
+          # readOnlyRootFilesystem is not set: the entrypoint rewrites
+          # /etc/clickhouse-server/users.d/default-user.xml at startup when a
+          # non-default CLICKHOUSE_USER is configured (verified against the
+          # upstream image), so the rootfs must stay writable.
+          securityContext: {allowPrivilegeEscalation: false, runAsNonRoot: true, runAsUser: 101, runAsGroup: 101, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 200m, memory: 512Mi}
+            limits: {cpu: "1", memory: 1Gi}
           env:
             - {name: CLICKHOUSE_USER, value: dataflow}
             - {name: CLICKHOUSE_PASSWORD, value: dataflow}
@@ -165,11 +190,23 @@ spec:
       initContainers:
         - name: wait-postgres
           image: {{ .Values.images.postgres }}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 70, runAsGroup: 70, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
           command: [sh, -c, "until pg_isready -h postgres -U dataflow; do sleep 2; done"]
       containers:
         - name: temporal
           image: {{ .Values.images.temporal }}
           imagePullPolicy: IfNotPresent
+          # readOnlyRootFilesystem is not set: auto-setup renders
+          # /etc/temporal/config/docker.yaml from a template baked into the
+          # image at startup (verified against the upstream image), so the
+          # rootfs must stay writable.
+          securityContext: {allowPrivilegeEscalation: false, runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: 500m, memory: 512Mi}
           env:
             - {name: DB, value: postgres12}
             - {name: DB_PORT, value: "5432"}
@@ -199,6 +236,10 @@ spec:
         - name: temporal-ui
           image: {{ .Values.images.temporalUI }}
           imagePullPolicy: IfNotPresent
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 200m, memory: 256Mi}
           env:
             - {name: TEMPORAL_ADDRESS, value: temporal:7233}
             - {name: TEMPORAL_UI_PORT, value: "8080"}
@@ -217,12 +258,18 @@ kind: Job
 metadata: {name: temporal-namespaces}
 spec:
   template:
+    metadata: {labels: {app: temporal-namespaces}}
     spec:
       restartPolicy: OnFailure
       containers:
         - name: namespaces
           image: {{ .Values.images.temporalAdmin }}
           imagePullPolicy: IfNotPresent
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 200m, memory: 128Mi}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
           command: [sh, -c]
           args:
             - |
@@ -230,6 +277,9 @@ spec:
               for ns in test prod; do
                 temporal operator namespace describe --address temporal:7233 --namespace "$ns" >/dev/null 2>&1 || temporal operator namespace create --address temporal:7233 --namespace "$ns" --retention 3d
               done
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -253,6 +303,10 @@ spec:
         - name: ollama
           image: {{ .Values.images.ollama }}
           imagePullPolicy: IfNotPresent
+          # Upstream image runs as root by default and its home/model-cache
+          # layout under non-root wasn't verified in this pass, so
+          # runAsNonRoot/readOnlyRootFilesystem are left unset (caveat).
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
           command: [/bin/sh, -c]
           args:
             - |
@@ -268,8 +322,8 @@ spec:
           readinessProbe: {exec: {command: [test, -f, /tmp/model-ready]}, periodSeconds: 5}
           volumeMounts: [{name: data, mountPath: /root/.ollama}]
           resources:
-            requests: {memory: 1Gi}
-            limits: {memory: 4Gi}
+            requests: {cpu: 500m, memory: 1Gi}
+            limits: {cpu: "4", memory: 4Gi}
       volumes:
         - name: data
           persistentVolumeClaim: {claimName: ollama-data}
@@ -294,11 +348,21 @@ spec:
       initContainers:
         - name: wait-postgres
           image: {{ .Values.images.postgres }}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 70, runAsGroup: 70, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
           command: [sh, -c, "until pg_isready -h postgres -U dataflow -d dataflow; do sleep 2; done"]
       containers:
         - name: api
           image: {{ .Values.images.app }}
           imagePullPolicy: Never
+          # Dockerfile already runs as USER dataflow (non-root); no local
+          # writes in this binary, so the rootfs can stay read-only.
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
           command: [api]
           env:
             {{- include "dataflow.appEnv" . | nindent 12 }}
@@ -335,6 +399,12 @@ spec:
         - name: worker
           image: {{ $.Values.images.app }}
           imagePullPolicy: Never
+          # Merge activities spill to a temp file (internal/activities/activities.go),
+          # so /tmp needs to stay writable even with a read-only rootfs.
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
           command: [activity-worker]
           env:
             {{- include "dataflow.appEnv" $ | nindent 12 }}
@@ -344,11 +414,14 @@ spec:
           volumeMounts:
             - {name: secrets, mountPath: /secrets, readOnly: true}
             - {name: connectors, mountPath: /app/connectors/manifests, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
       volumes:
         - name: secrets
           hostPath: {path: {{ printf "%s/secrets" $.Values.hostPath | quote }}, type: Directory}
         - name: connectors
           hostPath: {path: {{ printf "%s/connectors/manifests" $.Values.hostPath | quote }}, type: Directory}
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -366,6 +439,10 @@ spec:
         - name: worker
           image: {{ $.Values.images.app }}
           imagePullPolicy: Never
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 250m, memory: 256Mi}
           command: [workflow-worker]
           env:
             - {name: TEMPORAL_ADDRESS, value: temporal:7233}
@@ -385,12 +462,27 @@ spec:
   template:
     metadata: {labels: {app: web}}
     spec:
+      securityContext: {fsGroup: 101}
       containers:
         - name: web
           image: {{ .Values.images.web }}
           imagePullPolicy: Never
+          # nginx:alpine runs as root by default; force the built-in nginx
+          # user and grant just enough capability to bind port 80.
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 101, runAsGroup: 101, capabilities: {drop: [ALL], add: [NET_BIND_SERVICE]}}
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 128Mi}
           ports: [{containerPort: 80}]
           readinessProbe: {httpGet: {path: /login, port: 80}, periodSeconds: 5}
+          volumeMounts:
+            - {name: cache, mountPath: /var/cache/nginx}
+            - {name: run, mountPath: /var/run}
+      volumes:
+        - name: cache
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -420,11 +512,20 @@ spec:
       backoffLimit: 2
       activeDeadlineSeconds: 900
       template:
+        metadata: {labels: {app: db-backup}}
         spec:
           restartPolicy: Never
           initContainers:
             - name: dump
               image: {{ .Values.images.postgres }}
+              # Stays root: it writes into /backups, a hostPath directory
+              # created (and owned by root) on the node, so a forced non-root
+              # UID would break the write without a host-side chown, which is
+              # out of scope here.
+              securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+              resources:
+                requests: {cpu: 50m, memory: 128Mi}
+                limits: {cpu: 500m, memory: 512Mi}
               env:
                 - {name: PGPASSWORD, valueFrom: {secretKeyRef: {name: dataflow-secrets, key: postgresPassword}}}
               command:
@@ -443,6 +544,12 @@ spec:
           containers:
             - name: upload
               image: {{ .Values.images.curl }}
+              # curlimages/curl already runs as a non-root user by default; it
+              # only reads /backups, so the mount can be read-only too.
+              securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: {drop: [ALL]}}
+              resources:
+                requests: {cpu: 25m, memory: 32Mi}
+                limits: {cpu: 100m, memory: 128Mi}
               command:
                 - sh
                 - -ec
@@ -461,7 +568,7 @@ spec:
 {{- else }}
                 - echo "backup.gcsBucket not set - dump kept on data disk only"
 {{- end }}
-              volumeMounts: [{name: backups, mountPath: /backups}]
+              volumeMounts: [{name: backups, mountPath: /backups, readOnly: true}]
           volumes:
             - name: backups
               hostPath: {path: /var/backups/dataflow, type: DirectoryOrCreate}

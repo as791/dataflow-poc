@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Activity, ArrowDownToLine, Braces, Cable, ChevronDown, ChevronUp,
-  Clock, Code2, CreditCard, Database, GitFork, History, LayoutList, Layers3,
-  Maximize2, Minimize2, Moon, Play, Plus, Rocket, Save, Search,
-  Settings, Sparkles, Sun, Terminal, User, Users, X,
-} from 'lucide-react';
-import { AtomMark } from '../components/AtomMark';
-import ReactFlow, {
-  Background, BackgroundVariant, Controls, MiniMap,
   addEdge, useNodesState, useEdgesState,
   type Node, type Connection, type ReactFlowInstance,
 } from 'reactflow';
@@ -18,32 +10,24 @@ import { useCatalog } from '../context/CatalogContext';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useFeatures } from '../context/FeatureContext';
-import { MermaidPreview } from '../components/MermaidPreview';
 import { api } from '../api';
-import { ActivityIcon, nodeTypes } from '../components/canvas/FlowNode';
-import { useAiGenerate } from '../hooks/useAiGenerate';
-import { ConfigPanel } from '../components/canvas/ConfigPanel';
+import { nodeTypes } from '../components/canvas/FlowNode';
 import { ExecutionMonitor } from '../components/canvas/ExecutionMonitor';
+import { useAiGenerate } from '../hooks/useAiGenerate';
+import { useApiQuery } from '../hooks/useApiQuery';
 import { definitionToFlow, flowToDefinition } from '../utils/pipelineConvert';
 import { validatePipeline } from '../utils/validatePipeline';
 import { deriveStage, displayEnvironment, type Stage } from '../utils/pipelineStage';
-
-const TOOLBAR_CATS = [
-  { id: 'source',    label: 'Sources',    icon: Database,         color: '#1D9E75' },
-  { id: 'transform', label: 'Transforms', icon: Braces,           color: '#D85A30' },
-  { id: 'sink',      label: 'Sinks',      icon: ArrowDownToLine,  color: '#639922' },
-  { id: 'flow',      label: 'Flow',       icon: GitFork,          color: '#7F77DD' },
-] as const;
-type CatId = typeof TOOLBAR_CATS[number]['id'];
-type WorkspacePanel = 'connectors' | 'settings' | null;
-type BottomTab = 'runs' | 'logs' | 'lifecycle' | 'mermaid';
-
-const STAGE_STYLES: Record<Stage, string> = {
-  draft:      'bg-amber-100  text-amber-700  dark:bg-amber-500/15  dark:text-amber-300',
-  testing:    'bg-blue-100   text-blue-700   dark:bg-blue-500/15   dark:text-blue-300',
-  production: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
-  archived:   'bg-gray-100   text-gray-500   dark:bg-white/5       dark:text-white/35',
-};
+import { NodePalette, type CatId } from './canvas/NodePalette';
+import { ContextAddMenu, type ContextAddState } from './canvas/ContextAddMenu';
+import { PipelineFlowCanvas } from './canvas/PipelineFlowCanvas';
+import { PipelineHeaderBar } from './canvas/PipelineHeaderBar';
+import { PipelineActionBar } from './canvas/PipelineActionBar';
+import { WorkspaceSidePanel, type WorkspacePanel, type PipelinePolicy } from './canvas/WorkspaceSidePanel';
+import { AiBuilderPanel } from './canvas/AiBuilderPanel';
+import { InspectorPanel } from './canvas/InspectorPanel';
+import { OutputDrawer, type BottomTab } from './canvas/OutputDrawer';
+import { EmptyCanvasState } from './canvas/EmptyCanvasState';
 
 let nid = 0;
 
@@ -73,7 +57,7 @@ export default function PipelineCanvasPage() {
   const [pipelineKey, setPipelineKey] = useState('');
   const [trigger, setTrigger] = useState<any>({ type: 'manual' });
   const [execution, setExecution] = useState<any>(undefined);
-  const [policy, setPolicy] = useState({ owner: '', domain: '', tags: '', freshnessMinutes: '', maxFailureRatePercent: '', maxDurationSeconds: '', notificationConnectionId: '', minimumSeverity: 'critical' });
+  const [policy, setPolicy] = useState<PipelinePolicy>({ owner: '', domain: '', tags: '', freshnessMinutes: '', maxFailureRatePercent: '', maxDurationSeconds: '', notificationConnectionId: '', minimumSeverity: 'critical' });
   const [savedRowId, setSavedRowId] = useState<string | null>(null);
   const [pipelineStage, setPipelineStage] = useState<Stage>('draft');
   const [executionId, setExecutionId] = useState<string | null>(null);
@@ -88,7 +72,6 @@ export default function PipelineCanvasPage() {
 
   const [activeCat, setActiveCat] = useState<CatId | null>(null);
   const [workspacePanel, setWorkspacePanel] = useState<WorkspacePanel>(null);
-  const [catQuery, setCatQuery] = useState('');
   const [showLifecycle, setShowLifecycle] = useState(false);
   const [showMermaid, setShowMermaid] = useState(false);
   const [mermaidDraft, setMermaidDraft] = useState('');
@@ -108,15 +91,46 @@ export default function PipelineCanvasPage() {
   const [runsLoading, setRunsLoading] = useState(false);
   const [selectedRun, setSelectedRun] = useState<any | null>(null);
   const [runDetail, setRunDetail] = useState<any | null>(null);
-  const [contextAdd, setContextAdd] = useState<{ source: string; x: number; y: number } | null>(null);
-  const [connectorInstances, setConnectorInstances] = useState<any[]>([]);
-  const [members, setMembers] = useState<any[]>([]);
-  const [usage, setUsage] = useState<any | null>(null);
-  const [upstreamPipelines, setUpstreamPipelines] = useState<Array<{ pipeline_key: string; name: string }>>([]);
-  const [workspaceAssets, setWorkspaceAssets] = useState<Array<{ urn: string; name: string; layer?: string }>>([]);
+  const [contextAdd, setContextAdd] = useState<ContextAddState | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteMsg, setInviteMsg] = useState('');
+
+  // ── Typed query/cache layer (apps/web/src/hooks/useApiQuery.ts) for the
+  // page's read-only, key-driven fetches. The pipeline-by-id hydration below
+  // stays a manual effect: it drives multi-field hydration + a `hydrated`
+  // ref guard rather than rendering a single resource, so it doesn't fit the
+  // data/error/loading shape.
+  const pipelinesQuery = useApiQuery(() => api.listPipelines({ limit: '500' }), []);
+  const upstreamPipelines = useMemo(() => {
+    const byKey = new Map<string, { pipeline_key: string; name: string }>();
+    (pipelinesQuery.data?.rows ?? []).forEach((row: any) => { if (!byKey.has(row.pipeline_key)) byKey.set(row.pipeline_key, row); });
+    return [...byKey.values()];
+  }, [pipelinesQuery.data]);
+
+  const lineageQuery = useApiQuery(() => api.workspaceLineage('test'), []);
+  const workspaceAssets = useMemo(() => {
+    const graph = lineageQuery.data as any;
+    if (!graph) return [];
+    const produced = new Set((graph.edges ?? []).filter((edge: any) =>
+      String(edge.source).startsWith('pipeline:') && String(edge.target).startsWith('asset:')).map((edge: any) => edge.target));
+    return (graph.nodes ?? []).filter((node: any) => node.kind === 'asset' && produced.has(node.id))
+      .map((node: any) => ({ urn: node.asset.urn, name: node.asset.name, layer: node.asset.layer }));
+  }, [lineageQuery.data]);
+
+  const connectorsQuery = useApiQuery(() => (workspacePanel ? api.listConnectors() : Promise.resolve([])), [workspacePanel]);
+  const connectorInstances = connectorsQuery.data ?? [];
+  const settingsQuery = useApiQuery(
+    () => (workspacePanel === 'settings' ? Promise.all([api.listMembers(), api.getUsage()]) : Promise.resolve([[], null] as [any[], any])),
+    [workspacePanel],
+  );
+  const members = settingsQuery.data?.[0] ?? [];
+  const usage = settingsQuery.data?.[1] ?? null;
+
+  useEffect(() => {
+    const err = pipelinesQuery.error ?? lineageQuery.error;
+    if (err) setMsg(`Load failed: ${err}`);
+  }, [pipelinesQuery.error, lineageQuery.error]);
 
   const hydrateFromDefinition = useCallback((def: any, message: string) => {
     const { nodes: ns, edges: es } = definitionToFlow(def, byType);
@@ -170,38 +184,6 @@ export default function PipelineCanvasPage() {
     }
     return () => { cancelled = true; };
   }, [location.search, location.state, byType]);
-
-  useEffect(() => {
-    api.listPipelines().then((rows: any[]) => {
-      const byKey = new Map<string, { pipeline_key: string; name: string }>();
-      rows.forEach(row => { if (!byKey.has(row.pipeline_key)) byKey.set(row.pipeline_key, row); });
-      setUpstreamPipelines([...byKey.values()]);
-    }).catch(() => setUpstreamPipelines([]));
-  }, []);
-
-  useEffect(() => {
-    api.workspaceLineage('test').then((graph: any) => {
-      const produced = new Set((graph.edges ?? []).filter((edge: any) =>
-        String(edge.source).startsWith('pipeline:') && String(edge.target).startsWith('asset:')).map((edge: any) => edge.target));
-      setWorkspaceAssets((graph.nodes ?? []).filter((node: any) => node.kind === 'asset' && produced.has(node.id))
-        .map((node: any) => ({ urn: node.asset.urn, name: node.asset.name, layer: node.asset.layer })));
-    }).catch(() => setWorkspaceAssets([]));
-  }, []);
-
-  useEffect(() => {
-    if (!workspacePanel) return;
-    if (workspacePanel === 'connectors') {
-      api.listConnectors().then(setConnectorInstances).catch(() => setConnectorInstances([]));
-    } else {
-      Promise.all([
-        api.listMembers().catch(() => []),
-        api.getUsage().catch(() => null),
-        api.listConnectors().catch(() => []),
-      ]).then(([nextMembers, nextUsage, nextConnectors]) => {
-        setMembers(nextMembers); setUsage(nextUsage); setConnectorInstances(nextConnectors);
-      });
-    }
-  }, [workspacePanel]);
 
   useEffect(() => {
     if (!activeCat && !workspacePanel) return;
@@ -463,492 +445,85 @@ export default function PipelineCanvasPage() {
     finally { setInviteBusy(false); }
   };
 
-  const catEntries = useMemo(() => {
-    const q = catQuery.toLowerCase();
-    return catalog.filter(c => {
-      const matchesCat = activeCat === 'flow'
-        ? c.nodeType === 'fork' || c.nodeType === 'merge'
-        : c.nodeType === activeCat;
-      const matchesQuery = !q || `${c.label} ${c.activityType}`.toLowerCase().includes(q);
-      return matchesCat && matchesQuery;
-    });
-  }, [catalog, activeCat, catQuery]);
-
-  const rightPanelOpen = selected || selectedEdge || showMermaid;
+  const rightPanelOpen = Boolean(selected || selectedEdge || showMermaid);
   const drawerOffset = drawerExpanded ? 'calc(52vh + 24px)' : drawerHeight + 24;
   const executionOffset = drawerExpanded ? 'calc(52vh + 28px)' : drawerHeight + 28;
+  const selectedNode = selected ? (nodes.find(n => n.id === selected.id) ?? selected) : null;
 
   return (
     <div ref={canvasRef} className="flex h-screen overflow-hidden bg-[#f5f5f5] dark:bg-[#0d0f17]">
       {/* ── Canvas area (flex-1, shrinks when AI panel opens) ── */}
       <div className="relative flex-1 min-w-0 overflow-hidden">
-      <ReactFlow
-        nodes={nodes} edges={edges} nodeTypes={nodeTypes}
-        onInit={setFlow}
-        onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        onConnectStart={(_, params) => { connectSource.current = params.nodeId; connected.current = false; }}
-        onConnectEnd={finishConnection}
-        onNodeClick={(_, n) => { setSelected(n); setSelectedEdge(null); setShowMermaid(false); }}
-        onEdgeClick={(_, ed) => { setSelectedEdge(ed); setSelected(null); setShowMermaid(false); }}
-        onPaneClick={() => { setActiveCat(null); setWorkspacePanel(null); setShowLifecycle(false); setContextAdd(null); }}
-        fitView
-        className="absolute inset-0">
-        <Background variant={BackgroundVariant.Dots} gap={24} size={1}
-          color={dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'} />
-        <Controls position="bottom-left" style={{ left: 72, bottom: drawerOpen ? drawerOffset : 12 }} />
-        {nodes.length > 0 && <MiniMap position="bottom-left" pannable zoomable
-          style={{ left: 126, bottom: drawerOpen ? drawerOffset : 12, width: 190, height: 112 }}
-          nodeColor={n => byType[n.data.activityType]?.color ?? '#6965db'}
-          nodeStrokeColor={dark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.25)'} nodeStrokeWidth={2}
-          maskColor={dark ? 'rgba(8,10,18,0.78)' : 'rgba(235,237,245,0.78)'} />}
-      </ReactFlow>
+        <PipelineFlowCanvas
+          nodes={nodes} edges={edges} nodeTypes={nodeTypes}
+          onInit={setFlow}
+          onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onConnectStart={(_, params) => { connectSource.current = params.nodeId; connected.current = false; }}
+          onConnectEnd={finishConnection}
+          onNodeClick={(_, n) => { setSelected(n); setSelectedEdge(null); setShowMermaid(false); }}
+          onEdgeClick={(_, ed) => { setSelectedEdge(ed); setSelected(null); setShowMermaid(false); }}
+          onPaneClick={() => { setActiveCat(null); setWorkspacePanel(null); setShowLifecycle(false); setContextAdd(null); }}
+          dark={dark} byType={byType} drawerOpen={drawerOpen} drawerOffset={drawerOffset}
+        />
 
-      {contextAdd && (
-        <div className="absolute z-40 w-72 rounded-2xl border border-gray-200 bg-white p-2 shadow-2xl dark:border-white/[0.1] dark:bg-[#12151e]"
-          style={{ left: contextAdd.x, top: contextAdd.y }}>
-          <div className="flex items-center justify-between px-2 py-1.5">
-            <div>
-              <p className="text-xs font-semibold text-gray-900 dark:text-white/90">Add next step</p>
-              <p className="text-[10px] text-gray-400 dark:text-white/35">Valid transforms, branches, and destinations</p>
-            </div>
-            <button className="icon-button h-7 w-7" onClick={() => setContextAdd(null)}><X size={13} /></button>
-          </div>
-          <div className="max-h-48 overflow-auto pt-1">
-            {nodes.find(node => node.id === contextAdd.source)?.data.nodeType !== 'sink' && catalog.filter(entry => entry.nodeType !== 'source').map(entry => (
-              <button key={entry.activityType} onClick={() => addNode(entry, contextAdd.source)}
-                className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left hover:bg-gray-50 dark:hover:bg-white/[0.06]">
-                <span className="h-7 w-1 rounded-full" style={{ background: entry.color }} />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-xs font-medium text-gray-700 dark:text-white/75">{entry.label}</span>
-                  <span className="block text-[10px] capitalize text-gray-400 dark:text-white/30">{entry.nodeType}</span>
-                </span>
-                <Plus size={13} className="text-gray-300 dark:text-white/25" />
-              </button>
-            ))}
-            {nodes.find(node => node.id === contextAdd.source)?.data.nodeType === 'sink' && (
-              <p className="px-2.5 py-4 text-xs text-gray-400 dark:text-white/35">Destinations end a pipeline branch.</p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Left Miro-style toolbar */}
-      <aside data-canvas-sidebar className="absolute left-3 top-3 bottom-3 z-20 flex w-[52px] flex-col items-center gap-1 rounded-2xl
-        border border-gray-200 dark:border-white/[0.08]
-        bg-white/95 dark:bg-[#0d0f17]/95 backdrop-blur-lg py-3 shadow-sm dark:shadow-glass">
-        <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-[10px] bg-gradient-to-br from-brand-400 to-brand-600 shadow-md shadow-brand-500/20">
-          <AtomMark size={20} />
-        </div>
-        <button title="All pipelines" onClick={() => navigate('/pipelines')}
-          className="group relative flex h-9 w-9 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
-          <LayoutList size={17} strokeWidth={1.75} />
-          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">All pipelines</span>
-        </button>
-        <div className="my-1 h-px w-8 bg-gray-200 dark:bg-white/[0.08]" />
-        {TOOLBAR_CATS.map(cat => {
-          const Icon = cat.icon;
-          const isActive = activeCat === cat.id;
-          return (
-            <button key={cat.id} title={cat.label}
-              onClick={() => { setActiveCat(isActive ? null : cat.id as CatId); setWorkspacePanel(null); setCatQuery(''); }}
-              className={`group relative flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
-                isActive
-                  ? 'text-white shadow-md'
-                  : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
-              }`}
-              style={isActive ? { background: cat.color } : undefined}>
-              <Icon size={17} strokeWidth={1.75} />
-              <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">{cat.label}</span>
-            </button>
-          );
-        })}
-        <div className="my-1 h-px w-8 bg-gray-200 dark:bg-white/[0.08]" />
-        <button title="Quick AI add" onClick={() => { setShowAI(v => !v); setActiveCat(null); setWorkspacePanel(null); }}
-          className={`group relative flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
-            showAI ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
-          }`}>
-          <Sparkles size={17} strokeWidth={1.75} />
-          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Quick AI add</span>
-        </button>
-        <button title="Edit as Mermaid" onClick={() => { setActiveCat(null); setWorkspacePanel(null); openMermaid(); }}
-          className="group relative flex h-9 w-9 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
-          <Code2 size={17} strokeWidth={1.75} />
-          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Edit as Mermaid</span>
-        </button>
-        <div className="flex-1" />
-        <div className="my-1 h-px w-8 bg-gray-200 dark:bg-white/[0.08]" />
-        <button title="Connectors" onClick={() => {
-          setWorkspacePanel(workspacePanel === 'connectors' ? null : 'connectors'); setActiveCat(null);
-        }} className={`group relative flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
-          workspacePanel === 'connectors' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
-        }`}>
-          <Cable size={17} strokeWidth={1.75} />
-          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Connectors</span>
-        </button>
-        <button title="Pipeline runs"
-          onClick={() => { setActiveCat(null); setWorkspacePanel(null); drawerOpen && bottomTab === 'runs' ? setDrawerOpen(false) : openDrawer('runs'); }}
-          className={`group relative flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
-            drawerOpen && bottomTab === 'runs' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
-          }`}>
-          <History size={17} strokeWidth={1.75} />
-          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Pipeline runs</span>
-        </button>
-        <button title="Pipeline lifecycle" onClick={() => { setActiveCat(null); setWorkspacePanel(null); drawerOpen && bottomTab === 'lifecycle' ? setDrawerOpen(false) : openDrawer('lifecycle'); }}
-          className={`group relative flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
-            drawerOpen && bottomTab === 'lifecycle' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
-          }`}>
-          <Rocket size={17} strokeWidth={1.75} />
-          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Pipeline lifecycle</span>
-        </button>
-        <button title="Profile and settings" onClick={() => {
-          setWorkspacePanel(workspacePanel === 'settings' ? null : 'settings'); setActiveCat(null);
-        }} className={`group relative flex h-9 w-9 items-center justify-center rounded-[10px] transition-all ${
-          workspacePanel === 'settings' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
-        }`}>
-          <Settings size={17} strokeWidth={1.75} />
-          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Settings</span>
-        </button>
-        <button title={dark ? 'Switch to light mode' : 'Switch to dark mode'} onClick={toggleTheme}
-          className="group relative flex h-9 w-9 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
-          {dark ? <Sun size={16} /> : <Moon size={16} />}
-          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">{dark ? 'Light mode' : 'Dark mode'}</span>
-        </button>
-      </aside>
-
-      {/* Category flyout panel */}
-      {activeCat && (
-        <div data-canvas-sidebar className="absolute left-[68px] top-3 bottom-3 z-10 w-[300px] flex flex-col overflow-hidden rounded-r-2xl
-          border border-gray-200 dark:border-white/[0.08]
-          bg-white/97 dark:bg-[#0d0f17]/97 backdrop-blur-lg shadow-xl">
-          <div className="border-b border-gray-100 dark:border-white/[0.07] p-3">
-            <p className="text-xs font-semibold text-gray-900 dark:text-white/90 capitalize mb-2">
-              {TOOLBAR_CATS.find(c => c.id === activeCat)?.label}
-            </p>
-            <label className="relative block">
-              <Search className="absolute left-2.5 top-2 text-gray-400 dark:text-white/30" size={13} />
-              <input className="glass-input pl-8 py-1.5 text-xs" placeholder="Search…"
-                value={catQuery} onChange={e => setCatQuery(e.target.value)} />
-            </label>
-          </div>
-          <div className="grid flex-1 grid-cols-2 content-start gap-1 overflow-auto p-2">
-            {catEntries.map(entry => (
-              <button key={entry.activityType} onClick={() => addNode(entry)}
-                className="group flex w-full items-center gap-2.5 rounded-[10px] border border-transparent px-2.5 py-2 text-left transition
-                  hover:border-gray-200 hover:bg-gray-50 dark:hover:border-white/[0.08] dark:hover:bg-white/[0.05]">
-                <span className="flex h-7 w-7 flex-none items-center justify-center rounded-[8px] border transition-colors
-                  border-gray-100 bg-gray-50 dark:border-white/[0.07] dark:bg-white/[0.04]
-                  group-hover:border-gray-200 dark:group-hover:border-white/[0.12]"
-                  style={{ color: entry.color }}>
-                  <ActivityIcon activityType={entry.activityType} nodeType={entry.nodeType} size={13} />
-                </span>
-                <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-gray-600 dark:text-white/65
-                  group-hover:text-gray-900 dark:group-hover:text-white">{entry.label}</span>
-                <Plus size={12} className="flex-none text-gray-300 dark:text-white/20 group-hover:text-brand-500" />
-              </button>
-            ))}
-            {catEntries.length === 0 && (
-              <p className="px-2 py-4 text-center text-xs text-gray-400 dark:text-white/30">No matches</p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {workspacePanel && (
-        <aside data-canvas-sidebar className="absolute left-[68px] top-3 bottom-3 z-20 flex w-[320px] flex-col overflow-hidden rounded-r-2xl border border-gray-200 bg-white/97 shadow-xl backdrop-blur-lg dark:border-white/[0.08] dark:bg-[#0d0f17]/97">
-          <div className="flex h-14 items-center justify-between border-b border-gray-100 px-4 dark:border-white/[0.07]">
-            <div>
-              <p className="text-xs font-semibold text-gray-900 dark:text-white/90">
-                {workspacePanel === 'connectors' ? 'Connectors' : 'Workspace settings'}
-              </p>
-              <p className="text-[10px] text-gray-400 dark:text-white/35">
-                {workspacePanel === 'connectors' ? 'Add and configure pipeline integrations' : 'Pipeline policy and workspace access'}
-              </p>
-            </div>
-            <button className="icon-button h-8 w-8" onClick={() => setWorkspacePanel(null)}><X size={14} /></button>
-          </div>
-
-          {workspacePanel === 'connectors' ? (
-            <div className="flex-1 overflow-auto p-3">
-              <div className="mb-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-white/[0.07] dark:bg-white/[0.035]">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-white/30">Connected accounts</p>
-                <p className="mt-1 text-xs text-gray-700 dark:text-white/70">{connectorInstances.length} configured</p>
-              </div>
-              <div className="space-y-2">
-                {catalog.filter(entry => entry.nodeType === 'source' || entry.nodeType === 'sink').map(entry => (
-                  <div key={entry.activityType} className="rounded-xl border border-gray-200 bg-white p-3 dark:border-white/[0.08] dark:bg-white/[0.035]">
-                    <div className="flex items-start gap-3">
-                      <span className="flex h-9 w-9 items-center justify-center rounded-xl text-white shadow-sm" style={{ background: entry.color }}>
-                        <ActivityIcon activityType={entry.activityType} nodeType={entry.nodeType} />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-xs font-semibold text-gray-800 dark:text-white/80">{entry.label.replace(' (destination)', '')}</p>
-                        <p className="mt-0.5 truncate text-[10px] text-gray-400 dark:text-white/30">{entry.activityType}</p>
-                        <span className="mt-2 inline-flex rounded-md bg-gray-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-gray-500 dark:bg-white/[0.06] dark:text-white/35">{entry.nodeType}</span>
-                      </div>
-                      <button title={`Add ${entry.label}`} onClick={() => addNode(entry)} className="icon-button h-8 w-8"><Plus size={14} /></button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="flex-1 space-y-3 overflow-auto p-3">
-              <section className="rounded-xl border border-gray-200 bg-white p-3 dark:border-white/[0.08] dark:bg-white/[0.035]">
-                <div className="flex items-center gap-2 text-xs font-semibold text-gray-800 dark:text-white/80"><Activity size={14} /> Ownership & SLO</div>
-                <div className="mt-3 space-y-2">
-                  <input className="glass-input py-1.5 text-xs" placeholder="Owner (team or email)" value={policy.owner} onChange={e => setPolicy(p => ({ ...p, owner: e.target.value }))} />
-                  <input className="glass-input py-1.5 text-xs" placeholder="Domain (orders, finance…)" value={policy.domain} onChange={e => setPolicy(p => ({ ...p, domain: e.target.value }))} />
-                  <input className="glass-input py-1.5 text-xs" placeholder="Tags, comma separated" value={policy.tags} onChange={e => setPolicy(p => ({ ...p, tags: e.target.value }))} />
-                  <div className="grid grid-cols-2 gap-2">
-                    <input className="glass-input py-1.5 text-xs" type="number" min="1" placeholder="Freshness min" value={policy.freshnessMinutes} onChange={e => setPolicy(p => ({ ...p, freshnessMinutes: e.target.value }))} />
-                    <input className="glass-input py-1.5 text-xs" type="number" min="0" max="100" placeholder="Max failures %" value={policy.maxFailureRatePercent} onChange={e => setPolicy(p => ({ ...p, maxFailureRatePercent: e.target.value }))} />
-                  </div>
-                  <input className="glass-input py-1.5 text-xs" type="number" min="0.001" step="0.001" placeholder="Max duration seconds" value={policy.maxDurationSeconds} onChange={e => setPolicy(p => ({ ...p, maxDurationSeconds: e.target.value }))} />
-                  <select className="glass-select py-1.5 text-xs" value={policy.notificationConnectionId} onChange={e => setPolicy(p => ({ ...p, notificationConnectionId: e.target.value }))} aria-label="Alert webhook connection">
-                    <option value="">No alert webhook</option>
-                    {connectorInstances.filter(c => c.provider === 'http').map(c => <option key={c.id} value={c.id}>{c.name ?? c.baseUrl ?? c.id}</option>)}
-                  </select>
-                  {policy.notificationConnectionId && <select className="glass-select py-1.5 text-xs" value={policy.minimumSeverity} onChange={e => setPolicy(p => ({ ...p, minimumSeverity: e.target.value }))} aria-label="Minimum alert severity">
-                    <option value="critical">Critical only</option><option value="warning">Warning and critical</option>
-                  </select>}
-                </div>
-                <p className="mt-2 text-[9px] text-gray-400 dark:text-white/30">Versioned with pipeline; Monitoring evaluates breaches automatically.</p>
-              </section>
-              <section className="rounded-xl border border-gray-200 bg-white p-3 dark:border-white/[0.08] dark:bg-white/[0.035]">
-                <div className="flex items-center gap-2 text-xs font-semibold text-gray-800 dark:text-white/80"><User size={14} /> Profile</div>
-                <p className="mt-3 truncate text-xs text-gray-700 dark:text-white/70">{user?.email}</p>
-                <p className="mt-1 text-[10px] capitalize text-gray-400 dark:text-white/35">{user?.role ?? 'member'} role</p>
-              </section>
-              <section className="rounded-xl border border-gray-200 bg-white p-3 dark:border-white/[0.08] dark:bg-white/[0.035]">
-                <div className="flex items-center gap-2 text-xs font-semibold text-gray-800 dark:text-white/80"><CreditCard size={14} /> Billing</div>
-                <div className="mt-3 flex items-end justify-between">
-                  <div><p className="text-lg font-semibold text-gray-900 dark:text-white/90">{usage?.used ?? '—'}</p><p className="text-[10px] text-gray-400 dark:text-white/35">executions used</p></div>
-                  <p className="text-[10px] text-gray-400 dark:text-white/35">limit {usage?.limit ?? '—'}</p>
-                </div>
-              </section>
-              <section className="rounded-xl border border-gray-200 bg-white p-3 dark:border-white/[0.08] dark:bg-white/[0.035]">
-                <div className="flex items-center justify-between text-xs font-semibold text-gray-800 dark:text-white/80"><span className="flex items-center gap-2"><Users size={14} /> Members</span><span className="glass-badge">{members.length}</span></div>
-                <div className="mt-2 divide-y divide-gray-100 dark:divide-white/[0.05]">
-                  {members.slice(0, 6).map(member => <div key={member.id} className="flex items-center justify-between gap-2 py-2 text-[11px]"><span className="truncate text-gray-600 dark:text-white/60">{member.email}</span><span className="capitalize text-gray-400 dark:text-white/30">{member.role}</span></div>)}
-                  {!members.length && <p className="py-2 text-[11px] text-gray-400 dark:text-white/30">No members loaded</p>}
-                </div>
-                {user?.role === 'owner' && (
-                  <form className="mt-2 flex gap-2" onSubmit={inviteMember}>
-                    <input type="email" required className="glass-input min-w-0 flex-1 py-1.5 text-xs" placeholder="teammate@company.com" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} />
-                    <button className="glass-btn-primary px-2.5 py-1.5 text-xs" disabled={inviteBusy}>{inviteBusy ? 'Sending' : 'Invite'}</button>
-                  </form>
-                )}
-                {inviteMsg && <p className="mt-2 text-[10px] text-gray-400 dark:text-white/35">{inviteMsg}</p>}
-              </section>
-            </div>
-          )}
-        </aside>
-      )}
-
-      {/* Top floating: name pill + lifecycle */}
-      <div className="absolute top-4 z-10 flex items-center gap-2 pointer-events-none transition-[left] duration-200"
-        style={{ left: workspacePanel || activeCat ? 400 : 90 }}>
-        <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-gray-200 dark:border-white/[0.09]
-          bg-white/95 dark:bg-[#0d1018]/90 px-3 py-2 shadow-sm dark:shadow-glass backdrop-blur-xl">
-          <input
-            className="bg-transparent text-sm font-semibold text-gray-900 dark:text-white/90 outline-none w-40 placeholder-gray-400 dark:placeholder-white/30"
-            value={name} onChange={e => setName(e.target.value)} aria-label="Pipeline name" />
-          <div className="h-4 w-px bg-gray-200 dark:bg-white/[0.1]" />
-          <div className="relative">
-            <button onClick={() => setShowLifecycle(v => !v)}
-              className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold transition-all ${STAGE_STYLES[pipelineStage]}`}>
-              {pipelineStage} <ChevronDown size={10} />
-            </button>
-            {showLifecycle && (
-              <div className="absolute top-7 left-0 z-50 w-52 rounded-2xl border border-gray-200 dark:border-white/[0.1]
-                bg-white dark:bg-[#11141d]/95 p-2 shadow-xl dark:shadow-glass backdrop-blur-xl">
-                <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-white/30">Lifecycle</p>
-                {pipelineStage === 'draft' && (
-                  <button className="glass-btn-ghost w-full justify-start text-xs"
-                    onClick={() => { activate(); setShowLifecycle(false); }}>
-                    <Rocket size={13} /> Activate → Integration
-                  </button>
-                )}
-                {pipelineStage === 'testing' && user?.role === 'owner' && (
-                  <button className="glass-btn-primary w-full justify-start text-xs"
-                    onClick={() => { promote(); setShowLifecycle(false); }}>
-                    <Layers3 size={13} /> Promote to Production
-                  </button>
-                )}
-                {pipelineStage === 'production' && (
-                  <p className="flex items-center gap-1.5 px-2 py-2 text-xs text-emerald-600 dark:text-emerald-400"><Activity size={13} /> Live in production</p>
-                )}
-              </div>
-            )}
-          </div>
-          <div className="h-4 w-px bg-gray-200 dark:bg-white/[0.1]" />
-          <div className="flex items-center gap-1.5">
-            <Clock size={12} className="text-gray-400 dark:text-white/30" />
-            <select className="bg-transparent text-xs text-gray-600 dark:text-white/60 outline-none cursor-pointer"
-              value={trigger.type}
-              onChange={e => setTrigger({ type: e.target.value,
-                ...(e.target.value === 'cron' ? { schedule: '*/5 * * * *' } : {}),
-                ...(e.target.value === 'webhook' ? { path: 'my-hook', secret: 'change-me' } : {}),
-                ...(e.target.value === 'event' ? { topic: upstreamPipelines.find(p => p.pipeline_key !== pipelineKey)
-                  ? `pipeline.completed.${upstreamPipelines.find(p => p.pipeline_key !== pipelineKey)!.pipeline_key}` : 'pipeline.completed.<pipeline-key>' } : {}),
-                ...(e.target.value === 'asset' ? { assetUrn: workspaceAssets[0]?.urn ?? '' } : {}) })}>
-              <option value="manual">Manual</option>
-              <option value="cron">Cron</option>
-              <option value="webhook">Webhook</option>
-              <option value="event">Upstream pipeline</option>
-              <option value="asset">Asset materialized</option>
-            </select>
-            {trigger.type === 'cron' && (
-              <input className="bg-transparent text-xs outline-none w-28 text-gray-600 dark:text-white/60 font-mono"
-                value={trigger.schedule} onChange={e => setTrigger({ ...trigger, schedule: e.target.value })} />
-            )}
-            {trigger.type === 'event' && (
-              <select className="max-w-48 bg-transparent text-xs text-gray-600 outline-none dark:text-white/60"
-                value={trigger.topic} onChange={e => setTrigger({ ...trigger, topic: e.target.value })} aria-label="Upstream pipeline event">
-                {!upstreamPipelines.some(p => p.pipeline_key !== pipelineKey) && <option value={trigger.topic}>{trigger.topic}</option>}
-                {upstreamPipelines.filter(p => p.pipeline_key !== pipelineKey).flatMap(p => [
-                  <option key={`${p.pipeline_key}:completed`} value={`pipeline.completed.${p.pipeline_key}`}>{p.name} completed</option>,
-                  <option key={`${p.pipeline_key}:failed`} value={`pipeline.failed.${p.pipeline_key}`}>{p.name} failed</option>,
-                  <option key={`${p.pipeline_key}:cancelled`} value={`pipeline.cancelled.${p.pipeline_key}`}>{p.name} cancelled</option>,
-                ])}
-              </select>
-            )}
-            {trigger.type === 'asset' && (
-              <select className="max-w-56 bg-transparent text-xs text-gray-600 outline-none dark:text-white/60"
-                value={trigger.assetUrn} onChange={e => setTrigger({ ...trigger, assetUrn: e.target.value })} aria-label="Materialized asset">
-                {!workspaceAssets.length && <option value="">No Integration output assets</option>}
-                {workspaceAssets.map(asset => <option key={asset.urn} value={asset.urn}>{asset.name}{asset.layer ? ` · ${asset.layer}` : ''}</option>)}
-              </select>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Top right: actions */}
-      <div className="absolute top-4 right-4 z-10 flex items-center gap-2 pointer-events-none">
-        <span id="pipeline-action-status" role="status" aria-live="polite" className="sr-only">
-          {msg || (!graphReady ? graphValidationErrors[0]?.message : hasUnsavedChanges ? 'Unsaved changes. Save before activating or running.' : '')}
-        </span>
-        {(msg || !graphReady || hasUnsavedChanges) && (
-          <span className="pointer-events-auto hidden xl:block rounded-xl border border-gray-200 dark:border-white/[0.09] bg-white/90 dark:bg-[#0d1018]/85 px-3 py-1.5 text-[11px] text-gray-500 dark:text-white/50 backdrop-blur-xl max-w-[240px] truncate shadow-sm">
-            {msg || (!graphReady ? graphValidationErrors[0]?.message : 'Unsaved changes · save before activate/run')}
-          </span>
+        {contextAdd && (
+          <ContextAddMenu contextAdd={contextAdd} setContextAdd={setContextAdd} nodes={nodes} catalog={catalog} addNode={addNode} />
         )}
-        <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-gray-200 dark:border-white/[0.09]
-          bg-white/95 dark:bg-[#0d1018]/90 px-2 py-2 shadow-sm dark:shadow-glass backdrop-blur-xl">
-		  <select className="max-w-32 bg-transparent text-xs text-gray-600 outline-none dark:text-white/60" aria-label="Execution engine" value={execution?.engine ?? 'workflow'} onChange={e => setExecution({ ...execution, engine: e.target.value })}>
-			<option value="workflow">Workflow</option>
-			<option value="stream-direct" disabled={!features.realtime}>Direct stream{!features.realtime ? ' · locked' : ''}</option>
-			<option value="spark-sql" disabled={!features.sparkSql}>Spark SQL{!features.sparkSql ? ' · locked' : ''}</option>
-			<option value="flink-sql" disabled={!features.realtime || !features.flinkSql}>Flink SQL{!features.realtime || !features.flinkSql ? ' · locked' : ''}</option>
-		  </select>
-          <button aria-describedby="pipeline-action-status" className="glass-btn-ghost border-transparent bg-transparent text-xs disabled:cursor-not-allowed disabled:opacity-40" disabled={!graphReady} onClick={save}><Save size={14} /> Save</button>
-          <button aria-describedby="pipeline-action-status" className="glass-btn-ghost border-transparent bg-transparent text-xs disabled:cursor-not-allowed disabled:opacity-40" disabled={!savedRowId || !graphReady || hasUnsavedChanges} onClick={activate}><Rocket size={14} /> Activate</button>
-          <button aria-describedby="pipeline-action-status" className="glass-btn-primary text-xs disabled:cursor-not-allowed disabled:opacity-40" disabled={!savedRowId || !graphReady || hasUnsavedChanges} onClick={run}><Play size={13} fill="currentColor" /> Run</button>
-        </div>
-      </div>
-	  {(execution?.engine === 'spark-sql' || execution?.engine === 'flink-sql') && <div className="pointer-events-auto absolute right-4 top-16 z-10 w-[min(520px,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white/95 p-2 shadow-sm dark:border-white/10 dark:bg-[#0d1018]/95"><input className="glass-input w-full font-mono text-xs" aria-label={`${execution.engine} SELECT`} placeholder="SELECT ... FROM source" value={execution?.transformSql ?? ''} onChange={e => setExecution({ ...execution, transformSql: e.target.value })} /></div>}
 
+        <NodePalette
+          catalog={catalog} activeCat={activeCat} setActiveCat={setActiveCat} addNode={addNode}
+          showAI={showAI} setShowAI={setShowAI} openMermaid={openMermaid}
+          workspacePanel={workspacePanel} setWorkspacePanel={setWorkspacePanel}
+          drawerOpen={drawerOpen} bottomTab={bottomTab} openDrawer={openDrawer} setDrawerOpen={setDrawerOpen}
+          dark={dark} toggleTheme={toggleTheme} navigate={navigate}
+        />
 
+        <WorkspaceSidePanel
+          workspacePanel={workspacePanel} setWorkspacePanel={setWorkspacePanel}
+          catalog={catalog} connectorInstances={connectorInstances}
+          connectorsError={connectorsQuery.error} refreshConnectors={connectorsQuery.refresh} addNode={addNode}
+          policy={policy} setPolicy={setPolicy} user={user} usage={usage} members={members}
+          settingsError={settingsQuery.error} refreshSettings={settingsQuery.refresh}
+          inviteEmail={inviteEmail} setInviteEmail={setInviteEmail} inviteBusy={inviteBusy}
+          inviteMsg={inviteMsg} inviteMember={inviteMember}
+        />
+
+        <PipelineHeaderBar
+          leftOffset={workspacePanel || activeCat ? 400 : 90}
+          name={name} setName={setName}
+          pipelineStage={pipelineStage} showLifecycle={showLifecycle} setShowLifecycle={setShowLifecycle}
+          isOwner={user?.role === 'owner'} activate={activate} promote={promote}
+          trigger={trigger} setTrigger={setTrigger} pipelineKey={pipelineKey}
+          upstreamPipelines={upstreamPipelines} workspaceAssets={workspaceAssets}
+        />
+
+        <PipelineActionBar
+          msg={msg} graphReady={graphReady} firstValidationError={graphValidationErrors[0]?.message}
+          hasUnsavedChanges={hasUnsavedChanges}
+          execution={execution} setExecution={setExecution} features={features}
+          savedRowId={savedRowId} save={save} activate={activate} run={run}
+        />
       </div>{/* end canvas area */}
 
-      {/* ── AI panel — flex sibling, pushes canvas left ── */}
-      <aside
-        className={`flex flex-col flex-none overflow-hidden border-l border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#0d1018] transition-[width] duration-200 ease-in-out ${
-          showAI ? 'w-[390px]' : 'w-0'
-        }`}
-      >
-        {showAI && (
-          <>
-            <div className="flex items-center gap-3 border-b border-gray-100 px-4 py-3 dark:border-white/[0.07]">
-              <Sparkles size={16} className="text-brand-500 flex-none" />
-              <b className="text-sm text-gray-900 dark:text-white/90">Build with AI</b>
-              <button className="icon-button ml-auto h-7 w-7" onClick={() => setShowAI(false)} aria-label="Close AI panel"><X size={14} /></button>
-            </div>
-            <div className="flex-1 space-y-3 overflow-y-auto p-4">
-              {aiMessages.map((m, i) => <div key={i} className={`rounded-xl p-3 text-xs ${m.role === 'user' ? 'ml-8 bg-brand-500/10 text-gray-800 dark:text-white/80' : 'mr-8 bg-gray-100 text-gray-600 dark:bg-white/[0.06] dark:text-white/60'}`}>{m.content}</div>)}
-              {aiProposal && <div className="space-y-3 rounded-xl border border-brand-300/30 bg-brand-500/[0.05] p-3">
-                <div className="text-xs font-semibold text-gray-900 dark:text-white/90">Proposed graph · {aiProposal.definition.nodes?.length ?? 0} nodes</div>
-                <div className="max-h-52 overflow-auto rounded-lg bg-white p-2 dark:bg-black/20"><MermaidPreview source={aiProposal.mermaid} /></div>
-                {aiProposal.definition.execution?.engine && <div className="text-xs text-gray-500 dark:text-white/50">Engine: {aiProposal.definition.execution.engine}</div>}
-                {aiProposal.warnings?.map((w: string, i: number) => <div key={i} className="text-xs text-amber-600 dark:text-amber-400">{w}</div>)}
-                <div className="flex gap-2"><button className="glass-btn-primary text-xs" onClick={applyAI}>Apply</button><button className="glass-btn-ghost text-xs" onClick={() => setAiProposal(null)}>Discard</button><button className="glass-btn-ghost text-xs" disabled={aiLoading} onClick={runAI}>Retry</button></div>
-              </div>}
-            </div>
-            <div className="border-t border-gray-100 p-3 dark:border-white/[0.07]">
-              <div className="flex items-center gap-2">
-                <input
-                  className="glass-input flex-1 text-sm"
-                  placeholder={nodes.length > 0 ? 'Describe changes… e.g. Add a filter step before the Postgres sink' : 'Describe your pipeline… e.g. Sync Zendesk tickets to Postgres'}
-                  value={aiPrompt} onChange={e => setAiPrompt(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && runAI()} autoFocus />
-                <button className="glass-btn-primary text-xs flex-none"
-                  disabled={aiLoading || !aiPrompt.trim()} onClick={runAI}>
-                  {aiLoading ? '…' : nodes.length > 0 ? 'Refine' : 'Generate'}
-                </button>
-              </div>
-              {aiError && <p className="border-t border-red-100 bg-red-50 px-4 py-2 text-[10px] text-red-600 dark:border-red-500/15 dark:bg-red-500/[0.06] dark:text-red-300">{aiError}</p>}
-              {aiLoading && <div className="h-0.5 animate-pulse bg-brand-500" />}
-              {aiUndo && <button className="mt-2 text-xs text-brand-500" onClick={undoAI}>Undo last apply</button>}
-            </div>
-          </>
-        )}
-      </aside>
+      <AiBuilderPanel
+        showAI={showAI} setShowAI={setShowAI} hasNodes={nodes.length > 0}
+        aiMessages={aiMessages} aiProposal={aiProposal} applyAI={applyAI}
+        discardProposal={() => setAiProposal(null)} aiLoading={aiLoading} runAI={runAI}
+        aiPrompt={aiPrompt} setAiPrompt={setAiPrompt} aiError={aiError} aiUndo={aiUndo} undoAI={undoAI}
+      />
 
-      {/* Right config / Mermaid panel — flex sibling, pushes canvas left */}
-      <aside
-        className={`flex flex-col flex-none overflow-hidden border-l border-gray-200 dark:border-white/[0.08] bg-white/97 dark:bg-[#0d1018]/94 backdrop-blur-xl transition-[width] duration-200 ease-in-out ${
-          rightPanelOpen ? 'w-[360px]' : 'w-0'
-        }`}
-      >
-        {rightPanelOpen && (
-          <>
-            <div className="flex h-14 flex-none items-center justify-between border-b border-gray-100 dark:border-white/[0.07] px-4">
-              <div>
-                <p className="text-xs font-semibold text-gray-900 dark:text-white/85">
-                  {showMermaid ? 'Mermaid editor' : selectedEdge ? 'Branch condition' : 'Node settings'}
-                </p>
-                <p className="text-[10px] text-gray-400 dark:text-white/30">
-                  {showMermaid ? 'Edit graph as code' : selectedEdge ? 'Conditional routing' : 'Configure selected node'}
-                </p>
-              </div>
-              <button className="icon-button h-8 w-8" onClick={() => { setShowMermaid(false); setSelected(null); setSelectedEdge(null); }}>
-                <X size={15} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-auto p-4">
-              {showMermaid ? (
-                <>
-                  <textarea className="glass-input h-52 w-full font-mono text-[11px]"
-                    value={mermaidDraft} onChange={e => setMermaidDraft(e.target.value)} />
-                  <button className="glass-btn-primary mt-3 w-full disabled:cursor-not-allowed disabled:opacity-50" disabled={!mermaidValid} onClick={applyMermaid}>
-                    <Code2 size={15} /> Apply to canvas
-                  </button>
-                  <div className="mt-4 overflow-hidden rounded-[14px] border border-gray-100 dark:border-white/[0.08] bg-gray-50 dark:bg-black/15 p-2">
-                    <MermaidPreview source={mermaidDraft} onValidChange={setMermaidValid} />
-                  </div>
-                  <p className="mt-2 text-[10px] text-gray-400 dark:text-white/30">Structure only. Node config preserved by matching ID.</p>
-                </>
-              ) : selectedEdge ? (
-                <div>
-                  <p className="mb-1 text-xs font-semibold text-gray-900 dark:text-white/85">Branch condition</p>
-                  <p className="mb-3 text-[10px] text-gray-400 dark:text-white/35">Records flow only when true. Blank = always.</p>
-                  <textarea className="glass-input h-20 w-full font-mono text-[11px]"
-                    placeholder="r.amount > 100"
-                    value={selectedEdge.data?.condition ?? ''}
-                    onChange={e => {
-                      patchEdgeCondition(selectedEdge.id, e.target.value);
-                      setSelectedEdge((s: any) => ({ ...s, data: { ...s.data, condition: e.target.value } }));
-                    }} />
-                </div>
-              ) : selected ? (
-                <ConfigPanel node={nodes.find(n => n.id === selected.id) ?? selected} onChange={patchNode} onDelete={deleteNode} />
-              ) : null}
-            </div>
-          </>
-        )}
-      </aside>
+      <InspectorPanel
+        open={rightPanelOpen} showMermaid={showMermaid} selected={selectedNode} selectedEdge={selectedEdge}
+        onClose={() => { setShowMermaid(false); setSelected(null); setSelectedEdge(null); }}
+        mermaidDraft={mermaidDraft} setMermaidDraft={setMermaidDraft}
+        mermaidValid={mermaidValid} setMermaidValid={setMermaidValid} applyMermaid={applyMermaid}
+        onEdgeConditionChange={(id, condition) => {
+          patchEdgeCondition(id, condition);
+          setSelectedEdge((s: any) => ({ ...s, data: { ...s.data, condition } }));
+        }}
+        onNodeChange={patchNode} onNodeDelete={deleteNode}
+      />
 
       {/* Execution monitor */}
       {executionId && (
@@ -957,129 +532,22 @@ export default function PipelineCanvasPage() {
         </div>
       )}
 
-      {/* IDE-style output drawer */}
-      {drawerOpen && (
-        <div className="absolute bottom-3 left-[68px] right-3 z-20 flex flex-col overflow-hidden rounded-2xl
-          border border-gray-200 dark:border-white/[0.08]
-          bg-white/97 dark:bg-[#0d1018]/96 backdrop-blur-xl
-          shadow-[0_-4px_24px_rgba(0,0,0,.08)] dark:shadow-[0_-8px_32px_rgba(0,0,0,.4)]"
-          style={{ height: drawerExpanded ? '52vh' : drawerHeight }}>
-          <button aria-label="Resize output panel" onPointerDown={startResize}
-            className="absolute -top-1 left-0 right-0 h-2 cursor-row-resize bg-transparent" />
-          <div className="flex h-10 flex-none items-center gap-1 border-b border-gray-100 px-3 dark:border-white/[0.06]">
-            {([
-              ['runs', History, 'Runs'], ['logs', Terminal, 'Logs'],
-              ['lifecycle', Activity, 'Lifecycle'], ['mermaid', Code2, 'Mermaid'],
-            ] as const).map(([id, Icon, label]) => (
-              <button key={id} onClick={() => setBottomTab(id)}
-                className={`flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium transition ${bottomTab === id ? 'bg-gray-100 text-gray-800 dark:bg-white/[0.08] dark:text-white/80' : 'text-gray-400 hover:text-gray-700 dark:text-white/35 dark:hover:text-white/65'}`}>
-                <Icon size={12} /> {label}
-              </button>
-            ))}
-            <div className="flex-1" />
-            <span className="hidden text-[10px] text-gray-400 dark:text-white/30 sm:inline">Drag top edge to resize</span>
-            <button className="icon-button h-7 w-7 border-transparent bg-transparent" title={drawerExpanded ? 'Restore panel' : 'Expand panel'}
-              onClick={() => setDrawerExpanded(v => !v)}>{drawerExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>
-            <button className="icon-button h-7 w-7 border-transparent bg-transparent" title="Collapse panel"
-              onClick={() => setDrawerOpen(false)}><ChevronDown size={14} /></button>
-          </div>
-          <div className="flex-1 overflow-auto">
-            {bottomTab === 'runs' && runsLoading && (
-              <div className="flex items-center justify-center h-full text-xs text-gray-400 dark:text-white/30">Loading…</div>
-            )}
-            {bottomTab === 'runs' && !runsLoading && recentRuns.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full gap-2 text-center">
-                <p className="text-xs text-gray-400 dark:text-white/30">No runs yet.</p>
-                <button className="glass-btn-primary text-xs" onClick={run}><Play size={12} /> Run pipeline</button>
-              </div>
-            )}
-            {bottomTab === 'runs' && !runsLoading && recentRuns.length > 0 && (
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-gray-100 dark:border-white/[0.06]">
-                    <th className="px-4 py-1.5 text-left font-medium text-gray-400 dark:text-white/30">Pipeline</th>
-                    <th className="px-4 py-1.5 text-left font-medium text-gray-400 dark:text-white/30">Status</th>
-                    <th className="px-4 py-1.5 text-left font-medium text-gray-400 dark:text-white/30">Started</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentRuns.slice(0, 20).map(r => {
-                    const statusColor =
-                      r.phase === 'completed' ? 'text-emerald-600 dark:text-emerald-400'
-                      : r.phase === 'failed'  ? 'text-red-500 dark:text-danger'
-                      : r.phase === 'running' ? 'text-amber-600 dark:text-amber-300'
-                      : 'text-gray-400 dark:text-white/40';
-                    return (
-                      <tr key={r.id}
-                        className="border-b border-gray-50 dark:border-white/[0.04] hover:bg-gray-50 dark:hover:bg-white/[0.03] cursor-pointer"
-                        onClick={() => selectRun(r)}>
-                        <td className="px-4 py-2 text-gray-700 dark:text-white/70 truncate max-w-[200px]">{r.name}</td>
-                        <td className={`px-4 py-2 font-medium ${statusColor}`}>{r.phase ?? '—'}</td>
-                        <td className="px-4 py-2 text-gray-400 dark:text-white/35">
-                          {r.started_at ? new Date(r.started_at).toLocaleString() : '—'}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-            {bottomTab === 'logs' && (
-              <div className="h-full p-3 font-mono text-[11px] text-gray-600 dark:text-white/60">
-                {!selectedRun && !executionId && <p className="text-gray-400 dark:text-white/30">Select a run to inspect execution output.</p>}
-                {executionId && !selectedRun && <p><span className="text-amber-500">RUNNING</span> {executionId}</p>}
-                {selectedRun && <div className="mb-3 flex items-center gap-3 font-sans"><span className="font-semibold text-gray-800 dark:text-white/80">{selectedRun.name}</span><span className="glass-badge">{selectedRun.phase}</span></div>}
-                {selectedRun && !runDetail && <p className="text-gray-400 dark:text-white/30">Loading execution detail…</p>}
-                {runDetail && <pre className="whitespace-pre-wrap break-words leading-relaxed">{runDetail.error ?? JSON.stringify(runDetail, null, 2)}</pre>}
-              </div>
-            )}
-            {bottomTab === 'lifecycle' && (
-              <div className="grid h-full gap-3 p-4 sm:grid-cols-3">
-                {(['draft', 'testing', 'production'] as Stage[]).map((stage, index) => (
-                  <div key={stage} className={`rounded-xl border p-3 ${pipelineStage === stage ? 'border-brand-400/50 bg-brand-500/[0.06]' : 'border-gray-200 dark:border-white/[0.07]'}`}>
-                    <div className="flex items-center gap-2"><span className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ${pipelineStage === stage ? 'bg-brand-500 text-white' : 'bg-gray-100 text-gray-400 dark:bg-white/[0.06] dark:text-white/30'}`}>{index + 1}</span><p className="text-xs font-semibold capitalize text-gray-800 dark:text-white/80">{stage === 'testing' ? 'Integration' : stage}</p></div>
-                    <p className="mt-2 text-[10px] text-gray-400 dark:text-white/30">{pipelineStage === stage ? 'Current pipeline stage' : stage === 'production' ? 'Promote after green Integration run' : 'Saved pipeline version'}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-            {bottomTab === 'mermaid' && (
-              <div className="grid min-h-full gap-3 p-3 md:grid-cols-2">
-                <div className="flex min-h-0 flex-col">
-                  <textarea className="glass-input min-h-36 flex-1 font-mono text-[11px]" value={mermaidDraft} onChange={e => setMermaidDraft(e.target.value)} />
-                  <button className="glass-btn-primary mt-2 self-start text-xs disabled:cursor-not-allowed disabled:opacity-50" disabled={!mermaidValid} onClick={applyMermaid}><Code2 size={13} /> Apply to DAG</button>
-                </div>
-                <div className="min-h-36 overflow-auto rounded-xl border border-gray-200 bg-gray-50 p-2 dark:border-white/[0.07] dark:bg-black/15"><MermaidPreview source={mermaidDraft} onValidChange={setMermaidValid} /></div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <OutputDrawer
+        drawerOpen={drawerOpen} drawerExpanded={drawerExpanded} drawerHeight={drawerHeight} startResize={startResize}
+        bottomTab={bottomTab} setBottomTab={setBottomTab} setDrawerExpanded={setDrawerExpanded}
+        setDrawerOpen={setDrawerOpen} openDrawer={openDrawer}
+        runsLoading={runsLoading} recentRuns={recentRuns} run={run} selectRun={selectRun}
+        selectedRun={selectedRun} runDetail={runDetail} executionId={executionId}
+        pipelineStage={pipelineStage}
+        mermaidDraft={mermaidDraft} setMermaidDraft={setMermaidDraft}
+        mermaidValid={mermaidValid} setMermaidValid={setMermaidValid} applyMermaid={applyMermaid}
+      />
 
-      {!drawerOpen && (
-        <button title="Open output panel" onClick={() => openDrawer(bottomTab)}
-          className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-gray-200 bg-white/95 px-3 py-1.5 text-[11px] text-gray-500 shadow-sm backdrop-blur dark:border-white/[0.08] dark:bg-[#11141d]/90 dark:text-white/45">
-          <ChevronUp size={13} /> Output
-        </button>
-      )}
-
-      {/* Empty state */}
       {!nodes.length && !activeCat && !showAI && (
-        <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-4 text-center pointer-events-none">
-          <p className="text-sm font-medium text-gray-400 dark:text-white/30">Start building your pipeline</p>
-          <div className="flex gap-2 pointer-events-auto">
-            <button
-              className="flex items-center gap-2 rounded-2xl border border-gray-200 dark:border-white/[0.09] bg-white dark:bg-white/[0.05] px-4 py-2.5 text-sm text-gray-600 dark:text-white/60 shadow-sm hover:bg-gray-50 hover:border-gray-300 dark:hover:bg-white/[0.08] transition-all"
-              onClick={() => { setActiveCat('source'); setCatQuery(''); }}>
-              <Database size={15} className="text-emerald-500" /> Add a source
-            </button>
-            <button
-              className="flex items-center gap-2 rounded-2xl border border-brand-300/30 bg-brand-500/10 text-brand-600 dark:text-brand-300 px-4 py-2.5 text-sm shadow-sm hover:bg-brand-500/15 transition-all"
-              onClick={() => setShowAI(true)}>
-              <Sparkles size={15} /> Generate with AI
-            </button>
-          </div>
-        </div>
+        <EmptyCanvasState
+          onAddSource={() => setActiveCat('source')}
+          onGenerateAI={() => setShowAI(true)}
+        />
       )}
     </div>
   );

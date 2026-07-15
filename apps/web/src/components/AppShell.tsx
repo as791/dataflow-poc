@@ -38,6 +38,7 @@ export function AppShell() {
   const { user, logout } = useAuth();
   const { dark, toggle } = useTheme();
   const navigate = useNavigate();
+  const doLogout = async () => { await logout(); navigate('/login', { replace: true }); };
   const { pathname } = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false); // ponytail: session-only dismiss, reappears on reload by design
@@ -53,16 +54,25 @@ export function AppShell() {
           <aside className="absolute left-0 top-0 bottom-0 flex w-[200px] flex-col items-center gap-1 py-3
             border-r border-gray-200 dark:border-white/[0.08]
             bg-white/98 dark:bg-[#0d0f17]/98 backdrop-blur-lg">
-            <button className="self-end mr-2 mb-2 flex h-8 w-8 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.08]" onClick={() => setSidebarOpen(false)}><X size={15} /></button>
+            <button aria-label="Close menu" onClick={() => setSidebarOpen(false)}
+              className="relative self-end mr-2 mb-2 flex h-8 w-8 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.08] before:absolute before:-inset-[6px] before:content-['']">
+              <X size={15} />
+            </button>
             {NAV.map(({ to, label, icon: Icon, end }) => (
               <NavLink key={to} to={to} end={end} onClick={() => setSidebarOpen(false)}
-                className={({ isActive }) => `flex w-[180px] items-center gap-3 px-3 h-9 rounded-[10px] border transition-all ${
+                className={({ isActive }) => `flex w-[180px] items-center gap-3 px-3 h-11 rounded-[10px] border transition-all ${
                   isActive ? 'border-brand-300/20 bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'border-transparent text-gray-600 dark:text-white/50 hover:bg-gray-100 dark:hover:bg-white/[0.055]'
                 }`}>
                 <Icon size={17} strokeWidth={1.75} />
                 <span className="text-sm font-medium">{label}</span>
               </NavLink>
             ))}
+            <div className="my-1 h-px w-[180px] bg-gray-200 dark:bg-white/[0.08]" />
+            <button onClick={doLogout}
+              className="flex w-[180px] items-center gap-3 px-3 h-11 rounded-[10px] border border-transparent text-gray-600 dark:text-white/50 hover:bg-gray-100 dark:hover:bg-white/[0.055] hover:text-red-500 dark:hover:text-red-400 transition-all">
+              <LogOut size={17} strokeWidth={1.75} />
+              <span className="text-sm font-medium">Sign out</span>
+            </button>
           </aside>
         </div>
       )}

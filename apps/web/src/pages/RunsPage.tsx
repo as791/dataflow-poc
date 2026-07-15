@@ -61,20 +61,22 @@ function durMs(started?: string, finished?: string): string {
 function RunDrawer({ run, onClose }: { run: Execution; onClose: () => void }) {
   const cfg = PHASE_STYLE[run.phase ?? ''];
   return (
-    <div className="flex w-[360px] flex-none flex-col border-l border-gray-200 bg-white
+    <div className="fixed inset-y-0 right-0 z-40 flex w-[85vw] max-w-[360px] flex-none flex-col border-l border-gray-200 bg-white
       dark:border-white/[0.08] dark:bg-white/[0.04] dark:backdrop-blur-xl overflow-hidden
-      shadow-[-18px_0_50px_rgba(0,0,0,.08)] dark:shadow-[-18px_0_50px_rgba(0,0,0,.28)]">
+      shadow-[-18px_0_50px_rgba(0,0,0,.08)] dark:shadow-[-18px_0_50px_rgba(0,0,0,.28)]
+      sm:static sm:z-auto sm:w-[360px] sm:max-w-none">
 
       <div className="px-5 pt-4 pb-3.5 border-b border-gray-100 dark:border-white/[0.07] shrink-0">
         <div className="flex items-center gap-2 mb-2.5">
           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${cfg?.badge ?? 'bg-gray-50 border-gray-200 text-gray-500'}`}>
             {run.phase ?? 'unknown'}
           </span>
-          <button onClick={onClose}
-            className="ml-auto flex h-[22px] w-[22px] items-center justify-center rounded-[6px]
+          <button onClick={onClose} aria-label="Close run details"
+            className="relative ml-auto flex h-[22px] w-[22px] items-center justify-center rounded-[6px]
               bg-gray-100 border border-gray-200 text-gray-400 hover:bg-gray-200 hover:text-gray-700
               dark:bg-white/[0.04] dark:border-white/[0.07] dark:text-white/40
-              dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
+              dark:hover:bg-white/[0.08] dark:hover:text-white transition-all
+              before:absolute before:-inset-[11px] before:content-['']">
             <X size={13} />
           </button>
         </div>
@@ -158,7 +160,7 @@ export default function RunsPage() {
   };
 
   useEffect(() => { refresh(); }, [refresh]);
-  useEffect(() => { api.listPipelines().then(setPipelines).catch(() => {}); }, []);
+  useEffect(() => { api.listPipelines({ limit: '500' }).then(page => setPipelines(page.rows)).catch(() => {}); }, []);
 
   const setF = (k: keyof typeof filters, v: string) => setFilters(f => ({ ...f, [k]: v }));
 
@@ -232,8 +234,8 @@ export default function RunsPage() {
             const cfg = PHASE_STYLE[r.phase ?? ''];
             const sel = selected?.id === r.id;
             return (
-              <div key={r.id} onClick={() => setSelected(sel ? null : r)}
-                className={`group flex items-stretch border-b border-gray-100 dark:border-white/[0.05] cursor-pointer transition-colors ${
+              <button type="button" key={r.id} onClick={() => setSelected(sel ? null : r)}
+                className={`group flex w-full items-stretch border-b border-gray-100 text-left dark:border-white/[0.05] cursor-pointer transition-colors ${
                   sel ? 'bg-brand-50 dark:bg-brand-500/[0.06]' : 'hover:bg-gray-50 dark:hover:bg-white/[0.025]'
                 }`}>
                 <div className={`w-[3px] shrink-0 ${cfg?.bar ?? 'bg-gray-300/60'}`} />
@@ -253,7 +255,7 @@ export default function RunsPage() {
                     </span>
                   </div>
                 </div>
-              </div>
+              </button>
             );
           })}
           {nextCursor && (
@@ -271,6 +273,7 @@ export default function RunsPage() {
         </div>
       </div>
 
+      {selected && <div className="fixed inset-0 z-30 bg-black/40 sm:hidden" onClick={() => setSelected(null)} />}
       {selected && <RunDrawer run={selected} onClose={() => setSelected(null)} />}
     </div>
   );

@@ -16,8 +16,21 @@ import (
 	"github.com/dataflow-poc/workflow-go/internal/config"
 	"github.com/dataflow-poc/workflow-go/internal/connectors"
 	"github.com/dataflow-poc/workflow-go/internal/database"
+	"github.com/dataflow-poc/workflow-go/internal/security"
 	"github.com/redis/go-redis/v9"
 )
+
+// alertHTTPClient is shared by every alert notification dispatch: the
+// destination URL comes from a tenant-configured HTTP connector, so it
+// must go through the SSRF-safe client (https-only, private/metadata
+// denylist re-checked at dial time).
+var alertHTTPClient = security.NewHTTPClient(5 * time.Second)
+
+// lineageHTTPClient serves OpenLineage dispatch, whose destination is an
+// operator-configured OPENLINEAGE_URL (not tenant/user-supplied), so it is
+// intentionally not routed through the SSRF-safe client — that endpoint
+// may legitimately be an internal collector.
+var lineageHTTPClient = &http.Client{Timeout: 5 * time.Second}
 
 type Group struct {
 	cancel context.CancelFunc
@@ -163,7 +176,7 @@ func dispatchAlerts(ctx context.Context, db *database.DB, runtime *connectors.Ru
 			if apiKey != "" {
 				headers["Authorization"] = "Bearer " + apiKey
 			}
-			sendErr = postJSON(ctx, endpoint, value.payload, headers)
+			sendErr = postJSON(ctx, alertHTTPClient, endpoint, value.payload, headers)
 		}
 		if sendErr == nil {
 			_, err = tx.Exec(ctx, `UPDATE pipeline_alert_notification_outbox SET sent_at=now(),attempts=attempts+1,last_error=NULL WHERE id=$1`, value.id)
@@ -225,7 +238,7 @@ func dispatchLineage(ctx context.Context, db *database.DB, endpoint, apiKey stri
 		if apiKey != "" {
 			headers["Authorization"] = "Bearer " + apiKey
 		}
-		sendErr := postJSON(ctx, endpoint, value.payload, headers)
+		sendErr := postJSON(ctx, lineageHTTPClient, endpoint, value.payload, headers)
 		if sendErr == nil {
 			_, err = tx.Exec(ctx, `UPDATE openlineage_outbox SET sent_at=now(),attempts=attempts+1,last_error=NULL WHERE id=$1`, value.id)
 		} else {
@@ -239,7 +252,7 @@ func dispatchLineage(ctx context.Context, db *database.DB, endpoint, apiKey stri
 	return tx.Commit(ctx)
 }
 
-func postJSON(ctx context.Context, endpoint string, payload []byte, headers map[string]string) error {
+func postJSON(ctx context.Context, client *http.Client, endpoint string, payload []byte, headers map[string]string) error {
 	if !json.Valid(payload) {
 		return fmt.Errorf("outbox payload is not JSON")
 	}
@@ -251,7 +264,6 @@ func postJSON(ctx context.Context, endpoint string, payload []byte, headers map[
 	for key, value := range headers {
 		request.Header.Set(key, value)
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
 	response, err := client.Do(request)
 	if err != nil {
 		return err

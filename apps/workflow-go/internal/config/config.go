@@ -41,7 +41,22 @@ type Config struct {
 	Edition                      string
 	InternalDemoFeatures         bool
 	AuditRetentionDays           int
+	ExecutionRetentionDays       int
+	NodeRunRetentionDays         int
+	PayloadRetentionDays         int
+	OutboxRetentionDays          int
+	RedisStreamMaxLen            int64
 	BackfillDispatchInterval     time.Duration
+	MaxPipelineListPageSize      int
+	MaxPipelineNodes             int
+	MaxPipelineEdges             int
+	MaxPipelineConfigBytes       int
+	MaxPipelineFanout            int
+	MaxPipelineMaxParallel       int
+	MaxPipelineNodePageSize      int
+	MaxBackfillPartitions        int
+	MaxPayloadBytes              int64
+	MaxMergeInMemoryBytes        int64
 }
 
 func Load() Config {
@@ -79,7 +94,22 @@ func Load() Config {
 		Edition:                      env("EDITION", "community"),
 		InternalDemoFeatures:         boolEnv("INTERNAL_DEMO_FEATURES"),
 		AuditRetentionDays:           intEnv("AUDIT_RETENTION_DAYS", 90),
+		ExecutionRetentionDays:       intEnv("EXECUTION_RETENTION_DAYS", 90),
+		NodeRunRetentionDays:         intEnv("NODE_RUN_RETENTION_DAYS", 90),
+		PayloadRetentionDays:         intEnv("PAYLOAD_RETENTION_DAYS", 30),
+		OutboxRetentionDays:          intEnv("OUTBOX_RETENTION_DAYS", 30),
+		RedisStreamMaxLen:            int64(intEnv("REDIS_STREAM_MAXLEN", 100000)),
 		BackfillDispatchInterval:     time.Duration(intEnv("BACKFILL_DISPATCH_INTERVAL_MS", 5000)) * time.Millisecond,
+		MaxPipelineListPageSize:      intEnv("MAX_PIPELINE_LIST_PAGE_SIZE", 200),
+		MaxPipelineNodes:             intEnv("MAX_PIPELINE_NODES", 500),
+		MaxPipelineEdges:             intEnv("MAX_PIPELINE_EDGES", 1000),
+		MaxPipelineConfigBytes:       intEnv("MAX_PIPELINE_CONFIG_BYTES", 65536),
+		MaxPipelineFanout:            intEnv("MAX_FANOUT", 50),
+		MaxPipelineMaxParallel:       intEnv("MAX_PIPELINE_MAX_PARALLEL", 100),
+		MaxPipelineNodePageSize:      intEnv("MAX_PIPELINE_NODE_PAGE_SIZE", 100000),
+		MaxBackfillPartitions:        intEnv("MAX_BACKFILL_PARTITIONS", 10000),
+		MaxPayloadBytes:              int64(intEnv("MAX_PAYLOAD_BYTES", 10*1024*1024)),
+		MaxMergeInMemoryBytes:        int64(intEnv("MAX_MERGE_INMEMORY_BYTES", 50*1024*1024)),
 	}
 }
 

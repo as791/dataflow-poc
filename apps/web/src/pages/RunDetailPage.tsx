@@ -93,7 +93,7 @@ export default function RunDetailPage() {
       <div className="flex items-center gap-3 border-b border-gray-100 dark:border-white/[0.07] px-6 py-4">
         <Link to="/runs" className="glass-btn-ghost flex items-center gap-1 text-sm"><ArrowLeft size={15} /> Runs</Link>
         <div>
-          <h1 className="text-sm font-semibold text-gray-900 dark:text-white/90">{data?.execution?.name ?? 'Run'}</h1>
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-white/90">{data?.execution?.name ?? 'Run'}</h2>
           <p className="text-xs text-gray-400 dark:text-white/40">
             {displayEnvironment(data?.execution?.environment)} · {data?.execution?.phase ?? '…'}
           </p>

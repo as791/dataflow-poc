@@ -1,12 +1,16 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
+	"time"
 
+	"github.com/dataflow-poc/workflow-go/internal/config"
 	"github.com/dataflow-poc/workflow-go/internal/model"
 	"github.com/jackc/pgx/v5"
 )
@@ -68,6 +72,9 @@ func (s *Server) pipelineCreate(w http.ResponseWriter, r *http.Request) error {
 	def.ID = id
 	def.TenantID = tenant.TenantID
 	if err := validatePipeline(def); err != nil {
+		return badRequest(ErrInvalidRequest, err.Error())
+	}
+	if err := validatePipelineLimits(def, s.Config); err != nil {
 		return badRequest(ErrInvalidRequest, err.Error())
 	}
 	if err := s.enforcePipelineFeatures(r, def); err != nil {
@@ -169,13 +176,77 @@ func (s *Server) pipelineRun(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// pipelineList returns a summary projection (no definition column) with
+// keyset pagination on (created_at,id) plus optional search/stage/trigger
+// filters. Use pipelineGet for the full definition of a single row.
 func (s *Server) pipelineList(w http.ResponseWriter, r *http.Request) error {
 	tenant := tenantFrom(r)
-	rows, err := tenantQueryRows(r.Context(), s.DB, tenant.TenantID, `SELECT p.id,p.pipeline_key,p.version,p.name,p.status,p.environment,p.promoted_from_version,p.created_at,p.definition,lr.phase AS last_run_phase,lr.started_at AS last_run_at,lr.id AS last_run_id FROM pipelines p LEFT JOIN LATERAL (SELECT phase,started_at,id FROM executions WHERE pipeline_id=p.id ORDER BY started_at DESC LIMIT 1) lr ON true ORDER BY p.created_at DESC`)
+	q := r.URL.Query()
+
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	if limit < 1 {
+		limit = 50
+	}
+	maxLimit := s.Config.MaxPipelineListPageSize
+	if maxLimit <= 0 || maxLimit > 200 {
+		maxLimit = 200
+	}
+	if limit > maxLimit {
+		limit = maxLimit
+	}
+
+	where := []string{}
+	args := []interface{}{}
+	if search := strings.TrimSpace(q.Get("search")); search != "" {
+		args = append(args, search)
+		where = append(where, fmt.Sprintf("p.name ILIKE '%%'||$%d||'%%'", len(args)))
+	}
+	switch q.Get("stage") {
+	case "production":
+		where = append(where, "p.status='active' AND p.environment='prod'")
+	case "testing":
+		where = append(where, "p.status='active' AND p.environment='test'")
+	case "draft":
+		where = append(where, "NOT (p.status='active' AND p.environment IN ('prod','test'))")
+	}
+	if trigger := q.Get("trigger"); trigger != "" {
+		args = append(args, trigger)
+		where = append(where, fmt.Sprintf("p.definition->'trigger'->>'type'=$%d", len(args)))
+	}
+	if cursor := q.Get("cursor"); cursor != "" {
+		decoded, err := base64.RawURLEncoding.DecodeString(cursor)
+		if err != nil {
+			return badRequest(ErrInvalidRequest, "invalid pipeline cursor")
+		}
+		var value struct{ CreatedAt, ID string }
+		if json.Unmarshal(decoded, &value) != nil || value.CreatedAt == "" || value.ID == "" {
+			return badRequest(ErrInvalidRequest, "invalid pipeline cursor")
+		}
+		args = append(args, value.CreatedAt, value.ID)
+		where = append(where, fmt.Sprintf("(p.created_at,p.id)<($%d::timestamptz,$%d)", len(args)-1, len(args)))
+	}
+
+	query := `SELECT p.id,p.pipeline_key,p.version,p.name,p.status,p.environment,p.promoted_from_version,p.created_at,p.definition->'trigger'->>'type' AS trigger_type,lr.phase AS last_run_phase,lr.started_at AS last_run_at,lr.id AS last_run_id FROM pipelines p LEFT JOIN LATERAL (SELECT phase,started_at,id FROM executions WHERE pipeline_id=p.id ORDER BY started_at DESC LIMIT 1) lr ON true`
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	query += fmt.Sprintf(" ORDER BY p.created_at DESC,p.id DESC LIMIT %d", limit+1)
+
+	rows, err := tenantQueryRows(r.Context(), s.DB, tenant.TenantID, query, args...)
 	if err != nil {
 		return err
 	}
-	jsonResponse(w, http.StatusOK, rows)
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	var next interface{}
+	if hasMore && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		b, _ := json.Marshal(map[string]string{"createdAt": timeValue(last["created_at"]).UTC().Format(time.RFC3339Nano), "id": stringValue(last["id"])})
+		next = base64.RawURLEncoding.EncodeToString(b)
+	}
+	jsonResponse(w, http.StatusOK, map[string]interface{}{"rows": rows, "nextCursor": next})
 	return nil
 }
 func (s *Server) pipelineGet(w http.ResponseWriter, r *http.Request) error {
@@ -187,6 +258,38 @@ func (s *Server) pipelineGet(w http.ResponseWriter, r *http.Request) error {
 		return notFound(ErrNotFound, "not found")
 	}
 	jsonResponse(w, http.StatusOK, row)
+	return nil
+}
+
+// validatePipelineLimits enforces config-driven size/shape ceilings on a
+// pipeline definition so an oversized or pathological graph is rejected
+// before it ever reaches the database.
+func validatePipelineLimits(def model.PipelineDefinition, cfg config.Config) error {
+	if len(def.Nodes) > cfg.MaxPipelineNodes {
+		return fmt.Errorf("pipeline has %d nodes, exceeding the limit of %d", len(def.Nodes), cfg.MaxPipelineNodes)
+	}
+	if len(def.Edges) > cfg.MaxPipelineEdges {
+		return fmt.Errorf("pipeline has %d edges, exceeding the limit of %d", len(def.Edges), cfg.MaxPipelineEdges)
+	}
+	fanout := map[string]int{}
+	for _, edge := range def.Edges {
+		fanout[edge.Source]++
+		if fanout[edge.Source] > cfg.MaxPipelineFanout {
+			return fmt.Errorf("node %s fans out to more than %d edges", edge.Source, cfg.MaxPipelineFanout)
+		}
+	}
+	for _, node := range def.Nodes {
+		body, _ := json.Marshal(node.Config)
+		if len(body) > cfg.MaxPipelineConfigBytes {
+			return fmt.Errorf("node %s config is %d bytes, exceeding the limit of %d", node.ID, len(body), cfg.MaxPipelineConfigBytes)
+		}
+		if node.Ingestion != nil && node.Ingestion.PageSize > cfg.MaxPipelineNodePageSize {
+			return fmt.Errorf("node %s ingestion pageSize %d exceeds the limit of %d", node.ID, node.Ingestion.PageSize, cfg.MaxPipelineNodePageSize)
+		}
+	}
+	if def.Concurrency != nil && def.Concurrency.MaxParallelNodes > cfg.MaxPipelineMaxParallel {
+		return fmt.Errorf("concurrency.maxParallelNodes %d exceeds the limit of %d", def.Concurrency.MaxParallelNodes, cfg.MaxPipelineMaxParallel)
+	}
 	return nil
 }
 
@@ -438,6 +541,9 @@ func (s *Server) backfillCreate(w http.ResponseWriter, r *http.Request) error {
 	plan, err := planBackfill(body)
 	if err != nil {
 		return badRequest(ErrInvalidRequest, err.Error())
+	}
+	if plan.PartitionCount > s.Config.MaxBackfillPartitions {
+		return badRequest(ErrInvalidRequest, fmt.Sprintf("backfill has %d partitions, exceeding the limit of %d", plan.PartitionCount, s.Config.MaxBackfillPartitions))
 	}
 	row, def, err := s.loadPipeline(r, r.PathValue("rowId"))
 	if err != nil {

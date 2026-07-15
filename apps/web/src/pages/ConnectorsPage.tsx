@@ -79,6 +79,12 @@ function ZendeskModal({ onClose, onConnect }: {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const slug = subdomain.trim().replace(/\.zendesk\.com\/?$/, '');
@@ -95,9 +101,9 @@ function ZendeskModal({ onClose, onConnect }: {
 
   return (
     <div className="glass-modal-backdrop" onClick={onClose}>
-      <div className="glass-modal" onClick={e => e.stopPropagation()}>
+      <div className="glass-modal" role="dialog" aria-modal="true" aria-labelledby="zendesk-modal-title" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-semibold">Connect Zendesk subdomain</h2>
+          <h2 id="zendesk-modal-title" className="text-lg font-semibold">Connect Zendesk subdomain</h2>
           <button
             className="glass-btn-ghost w-8 h-8 flex items-center justify-center text-lg leading-none"
             onClick={onClose}
@@ -153,6 +159,12 @@ function CredentialModal({ onClose, onSaved, realtime, advanced, initialProvider
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setF(s => ({ ...s, [k]: e.target.value }));
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy(true); setErr(null);
     try {
@@ -184,9 +196,9 @@ function CredentialModal({ onClose, onSaved, realtime, advanced, initialProvider
 
   return (
     <div className="glass-modal-backdrop" onClick={onClose}>
-      <div className="glass-modal" onClick={e => e.stopPropagation()}>
+      <div className="glass-modal" role="dialog" aria-modal="true" aria-labelledby="credential-modal-title" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-semibold">Add credential</h2>
+          <h2 id="credential-modal-title" className="text-lg font-semibold">Add credential</h2>
           <button className="glass-btn-ghost w-8 h-8 flex items-center justify-center text-lg leading-none" onClick={onClose} aria-label="Close">×</button>
         </div>
         <form onSubmit={submit} className="space-y-3">
@@ -209,12 +221,12 @@ function CredentialModal({ onClose, onSaved, realtime, advanced, initialProvider
           </label>
           {provider === 'postgres' || provider === 'mysql' ? (
             <>
-              <input className="glass-input" placeholder="host" value={f.host ?? ''} onChange={set('host')} />
-              <input className="glass-input" placeholder={`port (${provider === 'postgres' ? 5432 : 3306})`} value={f.port ?? ''} onChange={set('port')} />
-              <input className="glass-input" placeholder="database" value={f.database ?? ''} onChange={set('database')} />
-              <input className="glass-input" placeholder="user" value={f.user ?? ''} onChange={set('user')} />
-              <input className="glass-input" type="password" placeholder="password" value={f.password ?? ''} onChange={set('password')} />
-              <select className="glass-select" value={f.sslMode ?? 'disable'} onChange={e => setF(s => ({ ...s, sslMode: e.target.value }))}>
+              <input className="glass-input" placeholder="host" aria-label="Host" value={f.host ?? ''} onChange={set('host')} />
+              <input className="glass-input" placeholder={`port (${provider === 'postgres' ? 5432 : 3306})`} aria-label="Port" value={f.port ?? ''} onChange={set('port')} />
+              <input className="glass-input" placeholder="database" aria-label="Database" value={f.database ?? ''} onChange={set('database')} />
+              <input className="glass-input" placeholder="user" aria-label="User" value={f.user ?? ''} onChange={set('user')} />
+              <input className="glass-input" type="password" placeholder="password" aria-label="Password" value={f.password ?? ''} onChange={set('password')} />
+              <select className="glass-select" aria-label="SSL mode" value={f.sslMode ?? 'disable'} onChange={e => setF(s => ({ ...s, sslMode: e.target.value }))}>
                 <option value="disable">SSL disabled</option>
                 <option value="require">SSL required</option>
                 <option value="verify-full">SSL verify certificate</option>
@@ -222,75 +234,75 @@ function CredentialModal({ onClose, onSaved, realtime, advanced, initialProvider
             </>
           ) : provider === 'mongodb' ? (
             <>
-              <input className="glass-input" placeholder="host" value={f.host ?? ''} onChange={set('host')} required />
-              {f.srv !== 'true' && <input className="glass-input" placeholder="port (27017)" value={f.port ?? ''} onChange={set('port')} />}
-              <input className="glass-input" placeholder="database" value={f.database ?? ''} onChange={set('database')} required />
-              <input className="glass-input" placeholder="user (optional)" value={f.user ?? ''} onChange={set('user')} />
-              <input className="glass-input" type="password" placeholder="password" value={f.password ?? ''} onChange={set('password')} />
-              <input className="glass-input" placeholder="auth source (admin)" value={f.authSource ?? ''} onChange={set('authSource')} />
+              <input className="glass-input" placeholder="host" aria-label="Host" value={f.host ?? ''} onChange={set('host')} required />
+              {f.srv !== 'true' && <input className="glass-input" placeholder="port (27017)" aria-label="Port" value={f.port ?? ''} onChange={set('port')} />}
+              <input className="glass-input" placeholder="database" aria-label="Database" value={f.database ?? ''} onChange={set('database')} required />
+              <input className="glass-input" placeholder="user (optional)" aria-label="User" value={f.user ?? ''} onChange={set('user')} />
+              <input className="glass-input" type="password" placeholder="password" aria-label="Password" value={f.password ?? ''} onChange={set('password')} />
+              <input className="glass-input" placeholder="auth source (admin)" aria-label="Auth source" value={f.authSource ?? ''} onChange={set('authSource')} />
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.srv === 'true'} onChange={e => setF(s => ({ ...s, srv: String(e.target.checked) }))} /> SRV (Atlas / DNS seedlist — no port)</label>
               {f.srv !== 'true' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.tls === 'true'} onChange={e => setF(s => ({ ...s, tls: String(e.target.checked) }))} /> TLS</label>}
             </>
           ) : provider === 'clickhouse' ? (
             <>
-              <input className="glass-input" type="url" placeholder="https://clickhouse.example.com:8443" value={f.url ?? ''} onChange={set('url')} required />
-              <input className="glass-input" placeholder="database (default)" value={f.database ?? ''} onChange={set('database')} />
-              <input className="glass-input" placeholder="username (default)" value={f.username ?? ''} onChange={set('username')} />
-              <input className="glass-input" type="password" placeholder="password" value={f.password ?? ''} onChange={set('password')} />
+              <input className="glass-input" type="url" placeholder="https://clickhouse.example.com:8443" aria-label="ClickHouse URL" value={f.url ?? ''} onChange={set('url')} required />
+              <input className="glass-input" placeholder="database (default)" aria-label="Database" value={f.database ?? ''} onChange={set('database')} />
+              <input className="glass-input" placeholder="username (default)" aria-label="Username" value={f.username ?? ''} onChange={set('username')} />
+              <input className="glass-input" type="password" placeholder="password" aria-label="Password" value={f.password ?? ''} onChange={set('password')} />
             </>
           ) : provider === 's3' ? (
             <>
-              <input className="glass-input" placeholder="region (us-east-1)" value={f.region ?? ''} onChange={set('region')} />
-              <input className="glass-input" placeholder="endpoint (optional)" value={f.endpoint ?? ''} onChange={set('endpoint')} />
-              <input className="glass-input" placeholder="access key ID" value={f.accessKeyId ?? ''} onChange={set('accessKeyId')} required />
-              <input className="glass-input" type="password" placeholder="secret access key" value={f.secretAccessKey ?? ''} onChange={set('secretAccessKey')} required />
+              <input className="glass-input" placeholder="region (us-east-1)" aria-label="Region" value={f.region ?? ''} onChange={set('region')} />
+              <input className="glass-input" placeholder="endpoint (optional)" aria-label="Endpoint" value={f.endpoint ?? ''} onChange={set('endpoint')} />
+              <input className="glass-input" placeholder="access key ID" aria-label="Access key ID" value={f.accessKeyId ?? ''} onChange={set('accessKeyId')} required />
+              <input className="glass-input" type="password" placeholder="secret access key" aria-label="Secret access key" value={f.secretAccessKey ?? ''} onChange={set('secretAccessKey')} required />
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.forcePathStyle === 'true'} onChange={e => setF(s => ({ ...s, forcePathStyle: String(e.target.checked) }))} /> Path-style URLs (MinIO/S3-compatible)</label>
             </>
           ) : provider === 'kafka' ? (
             <>
-              <input className="glass-input" placeholder="brokers (kafka-1:9092,kafka-2:9092)" value={f.brokers ?? ''} onChange={set('brokers')} required />
-              <input className="glass-input" placeholder="client ID (dataflow)" value={f.clientId ?? ''} onChange={set('clientId')} />
-              <select className="glass-select" value={f.saslMechanism ?? 'none'} onChange={e => setF(s => ({ ...s, saslMechanism: e.target.value }))}>
+              <input className="glass-input" placeholder="brokers (kafka-1:9092,kafka-2:9092)" aria-label="Brokers" value={f.brokers ?? ''} onChange={set('brokers')} required />
+              <input className="glass-input" placeholder="client ID (dataflow)" aria-label="Client ID" value={f.clientId ?? ''} onChange={set('clientId')} />
+              <select className="glass-select" aria-label="SASL mechanism" value={f.saslMechanism ?? 'none'} onChange={e => setF(s => ({ ...s, saslMechanism: e.target.value }))}>
                 <option value="none">No SASL</option><option value="plain">SASL/PLAIN</option>
                 <option value="scram-sha-256">SCRAM-SHA-256</option><option value="scram-sha-512">SCRAM-SHA-512</option>
               </select>
               {f.saslMechanism && f.saslMechanism !== 'none' && <>
-                <input className="glass-input" placeholder="SASL username" value={f.username ?? ''} onChange={set('username')} required />
-                <input className="glass-input" type="password" placeholder="SASL password" value={f.password ?? ''} onChange={set('password')} required />
+                <input className="glass-input" placeholder="SASL username" aria-label="SASL username" value={f.username ?? ''} onChange={set('username')} required />
+                <input className="glass-input" type="password" placeholder="SASL password" aria-label="SASL password" value={f.password ?? ''} onChange={set('password')} required />
               </>}
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.tls === 'true'} onChange={e => setF(s => ({ ...s, tls: String(e.target.checked) }))} /> TLS</label>
             </>
           ) : provider === 'sftp' ? (
             <>
-              <input className="glass-input" placeholder="host" value={f.host ?? ''} onChange={set('host')} required />
-              <input className="glass-input" placeholder="port (22)" value={f.port ?? ''} onChange={set('port')} />
-              <input className="glass-input" placeholder="username" value={f.user ?? ''} onChange={set('user')} required />
-              <input className="glass-input" type="password" placeholder="password" value={f.password ?? ''} onChange={set('password')} />
-              <textarea className="glass-input" placeholder="private key (optional)" value={f.privateKey ?? ''} onChange={e => setF(s => ({ ...s, privateKey: e.target.value }))} />
+              <input className="glass-input" placeholder="host" aria-label="Host" value={f.host ?? ''} onChange={set('host')} required />
+              <input className="glass-input" placeholder="port (22)" aria-label="Port" value={f.port ?? ''} onChange={set('port')} />
+              <input className="glass-input" placeholder="username" aria-label="Username" value={f.user ?? ''} onChange={set('user')} required />
+              <input className="glass-input" type="password" placeholder="password" aria-label="Password" value={f.password ?? ''} onChange={set('password')} />
+              <textarea className="glass-input" placeholder="private key (optional)" aria-label="Private key" value={f.privateKey ?? ''} onChange={e => setF(s => ({ ...s, privateKey: e.target.value }))} />
             </>
           ) : provider === 'snowflake' ? (
             <>
-              <input className="glass-input" placeholder="account identifier" value={f.account ?? ''} onChange={set('account')} required />
-              <input className="glass-input" placeholder="username" value={f.user ?? ''} onChange={set('user')} required />
-              <input className="glass-input" type="password" placeholder="password" value={f.password ?? ''} onChange={set('password')} required />
-              <input className="glass-input" placeholder="warehouse" value={f.warehouse ?? ''} onChange={set('warehouse')} required />
-              <input className="glass-input" placeholder="database" value={f.database ?? ''} onChange={set('database')} required />
-              <input className="glass-input" placeholder="schema (optional)" value={f.schema ?? ''} onChange={set('schema')} />
+              <input className="glass-input" placeholder="account identifier" aria-label="Account identifier" value={f.account ?? ''} onChange={set('account')} required />
+              <input className="glass-input" placeholder="username" aria-label="Username" value={f.user ?? ''} onChange={set('user')} required />
+              <input className="glass-input" type="password" placeholder="password" aria-label="Password" value={f.password ?? ''} onChange={set('password')} required />
+              <input className="glass-input" placeholder="warehouse" aria-label="Warehouse" value={f.warehouse ?? ''} onChange={set('warehouse')} required />
+              <input className="glass-input" placeholder="database" aria-label="Database" value={f.database ?? ''} onChange={set('database')} required />
+              <input className="glass-input" placeholder="schema (optional)" aria-label="Schema" value={f.schema ?? ''} onChange={set('schema')} />
             </>
           ) : provider === 'iceberg' ? (
             <>
-              <input className="glass-input" type="url" placeholder="REST catalog URL" value={f.url ?? ''} onChange={set('url')} required />
-              <input className="glass-input" placeholder="warehouse (optional)" value={f.warehouse ?? ''} onChange={set('warehouse')} />
-              <input className="glass-input" type="password" placeholder="catalog bearer token (optional)" value={f.token ?? ''} onChange={set('token')} />
-              <input className="glass-input" placeholder="S3 access key (optional)" value={f.accessKeyId ?? ''} onChange={set('accessKeyId')} />
-              <input className="glass-input" type="password" placeholder="S3 secret key (optional)" value={f.secretAccessKey ?? ''} onChange={set('secretAccessKey')} />
-              <input className="glass-input" placeholder="S3 region (us-east-1)" value={f.region ?? ''} onChange={set('region')} />
+              <input className="glass-input" type="url" placeholder="REST catalog URL" aria-label="REST catalog URL" value={f.url ?? ''} onChange={set('url')} required />
+              <input className="glass-input" placeholder="warehouse (optional)" aria-label="Warehouse" value={f.warehouse ?? ''} onChange={set('warehouse')} />
+              <input className="glass-input" type="password" placeholder="catalog bearer token (optional)" aria-label="Catalog bearer token" value={f.token ?? ''} onChange={set('token')} />
+              <input className="glass-input" placeholder="S3 access key (optional)" aria-label="S3 access key" value={f.accessKeyId ?? ''} onChange={set('accessKeyId')} />
+              <input className="glass-input" type="password" placeholder="S3 secret key (optional)" aria-label="S3 secret key" value={f.secretAccessKey ?? ''} onChange={set('secretAccessKey')} />
+              <input className="glass-input" placeholder="S3 region (us-east-1)" aria-label="S3 region" value={f.region ?? ''} onChange={set('region')} />
             </>
           ) : (
             <>
-              <input className="glass-input" placeholder="base URL" value={f.baseUrl ?? ''} onChange={set('baseUrl')} />
-              <input className="glass-input" type="password" placeholder="Bearer API key (optional)" value={f.apiKey ?? ''} onChange={set('apiKey')} />
-              <input className="glass-input" type="password" placeholder="Webhook HMAC secret (optional)" value={f.hmacSecret ?? ''} onChange={set('hmacSecret')} />
+              <input className="glass-input" placeholder="base URL" aria-label="Base URL" value={f.baseUrl ?? ''} onChange={set('baseUrl')} />
+              <input className="glass-input" type="password" placeholder="Bearer API key (optional)" aria-label="Bearer API key" value={f.apiKey ?? ''} onChange={set('apiKey')} />
+              <input className="glass-input" type="password" placeholder="Webhook HMAC secret (optional)" aria-label="Webhook HMAC secret" value={f.hmacSecret ?? ''} onChange={set('hmacSecret')} />
             </>
           )}
           {err && <p className="text-xs text-danger/90 bg-danger/10 border border-danger/30 rounded-lg px-3 py-2">{err}</p>}
@@ -502,7 +514,7 @@ export function ConnectorsPage() {
       <div>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="page-heading">Connect accounts</h1>
+            <h2 className="page-heading">Connect accounts</h2>
             <p className="page-subtitle mt-1">Choose a connector. Credentials and OAuth tokens are encrypted per tenant.</p>
           </div>
         </div>
@@ -517,7 +529,7 @@ export function ConnectorsPage() {
         </div>
       ) : (
         <section>
-          <h2 className="section-heading mb-2.5">Accounts</h2>
+          <h3 className="section-heading mb-2.5">Accounts</h3>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {PROVIDERS.map(({ key, label, onConnect }) => (
             <ConnectorCard
@@ -538,7 +550,7 @@ export function ConnectorsPage() {
       )}
 
       <section>
-        <h2 className="section-heading mb-2.5">Databases &amp; services</h2>
+        <h3 className="section-heading mb-2.5">Databases &amp; services</h3>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {CREDENTIAL_CATALOG.map(({ key, label, subtitle, icon: Icon, color, feature }) => {
             const count = credentials.filter(c => c.provider === key).length;
@@ -571,7 +583,7 @@ export function ConnectorsPage() {
         <section className="glass-card p-4">
           <div className="mb-2 flex items-center gap-2">
             <Plug size={15} className="text-brand-300" />
-            <h2 className="text-sm font-semibold">Configured connections</h2>
+            <h3 className="text-sm font-semibold">Configured connections</h3>
             <span className="glass-badge ml-auto px-2 py-0.5 text-[10px]">{credentials.length}</span>
           </div>
           <ul className="divide-y divide-gray-100 dark:divide-white/5">

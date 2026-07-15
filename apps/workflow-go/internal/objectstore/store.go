@@ -67,7 +67,10 @@ func (s *Store) Put(ctx context.Context, key, body string) error {
 	return err
 }
 
-func (s *Store) Get(ctx context.Context, bucket, key string) (string, error) {
+// Get fetches an object. If maxBytes > 0, the download is capped there (belt-and-suspenders
+// alongside the caller's own size check on stored metadata) and an oversized object errors
+// out instead of being fully buffered.
+func (s *Store) Get(ctx context.Context, bucket, key string, maxBytes int64) (string, error) {
 	if bucket == "" {
 		bucket = s.config.Bucket
 	}
@@ -76,8 +79,18 @@ func (s *Store) Get(ctx context.Context, bucket, key string) (string, error) {
 		return "", err
 	}
 	defer result.Body.Close()
-	body, err := io.ReadAll(result.Body)
-	return string(body), err
+	reader := io.Reader(result.Body)
+	if maxBytes > 0 {
+		reader = io.LimitReader(result.Body, maxBytes+1)
+	}
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return "", err
+	}
+	if maxBytes > 0 && int64(len(body)) > maxBytes {
+		return "", fmt.Errorf("object %s is larger than max payload size of %d bytes", key, maxBytes)
+	}
+	return string(body), nil
 }
 
 func (s *Store) Delete(ctx context.Context, key string) error {

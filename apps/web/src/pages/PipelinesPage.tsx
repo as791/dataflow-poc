@@ -19,7 +19,10 @@ interface Pipeline {
   status: string;
   environment: string;
   created_at: string;
-  definition: any;
+  // ponytail: list rows are a summary projection (Gate 1 keyset pagination) —
+  // no `definition` column. trigger_type is derived server-side; the drawer
+  // fetches the full definition on demand via api.getPipeline().
+  trigger_type: string | null;
   last_run_phase: string | null;
   last_run_at: string | null;
   last_run_id: string | null;
@@ -67,6 +70,15 @@ function triggerLabel(def: any): string {
   return t.type;
 }
 
+// Cheap label from the list summary's trigger_type (no cron expression —
+// that only exists in the full definition, fetched on demand in the drawer).
+function triggerTypeLabel(type: string | null): string {
+  if (!type || type === 'manual') return 'Manual';
+  if (type === 'cron') return 'Cron';
+  if (type === 'webhook') return 'Webhook';
+  return type;
+}
+
 function pipelineNodes(def: any) {
   if (!def?.nodes) return [];
   return (def.nodes as any[]).filter(n => n.activityType && n.nodeType !== 'fork' && n.nodeType !== 'merge').slice(0, 4);
@@ -83,19 +95,10 @@ const STAGE_CFG: Record<Stage, { bar: string; badge: string; label: string }> = 
 
 // ── sub-components ────────────────────────────────────────────────────────────
 
-function PipelineIcon({ definition }: { definition: any }) {
-  const { byType } = useCatalog();
-  const node = pipelineNodes(definition)[0];
-  if (!node) return null;
-  const entry = byType[node.activityType];
-  return (
-    <span className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] border
-      border-gray-200 bg-gray-50 dark:border-white/[0.1] dark:bg-white/[0.05]"
-      style={{ color: entry?.color ?? '#7c6cf2' }} title={entry?.label ?? node.activityType}>
-      <ActivityIcon activityType={node.activityType} nodeType={node.nodeType} size={13} />
-    </span>
-  );
-}
+// ponytail: per-row PipelineIcon (first node's activity icon) removed — the
+// list summary projection no longer carries `definition`, and fetching it
+// per row would defeat the point of the Gate 1 summary query. The drawer's
+// topology section (below) still shows it once the row is selected.
 
 function RunDot({ phase }: { phase: string | null }) {
   if (phase === 'completed') return <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400" />;
@@ -118,13 +121,23 @@ function PipelineDrawer({ pipeline, onClose }: { pipeline: Pipeline; onClose: ()
   const { byType } = useCatalog();
   const [runs, setRuns] = useState<Execution[]>([]);
   const [tab, setTab] = useState<'runs'>('runs');
+  // List rows don't carry the full definition (Gate 1 summary projection) —
+  // fetch it lazily here for topology + the detailed trigger label.
+  const [definition, setDefinition] = useState<any | null>(null);
   const stage = stageOf(pipeline);
   const cfg = STAGE_CFG[stage];
-  const nodes = pipelineNodes(pipeline.definition);
+  const nodes = pipelineNodes(definition);
 
   useEffect(() => {
     api.listExecutions({ pipeline: pipeline.id, limit: '30' })
       .then((d: Execution[]) => setRuns(d))
+      .catch(() => {});
+  }, [pipeline.id]);
+
+  useEffect(() => {
+    setDefinition(null);
+    api.getPipeline(pipeline.id)
+      .then((row: any) => setDefinition(row?.definition ?? null))
       .catch(() => {});
   }, [pipeline.id]);
 
@@ -133,9 +146,10 @@ function PipelineDrawer({ pipeline, onClose }: { pipeline: Pipeline; onClose: ()
     : null;
 
   return (
-    <div className="flex w-[380px] flex-none flex-col border-l border-gray-200 bg-white
+    <div className="fixed inset-y-0 right-0 z-40 flex w-[85vw] max-w-[380px] flex-none flex-col border-l border-gray-200 bg-white
       dark:border-white/[0.08] dark:bg-white/[0.04] dark:backdrop-blur-xl overflow-hidden
-      shadow-[-18px_0_50px_rgba(0,0,0,.08)] dark:shadow-[-18px_0_50px_rgba(0,0,0,.28)]">
+      shadow-[-18px_0_50px_rgba(0,0,0,.08)] dark:shadow-[-18px_0_50px_rgba(0,0,0,.28)]
+      sm:static sm:z-auto sm:w-[380px] sm:max-w-none">
 
       {/* header */}
       <div className="px-5 pt-4 pb-3.5 border-b border-gray-100 dark:border-white/[0.07] shrink-0">
@@ -143,16 +157,17 @@ function PipelineDrawer({ pipeline, onClose }: { pipeline: Pipeline; onClose: ()
           <span className="text-[13px] font-semibold tracking-tight text-gray-900 dark:text-white/90 min-w-0 truncate">{pipelineName(pipeline)}</span>
           <span className={`text-[9px] font-semibold px-1.5 py-px rounded-full border shrink-0 ${cfg.badge}`}>{cfg.label}</span>
           <button onClick={onClose} aria-label="Close pipeline details"
-            className="ml-auto flex h-[22px] w-[22px] items-center justify-center rounded-[6px] shrink-0
+            className="relative ml-auto flex h-[22px] w-[22px] items-center justify-center rounded-[6px] shrink-0
               bg-gray-100 border border-gray-200 text-gray-400 hover:bg-gray-200 hover:text-gray-700
               dark:bg-white/[0.04] dark:border-white/[0.07] dark:text-white/40
-              dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
+              dark:hover:bg-white/[0.08] dark:hover:text-white transition-all
+              before:absolute before:-inset-[11px] before:content-['']">
             <X size={13} />
           </button>
         </div>
         <div className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-white/35">
           <Clock size={11} />
-          <span>v{pipeline.version} · {triggerLabel(pipeline.definition)}</span>
+          <span>v{pipeline.version} · {definition ? triggerLabel(definition) : triggerTypeLabel(pipeline.trigger_type)}</span>
         </div>
         <div className="flex gap-1.5 mt-3">
           {[
@@ -281,48 +296,60 @@ const TRIGGER_FILTERS: { key: TriggerFilter; label: string }[] = [
   { key: 'webhook', label: 'Webhook' },
 ];
 
-function triggerType(p: Pipeline): Exclude<TriggerFilter, 'all'> | 'other' {
-  const type = p.definition?.trigger?.type ?? 'manual';
-  return type === 'cron' || type === 'manual' || type === 'webhook' ? type : 'other';
-}
-
-function matches(p: Pipeline, f: FilterType): boolean {
-  if (f === 'all')         return true;
-  if (f === 'production')  return stageOf(p) === 'production';
-  if (f === 'integration') return stageOf(p) === 'testing';
-  if (f === 'draft')       return stageOf(p) === 'draft';
-  return true;
-}
+// FilterType -> the API's `stage` query param (server-side filter, no client scan).
+const STAGE_PARAM: Partial<Record<FilterType, string>> = {
+  production: 'production', integration: 'testing', draft: 'draft',
+};
 
 export default function PipelinesPage() {
   const navigate = useNavigate();
-  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
+  const [rows, setRows] = useState<Pipeline[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterType>('all');
   const [triggerFilter, setTriggerFilter] = useState<TriggerFilter>('all');
   const [failedOnly, setFailedOnly] = useState(false);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selected, setSelected] = useState<Pipeline | null>(null);
 
+  // Debounce the search box before it hits the server-side ILIKE filter.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const queryParams = {
+    limit: '50',
+    search: debouncedSearch || undefined,
+    stage: STAGE_PARAM[filter],
+    trigger: triggerFilter === 'all' ? undefined : triggerFilter,
+  };
+
   const load = () => {
-    setLoading(true); setError(null);
-    api.listPipelines()
-      .then((d: Pipeline[]) => { setPipelines(d); setLoading(false); })
+    setLoading(true); setError(null); setNextCursor(null);
+    api.listPipelines(queryParams)
+      .then(page => { setRows(page.rows); setNextCursor(page.nextCursor); setLoading(false); })
       .catch((e: Error) => { setError(e.message); setLoading(false); });
   };
 
-  useEffect(() => { load(); }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [filter, triggerFilter, debouncedSearch]);
 
-  const counts = Object.fromEntries(
-    FILTERS.map(({ key }) => [key, pipelines.filter(p => matches(p, key)).length])
-  ) as Record<FilterType, number>;
+  const loadMore = () => {
+    if (!nextCursor) return;
+    setLoadingMore(true);
+    api.listPipelines({ ...queryParams, cursor: nextCursor })
+      .then(page => { setRows(r => [...r, ...page.rows]); setNextCursor(page.nextCursor); })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoadingMore(false));
+  };
 
-  const visible = pipelines
-    .filter(p => matches(p, filter))
-    .filter(p => triggerFilter === 'all' || triggerType(p) === triggerFilter)
-    .filter(p => !failedOnly || p.last_run_phase === 'failed')
-    .filter(p => !search || pipelineName(p).toLowerCase().includes(search.toLowerCase()));
+  // failedOnly narrows only the currently-loaded page — cheap client filter,
+  // not a full-table scan (rows are already keyset-paginated from the server).
+  const visible = failedOnly ? rows.filter(p => p.last_run_phase === 'failed') : rows;
 
   return (
     <div className="flex h-full">
@@ -340,7 +367,6 @@ export default function PipelinesPage() {
                 }`}>
                 {dot && <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />}
                 {label}
-                <span className="text-gray-400 dark:text-white/30 ml-0.5">{counts[key]}</span>
               </button>
             ))}
             <div className="ml-auto flex items-center gap-2">
@@ -370,7 +396,6 @@ export default function PipelinesPage() {
               <span className={`absolute top-0.5 h-[13px] w-[13px] rounded-full bg-white shadow-sm transition-[left] ${failedOnly ? 'left-[15px]' : 'left-0.5'}`} />
             </span>
             Only show last-run failures
-            <span className="text-gray-400 dark:text-white/30">({pipelines.filter(p => p.last_run_phase === 'failed').length})</span>
           </button>
         </div>
 
@@ -380,7 +405,7 @@ export default function PipelinesPage() {
           {!loading && error && <div className="p-6"><ApiError message={error} onRetry={load} /></div>}
           {!loading && !error && visible.length === 0 && (
             <div className="flex h-32 flex-col items-center justify-center gap-2 text-[12px] text-gray-400 dark:text-white/35">
-              {pipelines.length === 0 ? (
+              {rows.length === 0 && filter === 'all' && triggerFilter === 'all' && !debouncedSearch ? (
                 <>
                   <span>No pipelines yet. Create one to run your first data flow.</span>
                   <button className="glass-btn-primary px-3 py-1 text-xs" onClick={() => navigate('/')}>Create pipeline</button>
@@ -404,10 +429,9 @@ export default function PipelinesPage() {
                 }`}>
                 <div className={`w-[3px] shrink-0 ${cfg.bar}`} />
                 <div className="flex flex-1 flex-wrap items-center gap-3.5 px-5 py-3 min-w-0">
-                  <PipelineIcon definition={p.definition} />
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-medium text-gray-900 dark:text-white/90 truncate">{pipelineName(p)}</div>
-                    <div className="text-[11px] text-gray-400 dark:text-white/32 mt-0.5">{triggerLabel(p.definition)}</div>
+                    <div className="text-[11px] text-gray-400 dark:text-white/32 mt-0.5">{triggerTypeLabel(p.trigger_type)}</div>
                   </div>
                   <div className="flex flex-none items-center gap-2.5 ml-auto">
                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${cfg.badge}`}>{cfg.label}</span>
@@ -424,11 +448,18 @@ export default function PipelinesPage() {
         </div>
 
         {/* footer */}
-        <div className="flex items-center px-6 py-2 border-t border-gray-100 dark:border-white/[0.06] shrink-0">
-          <span className="text-[11px] text-gray-400 dark:text-white/28">{visible.length} pipeline{visible.length !== 1 ? 's' : ''}</span>
+        <div className="flex items-center gap-3 px-6 py-2 border-t border-gray-100 dark:border-white/[0.06] shrink-0">
+          <span className="text-[11px] text-gray-400 dark:text-white/28">{visible.length} pipeline{visible.length !== 1 ? 's' : ''} loaded</span>
+          {nextCursor && (
+            <button onClick={loadMore} disabled={loadingMore}
+              className="glass-btn-ghost px-2.5 py-1 text-[11px] disabled:opacity-50">
+              {loadingMore ? 'Loading…' : 'Load more'}
+            </button>
+          )}
         </div>
       </div>
 
+      {selected && <div className="fixed inset-0 z-30 bg-black/40 sm:hidden" onClick={() => setSelected(null)} />}
       {selected && <PipelineDrawer key={selected.id} pipeline={selected} onClose={() => setSelected(null)} />}
     </div>
   );

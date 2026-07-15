@@ -10,8 +10,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
+
+	"github.com/dataflow-poc/workflow-go/internal/security"
 )
 
 // AlertDestination exposes only the fields required by the notification
@@ -33,12 +34,8 @@ func (r *Runtime) AlertDestination(ctx context.Context, tenantID, id string) (st
 	if endpoint == "" {
 		return "", "", fmt.Errorf("notification connector must have baseUrl")
 	}
-	request, err := http.NewRequest(http.MethodPost, endpoint, nil)
-	if err != nil {
-		return "", "", err
-	}
-	if request.URL.Scheme != "http" && request.URL.Scheme != "https" {
-		return "", "", fmt.Errorf("notification URL must use http or https")
+	if _, err := security.ValidateURL(endpoint); err != nil {
+		return "", "", fmt.Errorf("notification %w", err)
 	}
 	return endpoint, stringValue(secret["apiKey"]), nil
 }

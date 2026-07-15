@@ -209,7 +209,7 @@ export default function LineagePage() {
       <div className="border-b border-gray-100 px-6 py-4 dark:border-white/[0.07]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="page-heading">Workspace lineage</h1>
+            <h2 className="page-heading">Workspace lineage</h2>
             <p className="page-subtitle mt-1">Pipelines merge automatically through shared source and destination assets.</p>
           </div>
           <div className="flex gap-2">

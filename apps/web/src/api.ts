@@ -40,7 +40,11 @@ export const api = {
     request(`/api/pipelines/${rowId}/stage`, { method: 'POST', body: JSON.stringify({ to, allowBreakingContract }) }).then(j),
   run:          (rowId: string) =>
     request(`/api/pipelines/${rowId}/run`, { method: 'POST', body: JSON.stringify({}) }).then(j),
-  listPipelines: () => request('/api/pipelines').then(j),
+  listPipelines: (params?: { limit?: string; cursor?: string; search?: string; stage?: string; trigger?: string }) => {
+    const clean = Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][];
+    const qs = clean.length ? '?' + new URLSearchParams(Object.fromEntries(clean)) : '';
+    return request(`/api/pipelines${qs}`).then(j) as Promise<{ rows: any[]; nextCursor: string | null }>;
+  },
   getPipeline: (rowId: string) => request(`/api/pipelines/${rowId}`).then(j),
   planBackfill: (rowId: string, body: { from: string; to: string; partitionDays: number; maxConcurrency: number }) =>
     request(`/api/pipelines/${rowId}/backfills/plan`, { method: 'POST', body: JSON.stringify(body) }).then(j),

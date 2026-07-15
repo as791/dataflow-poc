@@ -138,7 +138,8 @@ if [ -n "$PUBLIC_IP" ]; then
   docker rm -f caddy >/dev/null 2>&1 || true
   docker run -d --restart unless-stopped --name caddy --network host \
     -v caddy_data:/data -v caddy_config:/config \
-    caddy:alpine caddy reverse-proxy --from "${PUBLIC_IP}.nip.io" --to localhost:3002 >/dev/null
+    caddy:alpine caddy reverse-proxy --from "${PUBLIC_IP}.nip.io" --to localhost:3002 \
+    --header-down "Strict-Transport-Security: max-age=31536000; includeSubDomains" >/dev/null
 fi
 
 kubectl -n dataflow rollout status deployment/api --timeout=5m

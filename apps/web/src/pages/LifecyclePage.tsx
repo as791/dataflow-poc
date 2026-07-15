@@ -157,7 +157,7 @@ export default function LifecyclePage() {
 
   const refresh = useCallback(async () => {
     setLoading(true); setError(null);
-    try { setRows(await api.listPipelines()); }
+    try { setRows((await api.listPipelines({ limit: '500' })).rows); }
     catch (e: any) { setError(e.message ?? 'Failed to load pipelines'); }
     finally { setLoading(false); }
   }, []);
@@ -180,7 +180,7 @@ export default function LifecyclePage() {
     <div className="mx-auto max-w-5xl space-y-6 px-6 py-10">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="page-heading flex items-center gap-2"><Milestone size={20} /> Lifecycle</h1>
+          <h2 className="page-heading flex items-center gap-2"><Milestone size={20} aria-hidden="true" /> Lifecycle</h2>
           <p className="page-subtitle mt-1">
             Promote pipelines draft → Integration → production. Production requires a green run and compatible published contracts.
           </p>

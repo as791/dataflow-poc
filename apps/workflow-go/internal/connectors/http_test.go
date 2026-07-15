@@ -12,7 +12,10 @@ import (
 )
 
 func TestHTTPFetch(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// http.fetch requests go through Runtime.SafeHTTP, which enforces https,
+	// so the fake upstream must speak TLS even though this test isn't
+	// exercising the SSRF denylist itself (see internal/security for that).
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("User-Agent"); got != "DataFlow/1.0" {
 			t.Fatalf("expected DataFlow User-Agent, got %q", got)
 		}
@@ -25,7 +28,7 @@ func TestHTTPFetch(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	rt := &Runtime{HTTP: ts.Client(), Sources: map[string]Source{}, Handlers: map[string]Handler{}}
+	rt := &Runtime{SafeHTTP: ts.Client(), Sources: map[string]Source{}, Handlers: map[string]Handler{}}
 	rt.registerHTTP()
 
 	sourceFn := rt.Sources["http.fetch"]
@@ -80,13 +83,15 @@ func TestRecordsSinkUsesDistinctDedupKeys(t *testing.T) {
 func TestWebhookSink(t *testing.T) {
 	var receivedBody map[string]interface{}
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// sink.webhook requests go through Runtime.SafeHTTP, which enforces
+	// https, so the fake destination must speak TLS.
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&receivedBody)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer ts.Close()
 
-	rt := &Runtime{HTTP: ts.Client(), Sources: map[string]Source{}, Handlers: map[string]Handler{}}
+	rt := &Runtime{SafeHTTP: ts.Client(), Sources: map[string]Source{}, Handlers: map[string]Handler{}}
 	rt.registerHTTP()
 
 	sinkFn := rt.Handlers["sink.webhook"]
