@@ -43,7 +43,9 @@ export function WorkspaceSidePanel({
   if (!workspacePanel) return null;
 
   return (
-    <aside data-canvas-sidebar className="absolute left-[68px] top-3 bottom-3 z-20 flex w-[320px] flex-col overflow-hidden rounded-r-2xl border border-gray-200 bg-white/97 shadow-xl backdrop-blur-lg dark:border-white/[0.08] dark:bg-[#0d0f17]/97">
+    <aside data-canvas-sidebar className="absolute top-3 bottom-3 z-20 flex flex-col overflow-hidden border border-gray-200 bg-white/97 shadow-xl backdrop-blur-lg dark:border-white/[0.08] dark:bg-[#0d0f17]/97
+    inset-x-3 rounded-2xl
+    sm:inset-x-auto sm:left-[68px] sm:right-auto sm:w-[320px] sm:rounded-r-2xl sm:rounded-l-none">
       <div className="flex h-14 items-center justify-between border-b border-gray-100 px-4 dark:border-white/[0.07]">
         <div>
           <p className="text-xs font-semibold text-gray-900 dark:text-white/90">

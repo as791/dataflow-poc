@@ -2,6 +2,7 @@ import {
   Activity, ChevronDown, ChevronUp, Code2, History, Maximize2, Minimize2, Play, Terminal,
 } from 'lucide-react';
 import { MermaidPreview } from '../../components/MermaidPreview';
+import { MOBILE_RAIL_CLEARANCE } from './NodePalette';
 import type { Stage } from '../../utils/pipelineStage';
 
 export type BottomTab = 'runs' | 'logs' | 'lifecycle' | 'mermaid';
@@ -44,17 +45,18 @@ export function OutputDrawer({
   if (!drawerOpen) {
     return (
       <button title="Open output panel" onClick={() => openDrawer(bottomTab)}
-        className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-gray-200 bg-white/95 px-3 py-1.5 text-[11px] text-gray-500 shadow-sm backdrop-blur dark:border-white/[0.08] dark:bg-[#11141d]/90 dark:text-white/45">
+        className={`absolute left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-gray-200 bg-white/95 px-3 py-1.5 text-[11px] text-gray-500 shadow-sm backdrop-blur dark:border-white/[0.08] dark:bg-[#11141d]/90 dark:text-white/45 ${MOBILE_RAIL_CLEARANCE}`}>
         <ChevronUp size={13} /> Output
       </button>
     );
   }
 
   return (
-    <div className="absolute bottom-3 left-[68px] right-3 z-20 flex flex-col overflow-hidden rounded-2xl
+    <div className="absolute z-20 flex flex-col overflow-hidden rounded-2xl
       border border-gray-200 dark:border-white/[0.08]
       bg-white/97 dark:bg-[#0d1018]/96 backdrop-blur-xl
-      shadow-[0_-4px_24px_rgba(0,0,0,.08)] dark:shadow-[0_-8px_32px_rgba(0,0,0,.4)]"
+      shadow-[0_-4px_24px_rgba(0,0,0,.08)] dark:shadow-[0_-8px_32px_rgba(0,0,0,.4)]
+      inset-x-3 bottom-24 sm:inset-x-auto sm:left-[68px] sm:right-3 sm:bottom-3"
       style={{ height: drawerExpanded ? '52vh' : drawerHeight }}>
       <button aria-label="Resize output panel" onPointerDown={startResize}
         className="absolute -top-1 left-0 right-0 h-2 cursor-row-resize bg-transparent" />

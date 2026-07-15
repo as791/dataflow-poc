@@ -37,11 +37,11 @@ var snowflakePath = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za
 // cap prevents one noisy tenant from exhausting the source database's
 // max_connections. Override with DB_POOL_MAX_CONNS for deployments with
 // known extra headroom.
-var connPoolCap = envInt("DB_POOL_MAX_CONNS", 5)
+var connPoolCap = envInt32("DB_POOL_MAX_CONNS", 5)
 
-func envInt(name string, fallback int) int {
-	if value, err := strconv.Atoi(os.Getenv(name)); err == nil && value > 0 {
-		return value
+func envInt32(name string, fallback int32) int32 {
+	if value, err := strconv.ParseInt(os.Getenv(name), 10, 32); err == nil && value > 0 {
+		return int32(value)
 	}
 	return fallback
 }
@@ -174,7 +174,7 @@ func (r *Runtime) postgresConnection(ctx context.Context, id string) (*pgxpool.P
 	if err != nil {
 		return nil, err
 	}
-	poolConfig.MaxConns = int32(connPoolCap)
+	poolConfig.MaxConns = connPoolCap
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return nil, err
@@ -376,8 +376,8 @@ func (r *Runtime) mysqlDB(ctx context.Context, id string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(connPoolCap)
-	db.SetMaxIdleConns(connPoolCap)
+	db.SetMaxOpenConns(int(connPoolCap))
+	db.SetMaxIdleConns(int(connPoolCap))
 	db.SetConnMaxLifetime(30 * time.Minute)
 	if err = db.PingContext(ctx); err != nil {
 		_ = db.Close()
@@ -648,8 +648,8 @@ func (r *Runtime) snowflakeDB(ctx context.Context, id string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(connPoolCap)
-	db.SetMaxIdleConns(connPoolCap)
+	db.SetMaxOpenConns(int(connPoolCap))
+	db.SetMaxIdleConns(int(connPoolCap))
 	db.SetConnMaxLifetime(30 * time.Minute)
 	if err = db.PingContext(ctx); err != nil {
 		_ = db.Close()

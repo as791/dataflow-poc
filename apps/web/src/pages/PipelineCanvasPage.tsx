@@ -17,7 +17,7 @@ import { useApiQuery } from '../hooks/useApiQuery';
 import { definitionToFlow, flowToDefinition } from '../utils/pipelineConvert';
 import { validatePipeline } from '../utils/validatePipeline';
 import { deriveStage, displayEnvironment, type Stage } from '../utils/pipelineStage';
-import { NodePalette, type CatId } from './canvas/NodePalette';
+import { NodePalette, MOBILE_RAIL_CLEARANCE, type CatId } from './canvas/NodePalette';
 import { ContextAddMenu, type ContextAddState } from './canvas/ContextAddMenu';
 import { PipelineFlowCanvas } from './canvas/PipelineFlowCanvas';
 import { PipelineHeaderBar } from './canvas/PipelineHeaderBar';
@@ -526,7 +526,8 @@ export default function PipelineCanvasPage() {
 
       {/* Execution monitor */}
       {executionId && (
-        <div className="absolute left-1/2 z-20 -translate-x-1/2" style={{ bottom: drawerOpen ? executionOffset : 20 }}>
+        <div className={`absolute left-1/2 z-20 -translate-x-1/2 ${drawerOpen ? '' : MOBILE_RAIL_CLEARANCE}`}
+          style={drawerOpen ? { bottom: executionOffset } : undefined}>
           <ExecutionMonitor executionId={executionId} onNodeStatus={onNodeStatus} />
         </div>
       )}

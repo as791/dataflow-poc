@@ -34,8 +34,9 @@ export function PipelineHeaderBar({
   workspaceAssets: Array<{ urn: string; name: string; layer?: string }>;
 }) {
   return (
-    <div className="absolute top-4 z-10 flex items-center gap-2 pointer-events-none transition-[left] duration-200"
-      style={{ left: leftOffset }}>
+    <div className="absolute top-4 z-10 flex items-center gap-2 pointer-events-none transition-[left] duration-200
+        left-3 sm:left-[var(--header-left)]"
+      style={{ '--header-left': `${leftOffset}px` } as React.CSSProperties}>
       <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-gray-200 dark:border-white/[0.09]
         bg-white/95 dark:bg-[#0d1018]/90 px-3 py-2 shadow-sm dark:shadow-glass backdrop-blur-xl">
         <input

@@ -17,11 +17,26 @@ export const TOOLBAR_CATS = [
 ] as const;
 export type CatId = typeof TOOLBAR_CATS[number]['id'];
 
-// Left Miro-style icon rail plus the category flyout it opens (source /
-// transform / sink / flow node lists). Category-select state lives here since
-// nothing outside the rail + flyout reads catQuery, and only the "active
-// category" id itself needs to be visible to the page (for the outside-click
-// handler and the top pill's left offset).
+// Icon-button classes shared by every rail action. Mobile (<sm): the rail is
+// a horizontal bottom bar, so buttons stack icon-over-label (no hover to
+// reveal the tooltip on touch, so the label has to just be there). Desktop
+// (sm+): the rail is the vertical strip, icon-only with a hover tooltip.
+const BTN = 'group relative flex h-full min-w-[52px] flex-none flex-col items-center justify-center gap-0.5 rounded-[10px] px-1 transition-all sm:h-11 sm:w-11 sm:min-w-0 sm:flex-row sm:px-0';
+const BTN_IDLE = 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white';
+const LABEL = 'text-[9px] font-medium leading-none sm:hidden';
+const TOOLTIP = 'pointer-events-none absolute left-[46px] z-50 hidden whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition sm:block sm:group-hover:opacity-100';
+// Clears the mobile bottom bar (bottom-3 + h-16 + gap) for anything else
+// anchored to the bottom edge (Output drawer, execution monitor, ...).
+export const MOBILE_RAIL_CLEARANCE = 'bottom-24 sm:bottom-3';
+
+// Left Miro-style icon rail (vertical strip on desktop, horizontal bottom bar
+// on phone-width viewports — the rail's own buttons only had hover tooltips,
+// which don't exist on touch, so mobile needs visible labels instead) plus
+// the category flyout it opens (source / transform / sink / flow node
+// lists), which becomes a bottom sheet above the mobile bar. Category-select
+// state lives here since nothing outside the rail + flyout reads catQuery,
+// and only the "active category" id itself needs to be visible to the page
+// (for the outside-click handler and the top pill's left offset).
 export function NodePalette({
   catalog, activeCat, setActiveCat, addNode,
   showAI, setShowAI, openMermaid,
@@ -61,92 +76,91 @@ export function NodePalette({
 
   return (
     <>
-      <aside data-canvas-sidebar className="absolute left-3 top-3 bottom-3 z-20 flex w-[52px] flex-col items-center gap-1 rounded-2xl
+      <aside data-canvas-sidebar className="absolute z-20 flex items-center gap-1 overflow-x-auto rounded-2xl
         border border-gray-200 dark:border-white/[0.08]
-        bg-white/95 dark:bg-[#0d0f17]/95 backdrop-blur-lg py-3 shadow-sm dark:shadow-glass">
-        <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-[10px] bg-gradient-to-br from-brand-400 to-brand-600 shadow-md shadow-brand-500/20">
+        bg-white/95 dark:bg-[#0d0f17]/95 backdrop-blur-lg shadow-sm dark:shadow-glass
+        inset-x-3 bottom-3 h-16 flex-row px-2
+        sm:inset-x-auto sm:left-3 sm:top-3 sm:bottom-3 sm:right-auto sm:h-auto sm:w-[52px] sm:flex-col sm:overflow-visible sm:px-0 sm:py-3">
+        <div className="mr-1 flex h-9 w-9 flex-none items-center justify-center rounded-[10px] bg-gradient-to-br from-brand-400 to-brand-600 shadow-md shadow-brand-500/20 sm:mr-0 sm:mb-2">
           <AtomMark size={20} />
         </div>
         <button title="All pipelines" aria-label="All pipelines" onClick={() => navigate('/pipelines')}
-          className="group relative flex h-11 w-11 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
+          className={`${BTN} ${BTN_IDLE}`}>
           <LayoutList size={17} strokeWidth={1.75} />
-          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">All pipelines</span>
+          <span className={LABEL}>Pipelines</span>
+          <span className={TOOLTIP}>All pipelines</span>
         </button>
-        <div className="my-1 h-px w-8 bg-gray-200 dark:bg-white/[0.08]" />
+        <div className="mx-1 h-8 w-px flex-none bg-gray-200 dark:bg-white/[0.08] sm:mx-0 sm:my-1 sm:h-px sm:w-8" />
         {TOOLBAR_CATS.map(cat => {
           const Icon = cat.icon;
           const isActive = activeCat === cat.id;
           return (
             <button key={cat.id} title={cat.label} aria-label={cat.label}
               onClick={() => { setActiveCat(isActive ? null : cat.id as CatId); setWorkspacePanel(null); setCatQuery(''); }}
-              className={`group relative flex h-11 w-11 items-center justify-center rounded-[10px] transition-all ${
-                isActive
-                  ? 'text-white shadow-md'
-                  : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
-              }`}
+              className={`${BTN} ${isActive ? 'text-white shadow-md' : BTN_IDLE}`}
               style={isActive ? { background: cat.color } : undefined}>
               <Icon size={17} strokeWidth={1.75} />
-              <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">{cat.label}</span>
+              <span className={LABEL}>{cat.label}</span>
+              <span className={TOOLTIP}>{cat.label}</span>
             </button>
           );
         })}
-        <div className="my-1 h-px w-8 bg-gray-200 dark:bg-white/[0.08]" />
+        <div className="mx-1 h-8 w-px flex-none bg-gray-200 dark:bg-white/[0.08] sm:mx-0 sm:my-1 sm:h-px sm:w-8" />
         <button title="Quick AI add" aria-label="Quick AI add" onClick={() => { setShowAI(v => !v); setActiveCat(null); setWorkspacePanel(null); }}
-          className={`group relative flex h-11 w-11 items-center justify-center rounded-[10px] transition-all ${
-            showAI ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
-          }`}>
+          className={`${BTN} ${showAI ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : BTN_IDLE}`}>
           <Sparkles size={17} strokeWidth={1.75} />
-          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Quick AI add</span>
+          <span className={LABEL}>Quick AI</span>
+          <span className={TOOLTIP}>Quick AI add</span>
         </button>
         <button title="Edit as Mermaid" aria-label="Edit as Mermaid" onClick={() => { setActiveCat(null); setWorkspacePanel(null); openMermaid(); }}
-          className="group relative flex h-11 w-11 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
+          className={`${BTN} ${BTN_IDLE}`}>
           <Code2 size={17} strokeWidth={1.75} />
-          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Edit as Mermaid</span>
+          <span className={LABEL}>Mermaid</span>
+          <span className={TOOLTIP}>Edit as Mermaid</span>
         </button>
         <div className="flex-1" />
-        <div className="my-1 h-px w-8 bg-gray-200 dark:bg-white/[0.08]" />
+        <div className="mx-1 h-8 w-px flex-none bg-gray-200 dark:bg-white/[0.08] sm:mx-0 sm:my-1 sm:h-px sm:w-8" />
         <button title="Connectors" aria-label="Connectors" onClick={() => {
           setWorkspacePanel(workspacePanel === 'connectors' ? null : 'connectors'); setActiveCat(null);
-        }} className={`group relative flex h-11 w-11 items-center justify-center rounded-[10px] transition-all ${
-          workspacePanel === 'connectors' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
-        }`}>
+        }} className={`${BTN} ${workspacePanel === 'connectors' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : BTN_IDLE}`}>
           <Cable size={17} strokeWidth={1.75} />
-          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Connectors</span>
+          <span className={LABEL}>Connect</span>
+          <span className={TOOLTIP}>Connectors</span>
         </button>
         <button title="Pipeline runs" aria-label="Pipeline runs"
           onClick={() => { setActiveCat(null); setWorkspacePanel(null); drawerOpen && bottomTab === 'runs' ? setDrawerOpen(false) : openDrawer('runs'); }}
-          className={`group relative flex h-11 w-11 items-center justify-center rounded-[10px] transition-all ${
-            drawerOpen && bottomTab === 'runs' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
-          }`}>
+          className={`${BTN} ${drawerOpen && bottomTab === 'runs' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : BTN_IDLE}`}>
           <History size={17} strokeWidth={1.75} />
-          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Pipeline runs</span>
+          <span className={LABEL}>Runs</span>
+          <span className={TOOLTIP}>Pipeline runs</span>
         </button>
         <button title="Pipeline lifecycle" aria-label="Pipeline lifecycle" onClick={() => { setActiveCat(null); setWorkspacePanel(null); drawerOpen && bottomTab === 'lifecycle' ? setDrawerOpen(false) : openDrawer('lifecycle'); }}
-          className={`group relative flex h-11 w-11 items-center justify-center rounded-[10px] transition-all ${
-            drawerOpen && bottomTab === 'lifecycle' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
-          }`}>
+          className={`${BTN} ${drawerOpen && bottomTab === 'lifecycle' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : BTN_IDLE}`}>
           <Rocket size={17} strokeWidth={1.75} />
-          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Pipeline lifecycle</span>
+          <span className={LABEL}>Lifecycle</span>
+          <span className={TOOLTIP}>Pipeline lifecycle</span>
         </button>
         <button title="Profile and settings" aria-label="Profile and settings" onClick={() => {
           setWorkspacePanel(workspacePanel === 'settings' ? null : 'settings'); setActiveCat(null);
-        }} className={`group relative flex h-11 w-11 items-center justify-center rounded-[10px] transition-all ${
-          workspacePanel === 'settings' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white'
-        }`}>
+        }} className={`${BTN} ${workspacePanel === 'settings' ? 'bg-brand-500/15 text-brand-500 dark:text-brand-300' : BTN_IDLE}`}>
           <Settings size={17} strokeWidth={1.75} />
-          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">Settings</span>
+          <span className={LABEL}>Settings</span>
+          <span className={TOOLTIP}>Settings</span>
         </button>
         <button title={dark ? 'Switch to light mode' : 'Switch to dark mode'} aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'} onClick={toggleTheme}
-          className="group relative flex h-11 w-11 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.08] dark:hover:text-white transition-all">
+          className={`${BTN} ${BTN_IDLE}`}>
           {dark ? <Sun size={16} /> : <Moon size={16} />}
-          <span className="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-lg border border-gray-200 dark:border-white/10 bg-gray-900/95 px-2 py-1 text-[11px] text-white/90 opacity-0 shadow-xl backdrop-blur-xl transition group-hover:opacity-100">{dark ? 'Light mode' : 'Dark mode'}</span>
+          <span className={LABEL}>{dark ? 'Light' : 'Dark'}</span>
+          <span className={TOOLTIP}>{dark ? 'Light mode' : 'Dark mode'}</span>
         </button>
       </aside>
 
       {activeCat && (
-        <div data-canvas-sidebar className="absolute left-[68px] top-3 bottom-3 z-10 w-[300px] flex flex-col overflow-hidden rounded-r-2xl
+        <div data-canvas-sidebar className="absolute z-10 flex flex-col overflow-hidden
           border border-gray-200 dark:border-white/[0.08]
-          bg-white/97 dark:bg-[#0d0f17]/97 backdrop-blur-lg shadow-xl">
+          bg-white/97 dark:bg-[#0d0f17]/97 backdrop-blur-lg shadow-xl
+          inset-x-3 bottom-36 max-h-[50vh] rounded-2xl
+          sm:inset-x-auto sm:bottom-3 sm:left-[68px] sm:top-3 sm:right-auto sm:w-[300px] sm:max-h-none sm:rounded-r-2xl sm:rounded-l-none">
           <div className="border-b border-gray-100 dark:border-white/[0.07] p-3">
             <p className="text-xs font-semibold text-gray-900 dark:text-white/90 capitalize mb-2">
               {TOOLBAR_CATS.find(c => c.id === activeCat)?.label}
