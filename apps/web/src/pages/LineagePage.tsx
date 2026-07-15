@@ -20,7 +20,7 @@ const ASSET_HEIGHT = 128;
 const PIPELINE_WIDTH = 200;
 const PIPELINE_HEIGHT = 100;
 const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 0.35 };
-const FIT_VIEW_OPTIONS = { padding: 0.25, minZoom: 0.05, maxZoom: 0.4 };
+const FIT_VIEW_OPTIONS = { padding: 0.25, minZoom: 0.15, maxZoom: 0.4 };
 const normalizeLayer = (layer: unknown): LineageLayer =>
   typeof layer === 'string' && Object.prototype.hasOwnProperty.call(LAYER_X, layer)
     ? layer as LineageLayer
