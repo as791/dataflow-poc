@@ -117,6 +117,7 @@ HELM_RUNTIME_ARGS=()
 if [ -n "$PUBLIC_IP" ]; then
   HELM_RUNTIME_ARGS+=(--set runtime.production=true)
   HELM_RUNTIME_ARGS+=(--set-string "secrets.appUrl=https://${PUBLIC_IP}.nip.io")
+  HELM_RUNTIME_ARGS+=(--set-string "backup.gcsBucket=${BACKUP_GCS_BUCKET:-dataflow-db-backups}")
 fi
 
 helm upgrade --install dataflow deploy/helm/dataflow --namespace dataflow --create-namespace \

@@ -8,6 +8,7 @@ images:
   temporalUI: temporalio/ui:2.39.0
   temporalAdmin: temporalio/admin-tools:1.31.1
   ollama: ollama/ollama:latest
+  curl: curlimages/curl:8.9.1
 
 hostPath: /workspace
 ollamaModel: llama3.2:3b
@@ -19,6 +20,12 @@ web:
   nodePort: 30002
 temporalUI:
   nodePort: 30082
+
+backup:
+  # GCS bucket for off-box upload of the 6-hourly pg_dump (empty = dump kept
+  # on the node's data disk only). Uses the GCE metadata-server token; the VM
+  # service account needs roles/storage.objectCreator on the bucket.
+  gcsBucket: ""
 
 storage:
   postgres: 2Gi

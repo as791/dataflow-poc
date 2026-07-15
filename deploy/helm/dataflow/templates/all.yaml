@@ -396,9 +396,9 @@ spec:
 ---
 # Logical DB backup every 6h (scripts/db-backup.sh as a CronJob). Dumps land on
 # the persistent data disk (kind node /var -> docker volume on /var/lib/docker),
-# so the daily 03:00 disk snapshot carries a <=6h-old dump off-box.
-# ponytail: no GCS/S3 upload yet — runtime SA has no storage role (user-only
-# IAM op); grant bucket access + add an upload step for sub-24h off-box RPO.
+# so the daily 03:00 disk snapshot carries a <=6h-old dump off-box. When
+# backup.gcsBucket is set, each dump is also uploaded to GCS using the GCE
+# metadata-server token (VM SA needs roles/storage.objectCreator on the bucket).
 apiVersion: batch/v1
 kind: CronJob
 metadata: {name: db-backup}
@@ -414,8 +414,8 @@ spec:
       template:
         spec:
           restartPolicy: Never
-          containers:
-            - name: backup
+          initContainers:
+            - name: dump
               image: {{ .Values.images.postgres }}
               env:
                 - {name: DATABASE_URL, valueFrom: {secretKeyRef: {name: dataflow-secrets, key: databaseUrl}}}
@@ -429,6 +429,26 @@ spec:
                   gunzip -t "$OUT"
                   ls -1t /backups/dataflow-backup-*.sql.gz | tail -n +29 | xargs -r rm --
                   echo "backup OK: $(du -sh "$OUT" | cut -f1) $OUT"
+              volumeMounts: [{name: backups, mountPath: /backups}]
+          containers:
+            - name: upload
+              image: {{ .Values.images.curl }}
+              command:
+                - sh
+                - -ec
+{{- if .Values.backup.gcsBucket }}
+                - |
+                  OUT=$(ls -1t /backups/dataflow-backup-*.sql.gz | head -1)
+                  TOKEN=$(curl -sf -H "Metadata-Flavor: Google" \
+                    "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token" \
+                    | sed -E 's/.*"access_token" *: *"([^"]+)".*/\1/')
+                  curl -sf -o /dev/null -X POST -H "Authorization: Bearer $TOKEN" \
+                    -H "Content-Type: application/gzip" --data-binary @"$OUT" \
+                    "https://storage.googleapis.com/upload/storage/v1/b/{{ .Values.backup.gcsBucket }}/o?uploadType=media&name=$(basename "$OUT")"
+                  echo "uploaded gs://{{ .Values.backup.gcsBucket }}/$(basename "$OUT")"
+{{- else }}
+                - echo "backup.gcsBucket not set - dump kept on data disk only"
+{{- end }}
               volumeMounts: [{name: backups, mountPath: /backups}]
           volumes:
             - name: backups
