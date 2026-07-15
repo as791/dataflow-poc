@@ -58,6 +58,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan reachable Git history for secrets
+        run: >-
+          docker run --rm -v "$PWD:/repo" -w /repo
+          ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+          git --redact=100 --no-banner .
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -78,3 +85,177 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate docker-compose
         run: docker compose config --quiet
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render chart in dev mode
+        run: helm template deploy/helm/dataflow > /dev/null
+      - name: Production render must fail without required secrets
+        run: |
+          if helm template deploy/helm/dataflow --set runtime.production=true > /dev/null 2>&1; then
+            echo "helm template succeeded in production mode without required secrets" >&2
+            exit 1
+          fi
+      - name: Production render succeeds with all required secrets set
+        run: >-
+          helm template deploy/helm/dataflow
+          --set runtime.production=true
+          --set secrets.jwt=dummy
+          --set secrets.oauthKey=dummy
+          --set secrets.temporalPayloadKey=dummy
+          --set secrets.appUrl=https://dataflow.example.com
+          --set secrets.databaseUrl=postgres://u:p@h:5432/db
+          --set secrets.appDatabaseUrl=postgres://u:p@h:5432/db
+          --set secrets.postgresPassword=dummy
+          --set secrets.redisUrl=redis://h:6379
+          --set secrets.redisPassword=dummy
+          --set secrets.googleClientId=dummy
+          --set secrets.googleClientSecret=dummy
+          --set secrets.smtpFrom=noreply@example.com
+          --set secrets.smtpUser=dummy
+          --set secrets.smtpPass=dummy
+          > /dev/null
+
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - name: Terraform format check
+        working-directory: infra
+        run: terraform fmt -check -recursive
+      - name: Terraform init (no backend)
+        working-directory: infra
+        run: terraform init -backend=false
+      - name: Terraform validate
+        working-directory: infra
+        run: terraform validate
+
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      matrix:
+        language: [go, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          deny-licenses: AGPL-1.0-or-later, AGPL-3.0-or-later, GPL-1.0-or-later, GPL-2.0-or-later, GPL-3.0-or-later, SSPL-1.0
+
+  iac-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: tfsec (Terraform)
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: infra
+      - name: Trivy config scan — Helm chart
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: deploy/helm/dataflow
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+  container-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build workflow-go image
+        run: docker build -f apps/workflow-go/Dockerfile -t dataflow-workflow-go:ci .
+      - name: Build web image
+        run: docker build -f apps/web/Dockerfile -t dataflow-web:ci .
+      - name: Scan workflow-go image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: dataflow-workflow-go:ci
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+      - name: Scan web image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: dataflow-web:ci
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build workflow-go image
+        run: docker build -f apps/workflow-go/Dockerfile -t dataflow-workflow-go:ci .
+      - name: Build web image
+        run: docker build -f apps/web/Dockerfile -t dataflow-web:ci .
+      - name: Generate SBOM — workflow-go
+        uses: anchore/sbom-action@v0.17.0
+        with:
+          image: dataflow-workflow-go:ci
+          format: spdx-json
+          output-file: sbom-workflow-go.spdx.json
+      - name: Generate SBOM — web
+        uses: anchore/sbom-action@v0.17.0
+        with:
+          image: dataflow-web:ci
+          format: spdx-json
+          output-file: sbom-web.spdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: |
+            sbom-workflow-go.spdx.json
+            sbom-web.spdx.json
+
+  sign-images:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      workflow-go-digest: ${{ steps.push.outputs.workflow_go_digest }}
+      web-digest: ${{ steps.push.outputs.web_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: sigstore/cosign-installer@v3.7.0
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push images
+        id: push
+        run: |
+          set -euo pipefail
+          repo=$(echo "ghcr.io/${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          docker build -f apps/workflow-go/Dockerfile -t "$repo/workflow-go:${{ github.sha }}" .
+          docker build -f apps/web/Dockerfile -t "$repo/web:${{ github.sha }}" .
+          docker push "$repo/workflow-go:${{ github.sha }}"
+          docker push "$repo/web:${{ github.sha }}"
+          workflow_go_digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$repo/workflow-go:${{ github.sha }}")
+          web_digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$repo/web:${{ github.sha }}")
+          echo "workflow_go_digest=$workflow_go_digest" >> "$GITHUB_OUTPUT"
+          echo "web_digest=$web_digest" >> "$GITHUB_OUTPUT"
+      - name: Sign images (keyless via GitHub OIDC)
+        run: |
+          cosign sign --yes "${{ steps.push.outputs.workflow_go_digest }}"
+          cosign sign --yes "${{ steps.push.outputs.web_digest }}"

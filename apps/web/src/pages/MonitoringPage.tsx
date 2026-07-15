@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, AlertTriangle, CheckCircle2, Clock3, RefreshCw } from 'lucide-react';
 import { api } from '../api';
-import { displayEnvironment } from './LifecyclePage';
+import { displayEnvironment } from '../utils/pipelineStage';
 import { ApiError } from '../components/ApiError';
 
 interface MonitoringData {
@@ -110,7 +110,7 @@ export default function MonitoringPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-6 px-6 py-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><h1 className="page-heading">Pipeline monitoring</h1><p className="page-subtitle mt-1">Health, reliability, latency, and recent failures across the workspace.</p></div>
+        <div><h2 className="page-heading">Pipeline monitoring</h2><p className="page-subtitle mt-1">Health, reliability, latency, and recent failures across the workspace.</p></div>
         <div className="flex items-center gap-2">
           <select className="glass-input" value={days} onChange={e => setDays(Number(e.target.value))} aria-label="Time range">
             <option value={1}>24 hours</option><option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option>
@@ -131,7 +131,7 @@ export default function MonitoringPage() {
 
       <section className="glass-card overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4 dark:border-white/5">
-          <div><h2 className="text-sm font-semibold text-gray-900 dark:text-white/90">Execution activity</h2><p className="mt-0.5 text-[10px] text-gray-400">Latest durable node outcomes. Sensitive values are redacted.</p></div>
+          <div><h3 className="text-sm font-semibold text-gray-900 dark:text-white/90">Execution activity</h3><p className="mt-0.5 text-[10px] text-gray-400">Latest durable node outcomes. Sensitive values are redacted.</p></div>
           <form className="flex items-center gap-2" onSubmit={event => { event.preventDefault(); setLogQuery(logInput.trim()); }}>
             <input className="glass-input w-56" value={logInput} onChange={event => setLogInput(event.target.value)} placeholder="Pipeline, run, node, error…" aria-label="Search execution activity" />
             <select className="glass-input" value={logLevel} onChange={event => setLogLevel(event.target.value)} aria-label="Activity level">
@@ -151,7 +151,7 @@ export default function MonitoringPage() {
 
       <section className="glass-card overflow-hidden">
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-white/5">
-          <div><h2 className="text-sm font-semibold text-gray-900 dark:text-white/90">Data quality</h2><p className="mt-0.5 text-[10px] text-gray-400">{data?.quality.checks ?? 0} checks · {(data?.quality.passedRows ?? 0).toLocaleString()} rows passed</p></div>
+          <div><h3 className="text-sm font-semibold text-gray-900 dark:text-white/90">Data quality</h3><p className="mt-0.5 text-[10px] text-gray-400">{data?.quality.checks ?? 0} checks · {(data?.quality.passedRows ?? 0).toLocaleString()} rows passed</p></div>
           <span className={`glass-badge ${(data?.quality.issues ?? 0) ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{data?.quality.issues ?? 0} issues</span>
         </div>
         {!data?.recentQualityIssues.length ? <p className="px-5 py-6 text-sm text-gray-400">No quality violations in this period.</p> : <div className="divide-y divide-gray-100 dark:divide-white/5">
@@ -165,7 +165,7 @@ export default function MonitoringPage() {
 
       <section className="glass-card overflow-hidden">
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-white/5">
-          <div><h2 className="text-sm font-semibold text-gray-900 dark:text-white/90">Active incidents</h2><p className="mt-0.5 text-[10px] text-gray-400">Deduplicated until the underlying breach resolves.</p></div>
+          <div><h3 className="text-sm font-semibold text-gray-900 dark:text-white/90">Active incidents</h3><p className="mt-0.5 text-[10px] text-gray-400">Deduplicated until the underlying breach resolves.</p></div>
           <span className="glass-badge">{alerts.length}</span>
         </div>
         {!alerts.length ? <p className="px-5 py-6 text-sm text-gray-400">No active incidents.</p> : <div className="divide-y divide-gray-100 dark:divide-white/5">
@@ -183,7 +183,7 @@ export default function MonitoringPage() {
 
       <div className="grid gap-6 xl:grid-cols-[1.6fr_1fr]">
         <section className="glass-card p-5">
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-white/90">Run volume and failures</h2>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white/90">Run volume and failures</h3>
           <div className="mt-5 flex h-44 items-end gap-2" aria-label="Run trend">
             {data?.trend.map(point => {
               const runs = Number(point.runs), failed = Number(point.failed);
@@ -198,7 +198,7 @@ export default function MonitoringPage() {
           </div>
         </section>
         <section className="glass-card p-5">
-          <div className="flex items-center justify-between"><h2 className="text-sm font-semibold text-gray-900 dark:text-white/90">Recent failures</h2><Link to="/runs" className="text-xs text-brand-500">All runs</Link></div>
+          <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-gray-900 dark:text-white/90">Recent failures</h3><Link to="/runs" className="text-xs text-brand-500">All runs</Link></div>
           <div className="mt-3 divide-y divide-gray-100 dark:divide-white/5">
             {!data?.recentFailures.length && <p className="py-6 text-sm text-gray-400">No failures in this period.</p>}
             {data?.recentFailures.map(failure => <Link key={failure.id} to={`/runs/${failure.id}`} className="block py-3">
@@ -210,7 +210,7 @@ export default function MonitoringPage() {
       </div>
 
       <section className="glass-card overflow-hidden">
-        <div className="border-b border-gray-100 px-5 py-4 dark:border-white/5"><h2 className="text-sm font-semibold text-gray-900 dark:text-white/90">Pipeline health</h2></div>
+        <div className="border-b border-gray-100 px-5 py-4 dark:border-white/5"><h3 className="text-sm font-semibold text-gray-900 dark:text-white/90">Pipeline health</h3></div>
         <div className="overflow-x-auto"><table className="w-full text-left text-xs">
           <thead className="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-400 dark:bg-white/[0.025]"><tr>
             <th className="px-5 py-3">Pipeline</th><th className="px-4 py-3">Health</th><th className="px-4 py-3">Last run</th><th className="px-4 py-3">Runs</th><th className="px-4 py-3">Failures</th><th className="px-4 py-3">Avg duration</th>

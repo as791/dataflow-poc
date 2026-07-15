@@ -18,6 +18,8 @@ type Payloads struct {
 	DB          *database.DB
 	Store       *objectstore.Store
 	PlatformKey []byte
+	// MaxPayloadBytes caps any single payload read; <= 0 means unlimited.
+	MaxPayloadBytes int64
 }
 
 func (p *Payloads) Write(ctx context.Context, data interface{}, tenantID, executionID, nodeID string, dek []byte) (*model.DataRef, error) {
@@ -82,6 +84,9 @@ func (p *Payloads) Read(ctx context.Context, ref *model.DataRef, dek []byte) (in
 	if ref == nil {
 		return nil, nil
 	}
+	if p.MaxPayloadBytes > 0 && int64(ref.SizeBytes) > p.MaxPayloadBytes {
+		return nil, fmt.Errorf("payload %s is %d bytes, exceeds MAX_PAYLOAD_BYTES limit of %d", ref.Key, ref.SizeBytes, p.MaxPayloadBytes)
+	}
 	key := dek
 	if len(key) == 0 {
 		key = p.PlatformKey
@@ -103,7 +108,7 @@ func (p *Payloads) Read(ctx context.Context, ref *model.DataRef, dek []byte) (in
 			return nil, fmt.Errorf("encrypted DataRef %s is missing its object store, encryption key, or IV", ref.Key)
 		}
 		var ciphertext string
-		ciphertext, err = p.Store.Get(ctx, ref.Bucket, ref.Key)
+		ciphertext, err = p.Store.Get(ctx, ref.Bucket, ref.Key, ciphertextSizeCap(p.MaxPayloadBytes))
 		if err == nil {
 			body, err = DecryptPayload(ciphertext, ref.IV, key)
 		}
@@ -135,6 +140,20 @@ func (p *Payloads) Read(ctx context.Context, ref *model.DataRef, dek []byte) (in
 		return nil, err
 	}
 	return value, nil
+}
+
+// ciphertextSizeCap converts a plaintext byte limit into the corresponding
+// download cap for the AES-GCM-sealed, base64.RawURLEncoding-at-rest object:
+// the sealed body is plaintext+gcmTagSize bytes, then base64-inflated. Store.Get
+// only sees ciphertext on the wire, so it must be given this larger bound —
+// the plaintext bound is already enforced separately via ref.SizeBytes in Read.
+const gcmTagSize = 16
+
+func ciphertextSizeCap(maxPlaintextBytes int64) int64 {
+	if maxPlaintextBytes <= 0 {
+		return 0
+	}
+	return int64(base64.RawURLEncoding.EncodedLen(int(maxPlaintextBytes) + gcmTagSize))
 }
 
 func nullString(value string) interface{} {

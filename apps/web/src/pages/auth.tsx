@@ -14,7 +14,7 @@ function AuthShell({ title, subtitle, children }: { title: string; subtitle?: st
         <div className="w-full max-w-md rounded-[24px] border border-white/[0.1] bg-[#10131c]/78 p-8 shadow-glass-glow backdrop-blur-2xl">
           <div className="mb-8 flex items-center gap-3">
             <span className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-gradient-to-br from-brand-400 to-brand-600 shadow-lg shadow-brand-500/20">
-              <Boxes size={20} />
+              <Boxes size={20} aria-hidden="true" />
             </span>
             <div><p className="text-sm font-semibold">DataFlow</p><p className="text-[10px] uppercase tracking-[.16em] text-white/30">Orchestration cloud</p></div>
           </div>
@@ -22,7 +22,7 @@ function AuthShell({ title, subtitle, children }: { title: string; subtitle?: st
           {subtitle && <p className="mt-1 text-sm text-white/40">{subtitle}</p>}
           {children}
           <div className="mt-7 flex items-center gap-2 border-t border-white/[0.07] pt-4 text-[10px] text-white/30">
-            <ShieldCheck size={13} /> Secure OAuth · tenant-isolated workspace
+            <ShieldCheck size={13} aria-hidden="true" /> Secure OAuth · tenant-isolated workspace
           </div>
         </div>
       </div>
@@ -31,7 +31,7 @@ function AuthShell({ title, subtitle, children }: { title: string; subtitle?: st
 }
 
 function ErrorLine({ msg }: { msg: string | null }) {
-  return msg ? <div className="text-xs text-rose-300 mt-3">{msg}</div> : null;
+  return msg ? <div role="alert" className="text-xs text-rose-300 mt-3">{msg}</div> : null;
 }
 
 function GoogleButton({ label }: { label: string }) {
@@ -63,8 +63,8 @@ const OAUTH_ERRORS: Record<string, string> = {
 // Show SSO button only when the API is configured with an OIDC provider.
 // We detect this by checking if VITE_OIDC_ENABLED=true is set at build time.
 const OIDC_ENABLED = import.meta.env.VITE_OIDC_ENABLED === 'true';
-const PASSWORD_AUTH_ENABLED = import.meta.env.VITE_PASSWORD_AUTH_ENABLED === 'true';
-const GOOGLE_AUTH_ENABLED = import.meta.env.VITE_GOOGLE_AUTH_ENABLED === 'true';
+const PASSWORD_AUTH_ENABLED = import.meta.env.VITE_PASSWORD_LOGIN_ENABLED === 'true';
+const GOOGLE_AUTH_ENABLED = import.meta.env.VITE_GOOGLE_LOGIN_ENABLED === 'true';
 
 function PasswordForm({ initialEmail = '', inviteToken }: { initialEmail?: string; inviteToken?: string }) {
   const [mode, setMode] = useState<'login' | 'register'>(inviteToken ? 'register' : 'login');
@@ -96,12 +96,12 @@ function PasswordForm({ initialEmail = '', inviteToken }: { initialEmail?: strin
   return (
     <form onSubmit={submit} className="mt-5 space-y-3 border-t border-white/[0.07] pt-5">
       <p className="text-xs text-white/40">{inviteToken ? 'Create your account' : 'Or sign in with email'}</p>
-      <input className="glass-input w-full text-sm" type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} readOnly={!!inviteToken} required />
-      <input className="glass-input w-full text-sm" type="password" placeholder="Password (8+ chars)" value={password} onChange={e => setPassword(e.target.value)} required minLength={8} />
+      <input className="glass-input w-full text-sm" type="email" placeholder="you@example.com" aria-label="Email" value={email} onChange={e => setEmail(e.target.value)} readOnly={!!inviteToken} required />
+      <input className="glass-input w-full text-sm" type="password" placeholder="Password (8+ chars)" aria-label="Password" value={password} onChange={e => setPassword(e.target.value)} required minLength={8} />
       {mode === 'register' && !inviteToken && (
-        <input className="glass-input w-full text-sm" placeholder="Workspace name (optional)" value={tenantName} onChange={e => setTenantName(e.target.value)} />
+        <input className="glass-input w-full text-sm" placeholder="Workspace name (optional)" aria-label="Workspace name (optional)" value={tenantName} onChange={e => setTenantName(e.target.value)} />
       )}
-      {err && <div className="text-xs text-rose-300">{err}</div>}
+      {err && <div role="alert" className="text-xs text-rose-300">{err}</div>}
       <button type="submit" className="glass-btn-primary w-full" disabled={busy}>
         {busy ? '…' : mode === 'login' ? 'Sign in' : 'Create account'}
       </button>

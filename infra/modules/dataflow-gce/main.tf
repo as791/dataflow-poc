@@ -10,27 +10,89 @@ data "google_compute_network" "default" {
   name = "default"
 }
 
-resource "google_compute_firewall" "dataflow_sg" {
-  name    = "${var.name}-sg"
-  network = data.google_compute_network.default.name
-  description = "DataFlow: SSH from admin, web UI and services from anywhere"
+resource "google_compute_firewall" "dataflow_web" {
+  name        = "${var.name}-web"
+  network     = data.google_compute_network.default.name
+  description = "DataFlow public HTTPS entrypoint"
 
   allow {
     protocol = "tcp"
-    ports    = ["22", "80", "443", "3002", "8080", "8082", "8084-8088"]
+    ports    = ["80", "443"]
   }
 
   source_ranges = ["0.0.0.0/0"]
-  target_tags   = ["${var.name}"]
+  target_tags   = [var.name]
+}
+
+resource "google_compute_firewall" "dataflow_admin" {
+  name        = "${var.name}-admin"
+  network     = data.google_compute_network.default.name
+  description = "DataFlow SSH from trusted administrator CIDR"
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+
+  source_ranges = [var.admin_cidr]
+  target_tags   = [var.name]
+}
+
+resource "google_compute_address" "this" {
+  name   = "${var.name}-ip"
+  region = var.region
+  # Promote the VM's existing ephemeral IP instead of minting a new one, so the
+  # deployed URL, OAuth redirects, and Secret Manager appUrl stay valid.
+  address = var.static_ip != "" ? var.static_ip : null
+}
+
+resource "google_compute_disk" "data" {
+  name = "${var.name}-data"
+  zone = var.zone
+  type = "pd-balanced"
+  size = var.data_disk_gb
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_compute_resource_policy" "data_snapshots" {
+  name   = "${var.name}-data-daily"
+  region = var.region
+
+  snapshot_schedule_policy {
+    schedule {
+      daily_schedule {
+        days_in_cycle = 1
+        start_time    = "03:00"
+      }
+    }
+    retention_policy {
+      max_retention_days    = 14
+      on_source_disk_delete = "KEEP_AUTO_SNAPSHOTS"
+    }
+    snapshot_properties {
+      labels            = { app = var.name }
+      storage_locations = [var.region]
+      guest_flush       = false
+    }
+  }
+}
+
+resource "google_compute_disk_resource_policy_attachment" "data_snapshots" {
+  name = google_compute_resource_policy.data_snapshots.name
+  disk = google_compute_disk.data.name
+  zone = var.zone
 }
 
 resource "google_compute_instance" "this" {
-  name         = var.name
-  machine_type = var.instance_type
-  zone         = var.zone
+  name                      = var.name
+  machine_type              = var.instance_type
+  zone                      = var.zone
   allow_stopping_for_update = true
 
-  tags = ["${var.name}"]
+  tags = [var.name]
 
   boot_disk {
     initialize_params {
@@ -40,14 +102,21 @@ resource "google_compute_instance" "this" {
     }
   }
 
+  attached_disk {
+    source      = google_compute_disk.data.id
+    device_name = "dataflow-data"
+    mode        = "READ_WRITE"
+  }
+
   network_interface {
     network = data.google_compute_network.default.name
     access_config {
-      # Ephemeral public IP
+      nat_ip = google_compute_address.this.address
     }
   }
 
   service_account {
+    email  = var.service_account_email
     scopes = ["cloud-platform"]
   }
 
@@ -57,5 +126,11 @@ resource "google_compute_instance" "this" {
       repo   = var.repo
       branch = var.branch
     })
+  }
+
+  lifecycle {
+    # The image data source tracks the newest family image; a new upstream image
+    # must not force-replace the VM (and wipe the kind cluster on the boot disk).
+    ignore_changes = [boot_disk[0].initialize_params[0].image]
   }
 }

@@ -39,6 +39,22 @@ func TestAESGCMCodecRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDataConverterRequiresKeyInProduction(t *testing.T) {
+	t.Setenv("NODE_ENV", "production")
+	t.Setenv("TEMPORAL_PAYLOAD_ENCRYPTION_KEY", "")
+	if _, err := NewDataConverterFromEnv(); err == nil {
+		t.Fatal("expected production configuration without an encryption key to fail")
+	}
+}
+
+func TestDataConverterAllowsPlaintextInDevelopment(t *testing.T) {
+	t.Setenv("NODE_ENV", "development")
+	t.Setenv("TEMPORAL_PAYLOAD_ENCRYPTION_KEY", "")
+	if _, err := NewDataConverterFromEnv(); err != nil {
+		t.Fatalf("development converter: %v", err)
+	}
+}
+
 func TestAESGCMCodecDecodesTypeScriptWireFormat(t *testing.T) {
 	// Generated with Node's crypto.createCipheriv('aes-256-gcm') using:
 	// key=0x2a*32, iv=0x07*12, plaintext={"executionId":"exec-node"}.

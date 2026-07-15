@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import ReactFlow, {
   Background, BackgroundVariant, Controls, Handle, MiniMap, Position,
-  type Edge, type Node, type NodeProps,
+  type Edge, type Node, type NodeProps, type ReactFlowInstance,
 } from 'reactflow';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, Database, History, RefreshCw, Search, Workflow } from 'lucide-react';
@@ -28,7 +28,7 @@ type LineageHistoryItem = {
   summary: Record<'breaking' | 'warning' | 'info', number>; changes: PipelineLineageChange[];
 };
 
-function AssetNode({ data }: NodeProps) {
+const AssetNode = memo(function AssetNode({ data }: NodeProps) {
   const layer = data.layer ?? 'external';
   return (
     <div className="min-w-[210px] rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm dark:border-white/10 dark:bg-[#12151f]/95">
@@ -51,9 +51,9 @@ function AssetNode({ data }: NodeProps) {
       <Handle type="source" position={Position.Right} />
     </div>
   );
-}
+});
 
-function PipelineNode({ data }: NodeProps) {
+const PipelineNode = memo(function PipelineNode({ data }: NodeProps) {
   const health = data.health ?? 'unmonitored';
   return (
     <div className="min-w-[190px] rounded-xl border bg-brand-50 px-3 py-2 shadow-md dark:bg-brand-500/10"
@@ -76,15 +76,19 @@ function PipelineNode({ data }: NodeProps) {
       <Handle type="source" position={Position.Right} />
     </div>
   );
-}
+});
 
 const nodeTypes = { asset: AssetNode, pipeline: PipelineNode };
 
 function buildFlow(graph: WorkspaceLineage, healthById: Record<string, PipelineHealth>): { nodes: Node[]; edges: Edge[] } {
   const edgeByNode = new Map<string, string[]>();
   for (const edge of graph.edges) {
-    edgeByNode.set(edge.source, [...(edgeByNode.get(edge.source) ?? []), edge.target]);
-    edgeByNode.set(edge.target, [...(edgeByNode.get(edge.target) ?? []), edge.source]);
+    const sourceEdges = edgeByNode.get(edge.source);
+    if (sourceEdges) sourceEdges.push(edge.target);
+    else edgeByNode.set(edge.source, [edge.target]);
+    const targetEdges = edgeByNode.get(edge.target);
+    if (targetEdges) targetEdges.push(edge.source);
+    else edgeByNode.set(edge.target, [edge.source]);
   }
   const assetLayer = new Map(graph.nodes.filter(n => n.kind === 'asset').map(n => [n.id, n.asset.layer ?? 'external']));
   const laneCounts: Record<string, number> = { external: 0, bronze: 0, silver: 0, gold: 0 };
@@ -129,10 +133,12 @@ export default function LineagePage() {
   const [domainFilter, setDomainFilter] = useState('');
   const [layerFilter, setLayerFilter] = useState('');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusDepth, setFocusDepth] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
 
   const refresh = async () => {
     setLoading(true); setError(null);
@@ -154,15 +160,20 @@ export default function LineagePage() {
     const timer = setInterval(() => { void refresh(); }, 30_000);
     return () => clearInterval(timer);
   }, [environment]);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 275);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const domains = useMemo(() => [...new Set((graph?.nodes ?? []).flatMap(node =>
     node.kind === 'pipeline' ? [node.pipeline.metadata?.domain ?? 'Unassigned'] : []))].sort(), [graph]);
   const filteredGraph = useMemo(() => graph ? filterWorkspaceLineage(graph, {
-    query: search, domains: domainFilter ? [domainFilter] : undefined,
+    query: debouncedSearch, domains: domainFilter ? [domainFilter] : undefined,
     layers: layerFilter ? [layerFilter as 'external' | 'bronze' | 'silver' | 'gold'] : undefined,
     focusId: focusDepth && selectedId ? selectedId : undefined, depth: focusDepth,
-  }) : null, [graph, search, domainFilter, layerFilter, focusDepth, selectedId]);
+  }) : null, [graph, debouncedSearch, domainFilter, layerFilter, focusDepth, selectedId]);
   const flow = useMemo(() => filteredGraph ? buildFlow(filteredGraph, healthById) : { nodes: [], edges: [] }, [filteredGraph, healthById]);
+  const flowNodeById = useMemo(() => new Map(flow.nodes.map(node => [node.id, node])), [flow.nodes]);
   const visible = useMemo(() => {
     if (!healthFilter) return flow;
     const matched = new Set(flow.nodes.filter(node =>
@@ -173,26 +184,43 @@ export default function LineagePage() {
     }
     return { nodes: flow.nodes.filter(node => matched.has(node.id)), edges: flow.edges.filter(edge => matched.has(edge.source) && matched.has(edge.target)) };
   }, [flow, healthFilter]);
+  const visibleNodeKey = useMemo(() => visible.nodes.map(node => node.id).sort().join('\u0000'), [visible.nodes]);
+  useEffect(() => {
+    if (!flowInstance || !visibleNodeKey) return;
+    const frame = requestAnimationFrame(() => {
+      void flowInstance.fitView({
+        nodes: visibleNodeKey.split('\u0000').map(id => ({ id })),
+        padding: 0.15,
+        duration: 250,
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [flowInstance, visibleNodeKey]);
   const impact = useMemo(() => {
     if (!selectedId || !visible.nodes.some(node => node.id === selectedId)) {
       return { ...visible, upstream: new Set<string>(), downstream: new Set<string>() };
     }
+    const rootId = selectedId;
     const incoming = new Map<string, string[]>(), outgoing = new Map<string, string[]>();
     for (const edge of visible.edges) {
-      incoming.set(edge.target, [...(incoming.get(edge.target) ?? []), edge.source]);
-      outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge.target]);
+      const sources = incoming.get(edge.target);
+      if (sources) sources.push(edge.source);
+      else incoming.set(edge.target, [edge.source]);
+      const targets = outgoing.get(edge.source);
+      if (targets) targets.push(edge.target);
+      else outgoing.set(edge.source, [edge.target]);
     }
     const walk = (reverse: boolean) => {
-      const found = new Set<string>(), queue = [selectedId];
-      while (queue.length) {
-        const id = queue.shift()!;
+      const found = new Set<string>([rootId]), queue = [rootId];
+      for (let index = 0; index < queue.length; index++) {
+        const id = queue[index];
         for (const next of (reverse ? incoming : outgoing).get(id) ?? []) if (!found.has(next)) {
           found.add(next); queue.push(next);
         }
       }
-      found.delete(selectedId); return found;
+      found.delete(rootId); return found;
     };
-    const upstream = walk(true), downstream = walk(false), active = new Set([selectedId, ...upstream, ...downstream]);
+    const upstream = walk(true), downstream = walk(false), active = new Set([rootId, ...upstream, ...downstream]);
     return {
       upstream, downstream,
       nodes: visible.nodes.map(node => ({ ...node, style: { ...node.style, opacity: active.has(node.id) ? 1 : 0.18 } })),
@@ -202,88 +230,94 @@ export default function LineagePage() {
   const selected = visible.nodes.find(node => node.id === selectedId);
   const selectedColumns = selected?.type === 'asset' ? (filteredGraph?.columnEdges ?? []).filter(edge =>
     edge.sourceAssetUrn === selected.data.urn || edge.targetAssetUrn === selected.data.urn) : [];
-  const atRisk = [...impact.downstream].filter(id => flow.nodes.some(node => node.id === id && node.data.health === 'critical')).length;
+  const atRisk = [...impact.downstream].filter(id => flowNodeById.get(id)?.data.health === 'critical').length;
+  const activeFilterCount = [
+    environment, healthFilter, domainFilter, layerFilter, search.trim(), focusDepth && selectedId ? 'focus' : '',
+  ].filter(Boolean).length;
+  const clearFilters = () => {
+    setEnvironment(''); setHealthFilter(''); setDomainFilter(''); setLayerFilter('');
+    setSearch(''); setDebouncedSearch(''); setFocusDepth(0); setSelectedId(null);
+  };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col">
-      <div className="border-b border-gray-100 px-6 py-4 dark:border-white/[0.07]">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="page-heading">Workspace lineage</h1>
-            <p className="page-subtitle mt-1">Pipelines merge automatically through shared source and destination assets.</p>
-          </div>
-          <div className="flex gap-2">
-            <button className="glass-btn-ghost flex items-center gap-1.5 text-sm" onClick={() => { setShowChanges(value => !value); setSelectedId(null); }} aria-expanded={showChanges}>
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="shrink-0 border-b border-gray-100 px-4 py-2.5 dark:border-white/[0.07] lg:px-6">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2" role="group" aria-label="Lineage filters">
+          <label className="flex shrink-0 items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Environment</span>
+            <select className="glass-input w-auto py-1.5 text-[12px]" value={environment}
+              onChange={event => setEnvironment(event.target.value)} aria-label="Lineage environment">
+              <option value="">All</option><option value="test">Integration</option><option value="prod">Production</option>
+            </select>
+          </label>
+          <label className="flex shrink-0 items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Health</span>
+            <select className="glass-input w-auto py-1.5 text-[12px]" value={healthFilter}
+              onChange={event => { setHealthFilter(event.target.value); setSelectedId(null); }} aria-label="Lineage health">
+              <option value="">All</option><option value="critical">Critical</option><option value="warning">Warning</option>
+              <option value="healthy">Healthy</option><option value="unmonitored">Unmonitored</option>
+            </select>
+          </label>
+          <label className="flex shrink-0 items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Domain</span>
+            <select className="glass-input w-auto max-w-36 py-1.5 text-[12px]" value={domainFilter}
+              onChange={event => { setDomainFilter(event.target.value); setSelectedId(null); }} aria-label="Lineage domain">
+              <option value="">All</option>{domains.map(domain => <option key={domain} value={domain}>{domain}</option>)}
+            </select>
+          </label>
+          <label className="flex shrink-0 items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Layer</span>
+            <select className="glass-input w-auto py-1.5 text-[12px]" value={layerFilter}
+              onChange={event => { setLayerFilter(event.target.value); setSelectedId(null); }} aria-label="Lineage layer">
+              <option value="">All</option><option value="external">Sources</option><option value="bronze">Bronze</option>
+              <option value="silver">Silver</option><option value="gold">Gold</option>
+            </select>
+          </label>
+          <label className="flex shrink-0 items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Focus</span>
+            <select className="glass-input w-auto py-1.5 text-[12px]" value={focusDepth}
+              onChange={event => setFocusDepth(Number(event.target.value))} disabled={!selected} aria-label="Lineage graph focus">
+              <option value={0}>Full graph</option><option value={1}>Selected + 1 hop</option><option value={2}>Selected + 2 hops</option>
+            </select>
+          </label>
+          <label className="flex shrink-0 items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Search</span>
+            <span className="relative">
+              <Search size={13} className="pointer-events-none absolute left-2.5 top-2 text-gray-400" />
+              <input type="search" className="glass-input w-44 py-1.5 pl-7 text-[12px]" value={search}
+                onChange={event => { setSearch(event.target.value); setSelectedId(null); }}
+                placeholder="Pipeline or asset" aria-label="Search lineage" />
+            </span>
+          </label>
+          {activeFilterCount > 0 && <button className="glass-btn-ghost whitespace-nowrap px-2.5 py-1.5 text-xs"
+            onClick={clearFilters} aria-label="Clear all lineage filters">Clear {activeFilterCount}</button>}
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            {graph && <span className="whitespace-nowrap text-[11px] text-gray-500 dark:text-white/50" aria-live="polite">
+              {visible.nodes.length}/{graph.nodes.length} nodes · {visible.edges.length} links
+            </span>}
+            <button className="glass-btn-ghost flex items-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 text-xs"
+              onClick={() => { setShowChanges(value => !value); setSelectedId(null); }} aria-expanded={showChanges} aria-controls="lineage-changes">
               <History size={14} /> Changes {changes.length > 0 && <span className="glass-badge">{changes.length}</span>}
             </button>
-            <button className="glass-btn-ghost flex items-center gap-1.5 text-sm" onClick={refresh} disabled={loading}>
+            <button className="glass-btn-ghost flex items-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 text-xs"
+              onClick={refresh} disabled={loading} aria-label="Refresh lineage">
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
             </button>
           </div>
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          {/* environment pills */}
-          {([['', 'All'], ['test', 'Integration'], ['prod', 'Production']] as const).map(([val, lbl]) => (
-            <button key={val} onClick={() => setEnvironment(val)}
-              className={`px-3 py-1 rounded-full text-[11px] font-medium border transition-all ${
-                environment === val
-                  ? 'bg-gray-900 border-gray-900 text-white dark:bg-white/[0.12] dark:border-white/[0.2] dark:text-white'
-                  : 'bg-transparent border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:border-white/[0.07] dark:text-white/45 dark:hover:bg-white/[0.065] dark:hover:text-white/75'
-              }`}>{lbl}</button>
-          ))}
-
-          <div className="h-4 w-px bg-gray-200 dark:bg-white/10 mx-1" />
-
-          {/* health pills */}
-          {([['', 'All health'], ['critical', 'Critical', 'bg-red-400'], ['warning', 'Warning', 'bg-amber-400'], ['healthy', 'Healthy', 'bg-emerald-400'], ['unmonitored', 'Unmonitored', 'bg-gray-400']] as const).map(([val, lbl, dot]) => (
-            <button key={val} onClick={() => { setHealthFilter(val); setSelectedId(null); }}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border transition-all ${
-                healthFilter === val
-                  ? 'bg-gray-900 border-gray-900 text-white dark:bg-white/[0.12] dark:border-white/[0.2] dark:text-white'
-                  : 'bg-transparent border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:border-white/[0.07] dark:text-white/45 dark:hover:bg-white/[0.065] dark:hover:text-white/75'
-              }`}>
-              {dot && <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />}{lbl}
-            </button>
-          ))}
-
-          <div className="h-4 w-px bg-gray-200 dark:bg-white/10 mx-1" />
-
-          <select className="glass-input" value={domainFilter} onChange={e => { setDomainFilter(e.target.value); setSelectedId(null); }} aria-label="Data domain">
-            <option value="">All domains</option>{domains.map(domain => <option key={domain} value={domain}>{domain}</option>)}
-          </select>
-          {/* layer pills */}
-          {([['', 'All'], ['external', 'Sources'], ['bronze', 'Bronze'], ['silver', 'Silver'], ['gold', 'Gold']] as const).map(([val, lbl]) => (
-            <button key={val} onClick={() => { setLayerFilter(val); setSelectedId(null); }}
-              className={`px-3 py-1 rounded-full text-[11px] font-medium border transition-all ${
-                layerFilter === val
-                  ? 'bg-gray-900 border-gray-900 text-white dark:bg-white/[0.12] dark:border-white/[0.2] dark:text-white'
-                  : 'bg-transparent border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:border-white/[0.07] dark:text-white/45 dark:hover:bg-white/[0.065] dark:hover:text-white/75'
-              }`}>{lbl}</button>
-          ))}
-          <select className="glass-input" value={focusDepth} onChange={e => setFocusDepth(Number(e.target.value))} disabled={!selected} aria-label="Graph focus">
-            <option value={0}>Full graph</option><option value={1}>Selected + 1 hop</option><option value={2}>Selected + 2 hops</option>
-          </select>
-          <label className="relative">
-            <Search size={14} className="absolute left-3 top-2.5 text-gray-400" />
-            <input className="glass-input pl-8" value={search} onChange={e => { setSearch(e.target.value); setSelectedId(null); }} placeholder="Find pipeline or asset" />
-          </label>
-          {graph && <div className="ml-auto flex gap-2 text-xs text-gray-500 dark:text-white/50">
-            <span className="glass-badge">{visible.nodes.length}/{graph.nodes.length} visible</span>
-            <span className="glass-badge">{graph.stats.pipelines} pipelines</span>
-            <span className="glass-badge">{graph.stats.assets} assets</span>
-            <span className="glass-badge">{graph.stats.sharedAssets} shared</span>
-            <span className="glass-badge">{graph.stats.columnLinks} columns</span>
-            {!!graph.stats.externalJobs && <span className="glass-badge">{graph.stats.externalJobs} external</span>}
-          </div>}
-        </div>
       </div>
       {error && <div className="m-4"><ApiError message={error} onRetry={refresh} /></div>}
-      <div className="relative flex-1">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         <div className="pointer-events-none absolute left-4 right-4 top-3 z-10 grid grid-cols-4 gap-2 text-center text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-white/35">
           {(['external', 'bronze', 'silver', 'gold'] as const).map(layer => <span key={layer}>{layer === 'external' ? 'Sources' : layer}</span>)}
         </div>
+        {loading && <div role="status" aria-live="polite" className={`pointer-events-none absolute z-30 flex items-center justify-center ${graph ? 'left-1/2 top-12 -translate-x-1/2' : 'inset-0 bg-white/65 dark:bg-[#080a10]/65'}`}>
+          <span className="flex items-center gap-2 rounded-full border border-gray-200 bg-white/95 px-3 py-1.5 text-xs text-gray-600 shadow-sm dark:border-white/10 dark:bg-[#11141d]/95 dark:text-white/65">
+            <RefreshCw size={13} className="animate-spin" /> {graph ? 'Refreshing lineage…' : 'Loading lineage…'}
+          </span>
+        </div>}
         {!loading && graph?.nodes.length === 0 && <p className="p-8 text-sm text-gray-400">No pipeline assets found. Configure source and sink assets, then save a pipeline.</p>}
-        {showChanges && <aside className="absolute left-4 top-14 z-20 max-h-[calc(100%-4.5rem)] w-80 overflow-auto rounded-xl border border-gray-200 bg-white/95 p-4 shadow-xl backdrop-blur dark:border-white/10 dark:bg-[#11141d]/95">
+        {showChanges && <aside id="lineage-changes" className="absolute left-4 top-14 z-20 max-h-[calc(100%-4.5rem)] w-80 overflow-auto rounded-xl border border-gray-200 bg-white/95 p-4 shadow-xl backdrop-blur dark:border-white/10 dark:bg-[#11141d]/95">
           <div className="flex items-start justify-between gap-2"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-brand-500">Architecture changes</p><h3 className="mt-1 text-sm font-semibold text-gray-900 dark:text-white/90">Pipeline version history</h3></div><button className="icon-button h-7 w-7" aria-label="Close architecture changes" onClick={() => setShowChanges(false)}>×</button></div>
           <p className="mt-1 text-[10px] text-gray-400">Derived from immutable saved versions.</p>
           {changes.length === 0 && <p className="mt-4 text-xs text-gray-500">No lineage changes found.</p>}
@@ -305,13 +339,13 @@ export default function LineagePage() {
           {selected.data.schema?.fields?.length > 0 && <div className="mt-3"><p className="text-[10px] font-semibold uppercase text-gray-400">Contract fields</p><p className="mt-1 text-[10px] text-gray-600 dark:text-white/55">{selected.data.schema.fields.slice(0, 8).map((field: any) => `${field.name}: ${field.type}${field.nullable ? '?' : ''}`).join(' · ')}</p></div>}
           {selectedColumns.length > 0 && <div className="mt-3"><p className="text-[10px] font-semibold uppercase text-gray-400">Column lineage</p><div className="mt-1 max-h-32 space-y-1 overflow-auto">{selectedColumns.slice(0, 20).map(edge => <p key={edge.id} className="truncate text-[10px] text-gray-600 dark:text-white/55" title={`${edge.sourceAssetUrn}.${edge.sourceField} → ${edge.targetAssetUrn}.${edge.targetField}`}>{edge.sourceField} → {edge.targetField}</p>)}</div></div>}
         </aside>}
-        <ReactFlow key={`${environment}:${domainFilter}:${layerFilter}:${search}:${healthFilter}:${focusDepth ? selectedId : ''}:${focusDepth}`}
-          nodes={impact.nodes} edges={impact.edges} nodeTypes={nodeTypes} fitView
+        <ReactFlow nodes={impact.nodes} edges={impact.edges} nodeTypes={nodeTypes} fitView onlyRenderVisibleElements
+          onInit={setFlowInstance}
           nodesDraggable={false} nodesConnectable={false} elementsSelectable
           onNodeClick={(_, node) => setSelectedId(node.id)} onPaneClick={() => setSelectedId(null)}>
           <Background variant={BackgroundVariant.Dots} gap={24} size={1} color={dark ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.06)'} />
           <Controls showInteractive={false} />
-          <MiniMap pannable zoomable
+          <MiniMap className="hidden md:block" pannable zoomable
             nodeColor={node => node.type === 'pipeline' ? '#7c6cf2' : LAYER_COLOR[node.data.layer ?? 'external']}
             nodeStrokeColor={dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.3)'}
             nodeStrokeWidth={2}

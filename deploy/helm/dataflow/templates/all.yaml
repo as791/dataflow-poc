@@ -5,23 +5,29 @@ metadata:
   labels: {{- include "dataflow.labels" . | nindent 4 }}
 type: Opaque
 stringData:
-  jwt: {{ default "dev-access-secret-change-me" .Values.secrets.jwt | quote }}
-  oauthKey: {{ default "aed60bcbe8b28875348f41d8c400a0632982946414aa2d5b6b0b8811e35cddd1" .Values.secrets.oauthKey | quote }}
-  googleClientId: {{ default "" .Values.secrets.googleClientId | quote }}
-  googleClientSecret: {{ default "" .Values.secrets.googleClientSecret | quote }}
+  jwt: {{ if .Values.runtime.production }}{{ required "secrets.jwt is required when runtime.production=true" .Values.secrets.jwt | quote }}{{ else }}{{ default "dev-access-secret-change-me" .Values.secrets.jwt | quote }}{{ end }}
+  oauthKey: {{ if .Values.runtime.production }}{{ required "secrets.oauthKey is required when runtime.production=true" .Values.secrets.oauthKey | quote }}{{ else }}{{ default "aed60bcbe8b28875348f41d8c400a0632982946414aa2d5b6b0b8811e35cddd1" .Values.secrets.oauthKey | quote }}{{ end }}
+  temporalPayloadKey: {{ if .Values.runtime.production }}{{ required "secrets.temporalPayloadKey is required when runtime.production=true" .Values.secrets.temporalPayloadKey | quote }}{{ else }}{{ default "" .Values.secrets.temporalPayloadKey | quote }}{{ end }}
+  googleClientId: {{ if .Values.runtime.production }}{{ required "secrets.googleClientId is required when runtime.production=true" .Values.secrets.googleClientId | quote }}{{ else }}{{ default "" .Values.secrets.googleClientId | quote }}{{ end }}
+  googleClientSecret: {{ if .Values.runtime.production }}{{ required "secrets.googleClientSecret is required when runtime.production=true" .Values.secrets.googleClientSecret | quote }}{{ else }}{{ default "" .Values.secrets.googleClientSecret | quote }}{{ end }}
   azureClientId: {{ default "" .Values.secrets.azureClientId | quote }}
   azureClientSecret: {{ default "" .Values.secrets.azureClientSecret | quote }}
-  smtpFrom: {{ default "" .Values.secrets.smtpFrom | quote }}
-  smtpUser: {{ default "" .Values.secrets.smtpUser | quote }}
-  smtpPass: {{ default "" .Values.secrets.smtpPass | quote }}
-  appUrl: {{ default "http://localhost:3002" .Values.secrets.appUrl | quote }}
-  databaseUrl: {{ default "postgres://dataflow:dataflow@postgres:5432/dataflow?sslmode=disable" .Values.secrets.databaseUrl | quote }}
-  appDatabaseUrl: {{ default "postgres://dataflow_app:dataflow_app@postgres:5432/dataflow?sslmode=disable" .Values.secrets.appDatabaseUrl | quote }}
-  redisUrl: {{ default "redis://redis:6379" .Values.secrets.redisUrl | quote }}
+  # SMTP is required in production: org invite emails (routes_core.go) send via SES.
+  smtpFrom: {{ if .Values.runtime.production }}{{ required "secrets.smtpFrom is required when runtime.production=true" .Values.secrets.smtpFrom | quote }}{{ else }}{{ default "" .Values.secrets.smtpFrom | quote }}{{ end }}
+  smtpUser: {{ if .Values.runtime.production }}{{ required "secrets.smtpUser is required when runtime.production=true" .Values.secrets.smtpUser | quote }}{{ else }}{{ default "" .Values.secrets.smtpUser | quote }}{{ end }}
+  smtpPass: {{ if .Values.runtime.production }}{{ required "secrets.smtpPass is required when runtime.production=true" .Values.secrets.smtpPass | quote }}{{ else }}{{ default "" .Values.secrets.smtpPass | quote }}{{ end }}
+  appUrl: {{ if .Values.runtime.production }}{{ required "secrets.appUrl is required when runtime.production=true" .Values.secrets.appUrl | quote }}{{ else }}{{ default "http://localhost:3002" .Values.secrets.appUrl | quote }}{{ end }}
+  databaseUrl: {{ if .Values.runtime.production }}{{ required "secrets.databaseUrl is required when runtime.production=true" .Values.secrets.databaseUrl | quote }}{{ else }}{{ default "postgres://dataflow:dataflow@postgres:5432/dataflow?sslmode=disable" .Values.secrets.databaseUrl | quote }}{{ end }}
+  appDatabaseUrl: {{ if .Values.runtime.production }}{{ required "secrets.appDatabaseUrl is required when runtime.production=true" .Values.secrets.appDatabaseUrl | quote }}{{ else }}{{ default "postgres://dataflow_app:dataflow_app@postgres:5432/dataflow?sslmode=disable" .Values.secrets.appDatabaseUrl | quote }}{{ end }}
+  redisUrl: {{ if .Values.runtime.production }}{{ required "secrets.redisUrl is required when runtime.production=true" .Values.secrets.redisUrl | quote }}{{ else }}{{ default "redis://redis:6379" .Values.secrets.redisUrl | quote }}{{ end }}
+  postgresPassword: {{ if .Values.runtime.production }}{{ required "secrets.postgresPassword is required when runtime.production=true" .Values.secrets.postgresPassword | quote }}{{ else }}{{ default "dataflow" .Values.secrets.postgresPassword | quote }}{{ end }}
+  redisPassword: {{ if .Values.runtime.production }}{{ required "secrets.redisPassword is required when runtime.production=true" .Values.secrets.redisPassword | quote }}{{ else }}{{ default "" .Values.secrets.redisPassword | quote }}{{ end }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
-metadata: {name: postgres-data}
+metadata:
+  name: postgres-data
+  annotations: {helm.sh/resource-policy: keep}
 spec:
   accessModes: [ReadWriteOnce]
   resources: {requests: {storage: {{ .Values.storage.postgres }}}}
@@ -35,24 +41,35 @@ spec:
   template:
     metadata: {labels: {app: postgres}}
     spec:
+      securityContext: {fsGroup: 70}
       containers:
         - name: postgres
           image: {{ .Values.images.postgres }}
           imagePullPolicy: IfNotPresent
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 70, runAsGroup: 70, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: 500m, memory: 512Mi}
           env:
             - {name: POSTGRES_USER, value: dataflow}
-            - {name: POSTGRES_PASSWORD, value: dataflow}
+            - {name: POSTGRES_PASSWORD, valueFrom: {secretKeyRef: {name: dataflow-secrets, key: postgresPassword}}}
             - {name: POSTGRES_DB, value: dataflow}
           ports: [{containerPort: 5432}]
           readinessProbe: {exec: {command: [pg_isready, -U, dataflow]}, periodSeconds: 3}
           volumeMounts:
             - {name: data, mountPath: /var/lib/postgresql/data}
-            - {name: migrations, mountPath: /docker-entrypoint-initdb.d}
+            - {name: migrations, mountPath: /docker-entrypoint-initdb.d, readOnly: true}
+            - {name: run, mountPath: /var/run/postgresql}
+            - {name: tmp, mountPath: /tmp}
       volumes:
         - name: data
           persistentVolumeClaim: {claimName: postgres-data}
         - name: migrations
           hostPath: {path: {{ printf "%s/db" .Values.hostPath | quote }}, type: Directory}
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -68,12 +85,26 @@ spec:
   template:
     metadata: {labels: {app: redis}}
     spec:
+      securityContext: {fsGroup: 1000}
       containers:
         - name: redis
           image: {{ .Values.images.redis }}
           imagePullPolicy: IfNotPresent
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 999, runAsGroup: 1000, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 250m, memory: 256Mi}
+          args: [redis-server, --appendonly, "yes", --appendfsync, everysec, --requirepass, "$(REDIS_PASSWORD)"]
+          env:
+            - {name: REDIS_PASSWORD, valueFrom: {secretKeyRef: {name: dataflow-secrets, key: redisPassword}}}
           ports: [{containerPort: 6379}]
-          readinessProbe: {exec: {command: [redis-cli, ping]}, periodSeconds: 3}
+          readinessProbe:
+            exec: {command: [sh, -c, "if [ -n \"$REDIS_PASSWORD\" ]; then redis-cli -a \"$REDIS_PASSWORD\" --no-auth-warning ping; else redis-cli ping; fi"]}
+            periodSeconds: 3
+          volumeMounts: [{name: data, mountPath: /data}]
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: redis-data}
 ---
 apiVersion: v1
 kind: Service
@@ -82,7 +113,18 @@ spec: {selector: {app: redis}, ports: [{port: 6379}]}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
-metadata: {name: clickhouse-data}
+metadata:
+  name: redis-data
+  annotations: {helm.sh/resource-policy: keep}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: {{ .Values.storage.redis }}}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: clickhouse-data
+  annotations: {helm.sh/resource-policy: keep}
 spec:
   accessModes: [ReadWriteOnce]
   resources: {requests: {storage: {{ .Values.storage.clickhouse }}}}
@@ -96,10 +138,19 @@ spec:
   template:
     metadata: {labels: {app: clickhouse}}
     spec:
+      securityContext: {fsGroup: 101}
       containers:
         - name: clickhouse
           image: {{ .Values.images.clickhouse }}
           imagePullPolicy: IfNotPresent
+          # readOnlyRootFilesystem is not set: the entrypoint rewrites
+          # /etc/clickhouse-server/users.d/default-user.xml at startup when a
+          # non-default CLICKHOUSE_USER is configured (verified against the
+          # upstream image), so the rootfs must stay writable.
+          securityContext: {allowPrivilegeEscalation: false, runAsNonRoot: true, runAsUser: 101, runAsGroup: 101, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 200m, memory: 512Mi}
+            limits: {cpu: "1", memory: 1Gi}
           env:
             - {name: CLICKHOUSE_USER, value: dataflow}
             - {name: CLICKHOUSE_PASSWORD, value: dataflow}
@@ -139,16 +190,28 @@ spec:
       initContainers:
         - name: wait-postgres
           image: {{ .Values.images.postgres }}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 70, runAsGroup: 70, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
           command: [sh, -c, "until pg_isready -h postgres -U dataflow; do sleep 2; done"]
       containers:
         - name: temporal
           image: {{ .Values.images.temporal }}
           imagePullPolicy: IfNotPresent
+          # readOnlyRootFilesystem is not set: auto-setup renders
+          # /etc/temporal/config/docker.yaml from a template baked into the
+          # image at startup (verified against the upstream image), so the
+          # rootfs must stay writable.
+          securityContext: {allowPrivilegeEscalation: false, runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: 500m, memory: 512Mi}
           env:
             - {name: DB, value: postgres12}
             - {name: DB_PORT, value: "5432"}
             - {name: POSTGRES_USER, value: dataflow}
-            - {name: POSTGRES_PWD, value: dataflow}
+            - {name: POSTGRES_PWD, valueFrom: {secretKeyRef: {name: dataflow-secrets, key: postgresPassword}}}
             - {name: POSTGRES_SEEDS, value: postgres}
             - {name: DBNAME, value: temporal}
             - {name: VISIBILITY_DBNAME, value: temporal_visibility}
@@ -173,6 +236,10 @@ spec:
         - name: temporal-ui
           image: {{ .Values.images.temporalUI }}
           imagePullPolicy: IfNotPresent
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 200m, memory: 256Mi}
           env:
             - {name: TEMPORAL_ADDRESS, value: temporal:7233}
             - {name: TEMPORAL_UI_PORT, value: "8080"}
@@ -191,12 +258,18 @@ kind: Job
 metadata: {name: temporal-namespaces}
 spec:
   template:
+    metadata: {labels: {app: temporal-namespaces}}
     spec:
       restartPolicy: OnFailure
       containers:
         - name: namespaces
           image: {{ .Values.images.temporalAdmin }}
           imagePullPolicy: IfNotPresent
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 200m, memory: 128Mi}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
           command: [sh, -c]
           args:
             - |
@@ -204,10 +277,15 @@ spec:
               for ns in test prod; do
                 temporal operator namespace describe --address temporal:7233 --namespace "$ns" >/dev/null 2>&1 || temporal operator namespace create --address temporal:7233 --namespace "$ns" --retention 3d
               done
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
-metadata: {name: ollama-data}
+metadata:
+  name: ollama-data
+  annotations: {helm.sh/resource-policy: keep}
 spec:
   accessModes: [ReadWriteOnce]
   resources: {requests: {storage: {{ .Values.storage.ollama }}}}
@@ -225,6 +303,10 @@ spec:
         - name: ollama
           image: {{ .Values.images.ollama }}
           imagePullPolicy: IfNotPresent
+          # Upstream image runs as root by default and its home/model-cache
+          # layout under non-root wasn't verified in this pass, so
+          # runAsNonRoot/readOnlyRootFilesystem are left unset (caveat).
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
           command: [/bin/sh, -c]
           args:
             - |
@@ -240,8 +322,8 @@ spec:
           readinessProbe: {exec: {command: [test, -f, /tmp/model-ready]}, periodSeconds: 5}
           volumeMounts: [{name: data, mountPath: /root/.ollama}]
           resources:
-            requests: {memory: 1Gi}
-            limits: {memory: 4Gi}
+            requests: {cpu: 500m, memory: 1Gi}
+            limits: {cpu: "4", memory: 4Gi}
       volumes:
         - name: data
           persistentVolumeClaim: {claimName: ollama-data}
@@ -258,22 +340,36 @@ spec:
   replicas: 1
   selector: {matchLabels: {app: api}}
   template:
-    metadata: {labels: {app: api}}
+    metadata:
+      labels: {app: api}
+      annotations:
+        checksum/secrets: {{ toJson .Values.secrets | sha256sum | quote }}
     spec:
       initContainers:
         - name: wait-postgres
           image: {{ .Values.images.postgres }}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 70, runAsGroup: 70, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
           command: [sh, -c, "until pg_isready -h postgres -U dataflow -d dataflow; do sleep 2; done"]
       containers:
         - name: api
           image: {{ .Values.images.app }}
           imagePullPolicy: Never
+          # Dockerfile already runs as USER dataflow (non-root); no local
+          # writes in this binary, so the rootfs can stay read-only.
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
           command: [api]
           env:
             {{- include "dataflow.appEnv" . | nindent 12 }}
             - {name: API_PORT, value: "4000"}
             - {name: TEMPORAL_NAMESPACE, value: default}
             - {name: TASK_QUEUE, value: dynamic-dag}
+            - {name: INTERNAL_DEMO_FEATURES, value: {{ .Values.internalDemoFeatures | quote }}}
           ports: [{containerPort: 4000}]
           readinessProbe: {tcpSocket: {port: 4000}, periodSeconds: 5}
           volumeMounts: [{name: connectors, mountPath: /app/connectors/manifests, readOnly: true}]
@@ -294,12 +390,21 @@ spec:
   replicas: 1
   selector: {matchLabels: {app: activity-worker-{{ $env }}}}
   template:
-    metadata: {labels: {app: activity-worker-{{ $env }}}}
+    metadata:
+      labels: {app: activity-worker-{{ $env }}}
+      annotations:
+        checksum/secrets: {{ toJson $.Values.secrets | sha256sum | quote }}
     spec:
       containers:
         - name: worker
           image: {{ $.Values.images.app }}
           imagePullPolicy: Never
+          # Merge activities spill to a temp file (internal/activities/activities.go),
+          # so /tmp needs to stay writable even with a read-only rootfs.
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
           command: [activity-worker]
           env:
             {{- include "dataflow.appEnv" $ | nindent 12 }}
@@ -309,11 +414,14 @@ spec:
           volumeMounts:
             - {name: secrets, mountPath: /secrets, readOnly: true}
             - {name: connectors, mountPath: /app/connectors/manifests, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
       volumes:
         - name: secrets
           hostPath: {path: {{ printf "%s/secrets" $.Values.hostPath | quote }}, type: Directory}
         - name: connectors
           hostPath: {path: {{ printf "%s/connectors/manifests" $.Values.hostPath | quote }}, type: Directory}
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -322,17 +430,27 @@ spec:
   replicas: 1
   selector: {matchLabels: {app: workflow-worker-{{ $env }}}}
   template:
-    metadata: {labels: {app: workflow-worker-{{ $env }}}}
+    metadata:
+      labels: {app: workflow-worker-{{ $env }}}
+      annotations:
+        checksum/secrets: {{ toJson $.Values.secrets | sha256sum | quote }}
     spec:
       containers:
         - name: worker
           image: {{ $.Values.images.app }}
           imagePullPolicy: Never
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 250m, memory: 256Mi}
           command: [workflow-worker]
           env:
             - {name: TEMPORAL_ADDRESS, value: temporal:7233}
             - {name: TEMPORAL_NAMESPACE, value: {{ $env }}}
             - {name: TASK_QUEUE, value: dynamic-dag-{{ $env }}}
+            - {name: NODE_ENV, value: {{ ternary "production" "development" $.Values.runtime.production | quote }}}
+            - name: TEMPORAL_PAYLOAD_ENCRYPTION_KEY
+              valueFrom: {secretKeyRef: {name: dataflow-secrets, key: temporalPayloadKey}}
 ---
 {{- end }}
 apiVersion: apps/v1
@@ -344,12 +462,27 @@ spec:
   template:
     metadata: {labels: {app: web}}
     spec:
+      securityContext: {fsGroup: 101}
       containers:
         - name: web
           image: {{ .Values.images.web }}
           imagePullPolicy: Never
+          # nginx:alpine runs as root by default; force the built-in nginx
+          # user and grant just enough capability to bind port 80.
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 101, runAsGroup: 101, capabilities: {drop: [ALL], add: [NET_BIND_SERVICE]}}
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 128Mi}
           ports: [{containerPort: 80}]
           readinessProbe: {httpGet: {path: /login, port: 80}, periodSeconds: 5}
+          volumeMounts:
+            - {name: cache, mountPath: /var/cache/nginx}
+            - {name: run, mountPath: /var/run}
+      volumes:
+        - name: cache
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -358,3 +491,84 @@ spec:
   type: NodePort
   selector: {app: web}
   ports: [{port: 80, targetPort: 80, nodePort: {{ .Values.web.nodePort }}}]
+---
+# Logical DB backup every 6h: dataflow (app), temporal, temporal_visibility
+# (workflow history) — all three databases on the shared postgres instance.
+# Dumps land on the persistent data disk (kind node /var -> docker volume on
+# /var/lib/docker), so the daily 03:00 disk snapshot carries a <=6h-old dump
+# off-box. When backup.gcsBucket is set, each dump is also uploaded to GCS
+# using the GCE metadata-server token (VM SA needs roles/storage.objectCreator
+# on the bucket).
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: db-backup}
+spec:
+  schedule: "15 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 900
+      template:
+        metadata: {labels: {app: db-backup}}
+        spec:
+          restartPolicy: Never
+          initContainers:
+            - name: dump
+              image: {{ .Values.images.postgres }}
+              # Stays root: it writes into /backups, a hostPath directory
+              # created (and owned by root) on the node, so a forced non-root
+              # UID would break the write without a host-side chown, which is
+              # out of scope here.
+              securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+              resources:
+                requests: {cpu: 50m, memory: 128Mi}
+                limits: {cpu: 500m, memory: 512Mi}
+              env:
+                - {name: PGPASSWORD, valueFrom: {secretKeyRef: {name: dataflow-secrets, key: postgresPassword}}}
+              command:
+                - sh
+                - -ec
+                - |
+                  STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+                  for DB in dataflow temporal temporal_visibility; do
+                    OUT="/backups/${DB}-backup-${STAMP}.sql.gz"
+                    pg_dump -h postgres -U dataflow -d "$DB" | gzip > "$OUT"
+                    gunzip -t "$OUT"
+                    ls -1t "/backups/${DB}-backup-"*.sql.gz | tail -n +29 | xargs -r rm --
+                    echo "backup OK: $(du -sh "$OUT" | cut -f1) $OUT"
+                  done
+              volumeMounts: [{name: backups, mountPath: /backups}]
+          containers:
+            - name: upload
+              image: {{ .Values.images.curl }}
+              # curlimages/curl already runs as a non-root user by default; it
+              # only reads /backups, so the mount can be read-only too.
+              securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: {drop: [ALL]}}
+              resources:
+                requests: {cpu: 25m, memory: 32Mi}
+                limits: {cpu: 100m, memory: 128Mi}
+              command:
+                - sh
+                - -ec
+{{- if .Values.backup.gcsBucket }}
+                - |
+                  TOKEN=$(curl -sf -H "Metadata-Flavor: Google" \
+                    "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token" \
+                    | sed -E 's/.*"access_token" *: *"([^"]+)".*/\1/')
+                  for DB in dataflow temporal temporal_visibility; do
+                    OUT=$(ls -1t "/backups/${DB}-backup-"*.sql.gz | head -1)
+                    curl -sf -o /dev/null -X POST -H "Authorization: Bearer $TOKEN" \
+                      -H "Content-Type: application/gzip" --data-binary @"$OUT" \
+                      "https://storage.googleapis.com/upload/storage/v1/b/{{ .Values.backup.gcsBucket }}/o?uploadType=media&name=$(basename "$OUT")"
+                    echo "uploaded gs://{{ .Values.backup.gcsBucket }}/$(basename "$OUT")"
+                  done
+{{- else }}
+                - echo "backup.gcsBucket not set - dump kept on data disk only"
+{{- end }}
+              volumeMounts: [{name: backups, mountPath: /backups, readOnly: true}]
+          volumes:
+            - name: backups
+              hostPath: {path: /var/backups/dataflow, type: DirectoryOrCreate}

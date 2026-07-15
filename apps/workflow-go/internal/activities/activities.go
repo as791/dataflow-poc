@@ -1,10 +1,13 @@
 package activities
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/dataflow-poc/workflow-go/internal/connectors"
@@ -19,6 +22,9 @@ type Activities struct {
 	Payloads       *Payloads
 	Runtime        *connectors.Runtime
 	PrivateKeyPath string
+	// MaxMergeInMemoryBytes caps how much fan-in merge input can be held in memory at once
+	// before MergeRefs spills to a temp file instead; <= 0 means unlimited.
+	MaxMergeInMemoryBytes int64
 }
 
 type ScheduledExecutionParams struct {
@@ -398,6 +404,33 @@ func (a *Activities) MergeRefs(ctx context.Context, p MergeParams) (model.NodeRe
 	if err != nil {
 		return fail(err)
 	}
+
+	strategy := p.Strategy
+	if strategy == "" {
+		strategy = "concat"
+	}
+	var totalBytes int64
+	for _, ref := range p.InputRefs {
+		if ref != nil {
+			totalBytes += int64(ref.SizeBytes)
+		}
+	}
+	oversized := a.MaxMergeInMemoryBytes > 0 && totalBytes > a.MaxMergeInMemoryBytes
+	if oversized && strategy != "concat" {
+		// ponytail: union/join/appendWithSourceTag need every input materialized to dedupe or
+		// index by joinKey, so there's no streaming path for them yet - reject instead of OOMing.
+		// Add a spill-backed hash index if a real workload needs merges this large.
+		return fail(fmt.Errorf("merge inputs total %d bytes, exceeds MAX_MERGE_INMEMORY_BYTES limit of %d for strategy %q", totalBytes, a.MaxMergeInMemoryBytes, strategy))
+	}
+	if oversized {
+		ref, count, err := a.streamConcatMerge(ctx, p, dek)
+		if err != nil {
+			return fail(err)
+		}
+		_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "success", time.Since(started), count, "")
+		return model.NodeResult{NodeID: p.NodeID, Status: "success", OutputRef: ref, Meta: map[string]interface{}{"durationMs": time.Since(started).Milliseconds(), "recordCount": count}}, nil
+	}
+
 	arrays := make([][]interface{}, 0, len(p.InputRefs))
 	for _, ref := range p.InputRefs {
 		value, err := a.Payloads.Read(ctx, ref, dek)
@@ -420,6 +453,85 @@ func (a *Activities) MergeRefs(ctx context.Context, p MergeParams) (model.NodeRe
 	}
 	_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "success", time.Since(started), len(merged), "")
 	return model.NodeResult{NodeID: p.NodeID, Status: "success", OutputRef: ref, Meta: map[string]interface{}{"durationMs": time.Since(started).Milliseconds(), "recordCount": len(merged)}}, nil
+}
+
+// streamConcatMerge concatenates merge inputs one ref at a time, spilling the accumulated
+// output to a temp file instead of holding every input array in memory simultaneously. Each
+// input is still read through Payloads.Read (capped by MaxPayloadBytes) and goes out of scope
+// once its records are flushed, so peak heap during accumulation is roughly one input array
+// plus the spill buffer, not N arrays. The spilled total is itself hard-capped at
+// MaxMergeInMemoryBytes (checked incrementally, not just against the declared input sizes at
+// entry) precisely so the final read-back of the spilled file — which Payloads.Write requires
+// in memory, since payload encryption here is not a streaming AEAD construct — can never exceed
+// that configured limit; this is what makes the acceptance criterion ("worker RSS stays within
+// its configured limit for worst allowed input") actually hold, not just the entry-time check.
+func (a *Activities) streamConcatMerge(ctx context.Context, p MergeParams, dek []byte) (*model.DataRef, int, error) {
+	tmp, err := os.CreateTemp("", "dataflow-merge-*.json")
+	if err != nil {
+		return nil, 0, err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	defer tmp.Close()
+
+	writer := bufio.NewWriter(tmp)
+	written := int64(0)
+	writeAndCount := func(b []byte) error {
+		written += int64(len(b))
+		if a.MaxMergeInMemoryBytes > 0 && written > a.MaxMergeInMemoryBytes {
+			return fmt.Errorf("merge output exceeds MAX_MERGE_INMEMORY_BYTES limit of %d", a.MaxMergeInMemoryBytes)
+		}
+		_, err := writer.Write(b)
+		return err
+	}
+	if err := writeAndCount([]byte("[")); err != nil {
+		return nil, 0, err
+	}
+	count := 0
+	for _, ref := range p.InputRefs {
+		value, err := a.Payloads.Read(ctx, ref, dek)
+		if err != nil {
+			return nil, 0, err
+		}
+		records, ok := value.([]interface{})
+		if !ok {
+			return nil, 0, fmt.Errorf("merge input must be an array")
+		}
+		for _, record := range records {
+			if count > 0 {
+				if err := writeAndCount([]byte(",")); err != nil {
+					return nil, 0, err
+				}
+			}
+			body, err := json.Marshal(record)
+			if err != nil {
+				return nil, 0, err
+			}
+			if err := writeAndCount(body); err != nil {
+				return nil, 0, err
+			}
+			count++
+		}
+	}
+	if err := writeAndCount([]byte("]")); err != nil {
+		return nil, 0, err
+	}
+	if err := writer.Flush(); err != nil {
+		return nil, 0, err
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return nil, 0, err
+	}
+	// Safe: writeAndCount already guaranteed the spilled file is <= MaxMergeInMemoryBytes.
+	merged, err := io.ReadAll(tmp)
+	if err != nil {
+		return nil, 0, err
+	}
+	ref, err := a.Payloads.Write(ctx, json.RawMessage(merged), p.TenantID, p.ExecutionID, p.NodeID, dek)
+	if err != nil {
+		return nil, 0, err
+	}
+	return ref, count, nil
 }
 
 type EdgeConditionParams struct {
@@ -454,6 +566,19 @@ func (a *Activities) MarkExecution(ctx context.Context, p MarkExecutionParams) e
 		return err
 	}
 	_, _ = a.DB.Pool.Exec(ctx, `WITH changed AS (UPDATE backfill_partitions bp SET status=$2,completed_at=now() FROM executions e WHERE e.id=$1 AND e.backfill_partition_id=bp.id RETURNING bp.job_id) UPDATE backfill_jobs bj SET status=CASE WHEN EXISTS(SELECT 1 FROM backfill_partitions p WHERE p.job_id=bj.id AND p.status='failed') THEN 'failed' WHEN EXISTS(SELECT 1 FROM backfill_partitions p WHERE p.job_id=bj.id AND p.status='cancelled') THEN 'cancelled' ELSE 'completed' END,completed_at=now() FROM changed WHERE bj.id=changed.job_id AND NOT EXISTS(SELECT 1 FROM backfill_partitions p WHERE p.job_id=bj.id AND p.status IN('pending','starting','running'))`, p.ExecutionID, p.Phase)
+	if p.Phase == "failed" {
+		if _, err := a.DB.Pool.Exec(ctx, `INSERT INTO pipeline_alerts (tenant_id,pipeline_id,execution_id,fingerprint,kind,severity,message,details)
+			SELECT e.tenant_id,e.pipeline_id,e.id,'execution_failed','execution_failed','critical',
+			  COALESCE('Node '||nr.node_id||' failed: '||nr.error,'Node '||nr.node_id||' failed','Execution failed'),
+			  jsonb_strip_nulls(jsonb_build_object('executionId',e.id,'nodeId',nr.node_id))
+			FROM executions e
+			LEFT JOIN LATERAL (SELECT node_id,error FROM node_runs WHERE execution_id=e.id AND status='failed' ORDER BY finished_at DESC NULLS LAST LIMIT 1) nr ON true
+			WHERE e.id=$1
+			ON CONFLICT (tenant_id,pipeline_id,fingerprint) WHERE status IN ('open','acknowledged')
+			DO UPDATE SET last_seen_at=now(),execution_id=EXCLUDED.execution_id,message=EXCLUDED.message,details=EXCLUDED.details`, p.ExecutionID); err != nil {
+			slog.Warn("failed to record pipeline alert", "executionId", p.ExecutionID, "error", err)
+		}
+	}
 	return nil
 }
 

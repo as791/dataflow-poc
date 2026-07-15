@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/dataflow-poc/workflow-go/internal/model"
+	"github.com/dataflow-poc/workflow-go/internal/security"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -209,8 +210,12 @@ func (s *Server) connectorTest(w http.ResponseWriter, r *http.Request) error {
 	}
 	extra, _ := row["extra"].(map[string]interface{})
 	if row["provider"] == "http" {
+		if _, err := security.ValidateURL(stringValue(extra["baseUrl"])); err != nil {
+			jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": false, "message": err.Error()})
+			return nil
+		}
 		request, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, stringValue(extra["baseUrl"]), nil)
-		response, err := s.HTTP.Do(request)
+		response, err := s.SafeHTTP.Do(request)
 		if err != nil {
 			jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": false, "message": err.Error()})
 			return nil

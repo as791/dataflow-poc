@@ -23,7 +23,7 @@ export default function ProfilePage() {
   return (
     <div className="mx-auto max-w-lg space-y-6 px-6 py-10">
       <div>
-        <h1 className="page-heading flex items-center gap-2"><User size={20} /> Profile</h1>
+        <h2 className="page-heading flex items-center gap-2"><User size={20} /> Profile</h2>
         <p className="page-subtitle mt-1">Your account and workspace details.</p>
       </div>
 

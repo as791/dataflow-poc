@@ -13,6 +13,7 @@ import (
 	"github.com/dataflow-poc/workflow-go/internal/connectors"
 	"github.com/dataflow-poc/workflow-go/internal/database"
 	"github.com/dataflow-poc/workflow-go/internal/objectstore"
+	"github.com/dataflow-poc/workflow-go/internal/security"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
@@ -20,11 +21,16 @@ import (
 )
 
 type Server struct {
-	Config     config.Config
-	DB         *database.DB
-	Redis      *redis.Client
-	Temporal   map[string]client.Client
-	HTTP       *http.Client
+	Config   config.Config
+	DB       *database.DB
+	Redis    *redis.Client
+	Temporal map[string]client.Client
+	HTTP     *http.Client
+	// SafeHTTP is the shared client for outbound requests to tenant-supplied
+	// endpoints (currently: the HTTP connector-instance test-connection
+	// check). It enforces HTTPS and re-validates the resolved IP against the
+	// private/metadata denylist at dial time.
+	SafeHTTP   *http.Client
 	Registry   *prometheus.Registry
 	Payloads   *activities.Payloads
 	Connectors *connectors.Registry
@@ -81,8 +87,8 @@ func New(ctx context.Context, cfg config.Config) (*Server, error) {
 	registry.MustRegister(requests, durations)
 	return &Server{
 		Config: cfg, DB: db, Redis: redis.NewClient(redisOptions), Temporal: temporalClients,
-		HTTP: &http.Client{Timeout: 30 * time.Second}, Registry: registry, Requests: requests, Durations: durations,
-		Payloads:   &activities.Payloads{DB: db, Store: store, PlatformKey: platformKey},
+		HTTP: &http.Client{Timeout: 30 * time.Second}, SafeHTTP: security.NewHTTPClient(30 * time.Second), Registry: registry, Requests: requests, Durations: durations,
+		Payloads:   &activities.Payloads{DB: db, Store: store, PlatformKey: platformKey, MaxPayloadBytes: cfg.MaxPayloadBytes},
 		Connectors: connectors.Load(cfg.ConnectorsDir),
 	}, nil
 }
@@ -137,12 +143,15 @@ func (s *Server) metrics(next http.Handler) http.Handler {
 }
 
 func (s *Server) StartBackground(ctx context.Context) {
-	go s.auditRetention(ctx)
+	go s.dataRetention(ctx)
 	go s.backfillDispatcher(ctx)
 	go s.assetEventSubscriber(ctx)
 }
 
-func (s *Server) auditRetention(ctx context.Context) {
+// dataRetention purges database rows past their configured retention window.
+// The Redis stream is intentionally excluded: successful entries are already
+// XACKed and deleted, while trimming a backlog could drop undelivered events.
+func (s *Server) dataRetention(ctx context.Context) {
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
 	for {
@@ -150,9 +159,20 @@ func (s *Server) auditRetention(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if _, err := s.DB.Pool.Exec(ctx, `DELETE FROM audit_log WHERE created_at < now() - ($1 || ' days')::interval`, s.Config.AuditRetentionDays); err != nil {
-				slog.Error("audit_log purge failed", "error", err)
-			}
+			s.purgeAgedData(ctx)
 		}
+	}
+}
+
+func (s *Server) purgeAgedData(ctx context.Context) {
+	_, err := s.DB.Pool.Exec(ctx, `SELECT public.purge_aged_data($1,$2,$3,$4,$5)`,
+		s.Config.AuditRetentionDays,
+		s.Config.ExecutionRetentionDays,
+		s.Config.NodeRunRetentionDays,
+		s.Config.PayloadRetentionDays,
+		s.Config.OutboxRetentionDays,
+	)
+	if err != nil {
+		slog.Error("data retention purge failed", "error", err)
 	}
 }

@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { CatalogProvider } from './context/CatalogContext';
@@ -5,27 +6,34 @@ import { ThemeProvider } from './context/ThemeContext';
 import { FeatureProvider } from './context/FeatureContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AppShell } from './components/AppShell';
-import PipelineCanvasPage from './pages/PipelineCanvasPage';
-import LifecyclePage from './pages/LifecyclePage';
-import RunsPage from './pages/RunsPage';
-import RunDetailPage from './pages/RunDetailPage';
-import { LoginPage, AcceptInvitePage } from './pages/auth';
-import { TeamPage } from './pages/TeamPage';
-import { ConnectorsPage } from './pages/ConnectorsPage';
-import { BillingPage } from './pages/BillingPage';
-import { AnalyticsPage } from './pages/AnalyticsPage';
-import LineagePage from './pages/LineagePage';
-import MonitoringPage from './pages/MonitoringPage';
-import PipelinesPage from './pages/PipelinesPage';
-import ProfilePage from './pages/ProfilePage';
-import SettingsPage from './pages/SettingsPage';
+import { RouteErrorBoundary } from './components/RouteErrorBoundary';
+
+const PipelineCanvasPage = lazy(() => import('./pages/PipelineCanvasPage'));
+const LifecyclePage = lazy(() => import('./pages/LifecyclePage'));
+const RunsPage = lazy(() => import('./pages/RunsPage'));
+const RunDetailPage = lazy(() => import('./pages/RunDetailPage'));
+const LineagePage = lazy(() => import('./pages/LineagePage'));
+const MonitoringPage = lazy(() => import('./pages/MonitoringPage'));
+const PipelinesPage = lazy(() => import('./pages/PipelinesPage'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const LoginPage = lazy(() => import('./pages/auth').then(module => ({ default: module.LoginPage })));
+const AcceptInvitePage = lazy(() => import('./pages/auth').then(module => ({ default: module.AcceptInvitePage })));
+const TeamPage = lazy(() => import('./pages/TeamPage').then(module => ({ default: module.TeamPage })));
+const ConnectorsPage = lazy(() => import('./pages/ConnectorsPage').then(module => ({ default: module.ConnectorsPage })));
+const BillingPage = lazy(() => import('./pages/BillingPage').then(module => ({ default: module.BillingPage })));
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage').then(module => ({ default: module.AnalyticsPage })));
+
+function RouteFallback() {
+  return <div role="status" aria-live="polite" className="flex min-h-screen items-center justify-center bg-white text-sm text-gray-500 dark:bg-[#080a10] dark:text-white/50">Loading page…</div>;
+}
 
 export default function App() {
   return (
     <ThemeProvider>
       <BrowserRouter>
         <AuthProvider>
-          <Routes>
+          <RouteErrorBoundary><Suspense fallback={<RouteFallback />}><Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/accept-invite" element={<AcceptInvitePage />} />
 
@@ -49,7 +57,7 @@ export default function App() {
               <Route path="settings" element={<SettingsPage />} />
               <Route path="profile" element={<ProfilePage />} />
             </Route>
-          </Routes>
+          </Routes></Suspense></RouteErrorBoundary>
         </AuthProvider>
       </BrowserRouter>
     </ThemeProvider>

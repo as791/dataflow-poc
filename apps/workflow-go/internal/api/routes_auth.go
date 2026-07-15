@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dataflow-poc/workflow-go/internal/model"
+	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -21,7 +22,7 @@ func (s *Server) registerAuth(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/auth/oidc/callback", handle(s.oidcCallback))
 	mux.Handle("POST /api/auth/register", s.rateLimit("password-register", 10, time.Minute, handle(s.registerPassword)))
 	mux.Handle("POST /api/auth/login", s.rateLimit("password-login", 10, time.Minute, handle(s.loginPassword)))
-	mux.HandleFunc("POST /api/auth/refresh", handle(s.refresh))
+	mux.Handle("POST /api/auth/refresh", s.rateLimit("token-refresh", 30, time.Minute, handle(s.refresh)))
 	mux.HandleFunc("POST /api/auth/logout", handle(s.logout))
 	mux.Handle("GET /api/auth/me", s.protected(handle(s.me)))
 	mux.HandleFunc("GET /api/auth/accept-invite", handle(s.acceptInvite))
@@ -245,11 +246,15 @@ func (s *Server) googleCallback(w http.ResponseWriter, r *http.Request) error {
 	idToken, _ := tokens["id_token"].(string)
 	var profile struct {
 		Sub, Email    string
+		Aud, Iss      string
 		EmailVerified interface{} `json:"email_verified"`
 	}
 	if idToken == "" || s.getJSON(r, "https://oauth2.googleapis.com/tokeninfo?id_token="+url.QueryEscape(idToken), &profile) != nil || profile.Sub == "" || profile.Email == "" || fmt.Sprint(profile.EmailVerified) == "false" {
 		http.Redirect(w, r, s.Config.AppURL+"/login?error=oauth_profile", http.StatusFound)
 		return nil
+	}
+	if profile.Aud != os.Getenv("GOOGLE_CLIENT_ID") || (profile.Iss != "" && profile.Iss != "https://accounts.google.com" && profile.Iss != "accounts.google.com") {
+		return &HTTPError{Status: http.StatusUnauthorized, Message: "Google id_token audience or issuer mismatch"}
 	}
 	userID, err := s.resolveIdentity(r, "google_sub", profile.Sub, strings.ToLower(profile.Email), "google")
 	if err != nil {
@@ -314,6 +319,10 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) error {
 		http.Redirect(w, r, s.Config.AppURL+"/login?error=oidc_profile", http.StatusFound)
 		return nil
 	}
+	idToken, _ := token["id_token"].(string)
+	if idToken == "" || verifyOIDCIDToken(idToken, strings.TrimSuffix(os.Getenv("OIDC_ISSUER"), "/"), os.Getenv("OIDC_CLIENT_ID"), info.Sub) != nil {
+		return &HTTPError{Status: http.StatusUnauthorized, Message: "OIDC id_token verification failed"}
+	}
 	userID, err := s.resolveIdentity(r, "oidc_sub", info.Sub, strings.ToLower(info.Email), "oidc")
 	if err != nil {
 		http.Redirect(w, r, s.Config.AppURL+"/login?error=oidc_failed", http.StatusFound)
@@ -326,6 +335,23 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) error {
 	setRefreshCookie(w, refresh)
 	http.Redirect(w, r, s.Config.AppURL+"/pipelines", http.StatusFound)
 	return nil
+}
+
+// verifyOIDCIDToken parses the ID token payload and checks iss, aud, sub, and exp.
+// We cannot JWKS-verify the signature without a new dependency; integrity is
+// anchored by cross-checking sub against the userinfo response, which is
+// fetched over TLS from the issuer using the access token.
+func verifyOIDCIDToken(idToken, issuer, clientID, userinfoSub string) error {
+	claims := &jwt.RegisteredClaims{}
+	if _, _, err := jwt.NewParser().ParseUnverified(idToken, claims); err != nil {
+		return fmt.Errorf("id_token claims: %w", err)
+	}
+	if issuer == "" || strings.TrimSuffix(claims.Issuer, "/") != issuer {
+		return fmt.Errorf("id_token issuer mismatch")
+	}
+	return jwt.NewValidator(
+		jwt.WithAudience(clientID), jwt.WithSubject(userinfoSub), jwt.WithExpirationRequired(),
+	).Validate(claims)
 }
 
 func (s *Server) resolveIdentity(r *http.Request, column, sub, email, provider string) (string, error) {

@@ -1,6 +1,22 @@
 # Loop State
 
-Updated: 2026-07-10 (analytics enterprise loop)
+Updated: 2026-07-15 (lineage UI QA/fix loop)
+
+## Lineage UI QA/fix loop (2026-07-15)
+
+Status: **done locally; not deployed**. Pattern `deployed-test-triage`; estimated budget used 95k/300k tokens; two-agent spawn cap fully used.
+
+- [x] Reproduced the actual deployed cold/direct `/lineage` failure: React Flow structural CSS was route-order dependent, leaving nodes, controls, and minimap in normal document flow and overlapping the filter/canvas area.
+- [x] Measured the deployed scale: 1,064 nodes / 174 edges; clearing search back to the full graph took about 1.8s before the fix.
+- [x] Loaded React Flow CSS globally and added a cold-route layout regression.
+- [x] Kept React Flow and optimized the page with viewport culling, memoized nodes, debounced search, stable canvas mounting, linear adjacency/BFS work, compact labeled filters, bounded layout, explicit loading state, and a mobile-hidden minimap.
+- [x] Corrected the Go lineage payload to provide deterministic edge/column-edge identity and provenance, complete S3 asset display fields, typed schemas, metadata, and SLOs.
+- [x] Added an actual-scale 1,064-node / 174-edge mobile fixture proving the full model loads while rendered nodes stay culled, the graph remains within the viewport, and at least 50vh remains usable.
+- [x] Independent maker/checker verification returned APPROVE for both change sets.
+
+Checks: web typecheck; existing web unit tests; 2 focused lineage Playwright tests; focused Go contract test; full `internal/api` Go package (9 tests); diff and gofmt checks. All passed.
+
+Remaining before release: deploy only with explicit authorization, then repeat cold/reload/warm navigation against the actual server and manually check filtered-result viewport behavior plus pan/zoom FPS. If production-scale interaction still misses targets, next evaluate hiding unlinked nodes and deterministic connected-component/layered layout before considering a WebGL graph renderer.
 
 ## Analytics enterprise loop (2026-07-10)
 

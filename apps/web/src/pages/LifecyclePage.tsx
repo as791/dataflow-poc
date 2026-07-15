@@ -4,23 +4,7 @@ import { History, Milestone, RefreshCw } from 'lucide-react';
 import { api } from '../api';
 import { ApiError } from '../components/ApiError';
 import { DateTimePicker } from '../components/DateTimePicker';
-
-export type Stage = 'draft' | 'testing' | 'production' | 'archived';
-const STAGE_LABEL: Record<Stage, string> = {
-  draft: 'Draft', testing: 'Integration', production: 'Production', archived: 'Archived',
-};
-const ENV_LABEL: Record<string, string> = { test: 'Integration', prod: 'Production' };
-
-export function displayStage(stage: Stage) { return STAGE_LABEL[stage]; }
-export function displayEnvironment(environment?: string) {
-  return environment ? (ENV_LABEL[environment] ?? environment) : 'Integration';
-}
-export function deriveStage(status?: string, environment?: string): Stage {
-  if (status === 'active' && environment === 'prod') return 'production';
-  if (status === 'active' && environment === 'test') return 'testing';
-  if (status === 'archived') return 'archived';
-  return 'draft';
-}
+import { deriveStage, displayEnvironment, displayStage, type Stage } from '../utils/pipelineStage';
 
 const STAGE_STYLE: Record<Stage, string> = {
   draft:      'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-white/60',
@@ -173,7 +157,7 @@ export default function LifecyclePage() {
 
   const refresh = useCallback(async () => {
     setLoading(true); setError(null);
-    try { setRows(await api.listPipelines()); }
+    try { setRows(await api.listAllPipelines()); }
     catch (e: any) { setError(e.message ?? 'Failed to load pipelines'); }
     finally { setLoading(false); }
   }, []);
@@ -196,7 +180,7 @@ export default function LifecyclePage() {
     <div className="mx-auto max-w-5xl space-y-6 px-6 py-10">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="page-heading flex items-center gap-2"><Milestone size={20} /> Lifecycle</h1>
+          <h2 className="page-heading flex items-center gap-2"><Milestone size={20} aria-hidden="true" /> Lifecycle</h2>
           <p className="page-subtitle mt-1">
             Promote pipelines draft → Integration → production. Production requires a green run and compatible published contracts.
           </p>

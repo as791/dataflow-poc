@@ -1,12 +1,16 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
+	"time"
 
+	"github.com/dataflow-poc/workflow-go/internal/config"
 	"github.com/dataflow-poc/workflow-go/internal/model"
 	"github.com/jackc/pgx/v5"
 )
@@ -68,6 +72,9 @@ func (s *Server) pipelineCreate(w http.ResponseWriter, r *http.Request) error {
 	def.ID = id
 	def.TenantID = tenant.TenantID
 	if err := validatePipeline(def); err != nil {
+		return badRequest(ErrInvalidRequest, err.Error())
+	}
+	if err := validatePipelineLimits(def, s.Config); err != nil {
 		return badRequest(ErrInvalidRequest, err.Error())
 	}
 	if err := s.enforcePipelineFeatures(r, def); err != nil {
@@ -169,13 +176,77 @@ func (s *Server) pipelineRun(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// pipelineList returns a summary projection (no definition column) with
+// keyset pagination on (created_at,id) plus optional search/stage/trigger
+// filters. Use pipelineGet for the full definition of a single row.
 func (s *Server) pipelineList(w http.ResponseWriter, r *http.Request) error {
 	tenant := tenantFrom(r)
-	rows, err := tenantQueryRows(r.Context(), s.DB, tenant.TenantID, `SELECT p.id,p.pipeline_key,p.version,p.name,p.status,p.environment,p.promoted_from_version,p.created_at,p.definition,lr.phase AS last_run_phase,lr.started_at AS last_run_at,lr.id AS last_run_id FROM pipelines p LEFT JOIN LATERAL (SELECT phase,started_at,id FROM executions WHERE pipeline_id=p.id ORDER BY started_at DESC LIMIT 1) lr ON true ORDER BY p.created_at DESC`)
+	q := r.URL.Query()
+
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	if limit < 1 {
+		limit = 50
+	}
+	maxLimit := s.Config.MaxPipelineListPageSize
+	if maxLimit <= 0 || maxLimit > 200 {
+		maxLimit = 200
+	}
+	if limit > maxLimit {
+		limit = maxLimit
+	}
+
+	where := []string{}
+	args := []interface{}{}
+	if search := strings.TrimSpace(q.Get("search")); search != "" {
+		args = append(args, search)
+		where = append(where, fmt.Sprintf("p.name ILIKE '%%'||$%d||'%%'", len(args)))
+	}
+	switch q.Get("stage") {
+	case "production":
+		where = append(where, "p.status='active' AND p.environment='prod'")
+	case "testing":
+		where = append(where, "p.status='active' AND p.environment='test'")
+	case "draft":
+		where = append(where, "NOT (p.status='active' AND p.environment IN ('prod','test'))")
+	}
+	if trigger := q.Get("trigger"); trigger != "" {
+		args = append(args, trigger)
+		where = append(where, fmt.Sprintf("p.definition->'trigger'->>'type'=$%d", len(args)))
+	}
+	if cursor := q.Get("cursor"); cursor != "" {
+		decoded, err := base64.RawURLEncoding.DecodeString(cursor)
+		if err != nil {
+			return badRequest(ErrInvalidRequest, "invalid pipeline cursor")
+		}
+		var value struct{ CreatedAt, ID string }
+		if json.Unmarshal(decoded, &value) != nil || value.CreatedAt == "" || value.ID == "" {
+			return badRequest(ErrInvalidRequest, "invalid pipeline cursor")
+		}
+		args = append(args, value.CreatedAt, value.ID)
+		where = append(where, fmt.Sprintf("(p.created_at,p.id)<($%d::timestamptz,$%d)", len(args)-1, len(args)))
+	}
+
+	query := `SELECT p.id,p.pipeline_key,p.version,p.name,p.status,p.environment,p.promoted_from_version,p.created_at,p.definition->'trigger'->>'type' AS trigger_type,lr.phase AS last_run_phase,lr.started_at AS last_run_at,lr.id AS last_run_id FROM pipelines p LEFT JOIN LATERAL (SELECT phase,started_at,id FROM executions WHERE pipeline_id=p.id ORDER BY started_at DESC LIMIT 1) lr ON true`
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	query += fmt.Sprintf(" ORDER BY p.created_at DESC,p.id DESC LIMIT %d", limit+1)
+
+	rows, err := tenantQueryRows(r.Context(), s.DB, tenant.TenantID, query, args...)
 	if err != nil {
 		return err
 	}
-	jsonResponse(w, http.StatusOK, rows)
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	var next interface{}
+	if hasMore && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		b, _ := json.Marshal(map[string]string{"createdAt": timeValue(last["created_at"]).UTC().Format(time.RFC3339Nano), "id": stringValue(last["id"])})
+		next = base64.RawURLEncoding.EncodeToString(b)
+	}
+	jsonResponse(w, http.StatusOK, map[string]interface{}{"rows": rows, "nextCursor": next})
 	return nil
 }
 func (s *Server) pipelineGet(w http.ResponseWriter, r *http.Request) error {
@@ -187,6 +258,38 @@ func (s *Server) pipelineGet(w http.ResponseWriter, r *http.Request) error {
 		return notFound(ErrNotFound, "not found")
 	}
 	jsonResponse(w, http.StatusOK, row)
+	return nil
+}
+
+// validatePipelineLimits enforces config-driven size/shape ceilings on a
+// pipeline definition so an oversized or pathological graph is rejected
+// before it ever reaches the database.
+func validatePipelineLimits(def model.PipelineDefinition, cfg config.Config) error {
+	if len(def.Nodes) > cfg.MaxPipelineNodes {
+		return fmt.Errorf("pipeline has %d nodes, exceeding the limit of %d", len(def.Nodes), cfg.MaxPipelineNodes)
+	}
+	if len(def.Edges) > cfg.MaxPipelineEdges {
+		return fmt.Errorf("pipeline has %d edges, exceeding the limit of %d", len(def.Edges), cfg.MaxPipelineEdges)
+	}
+	fanout := map[string]int{}
+	for _, edge := range def.Edges {
+		fanout[edge.Source]++
+		if fanout[edge.Source] > cfg.MaxPipelineFanout {
+			return fmt.Errorf("node %s fans out to more than %d edges", edge.Source, cfg.MaxPipelineFanout)
+		}
+	}
+	for _, node := range def.Nodes {
+		body, _ := json.Marshal(node.Config)
+		if len(body) > cfg.MaxPipelineConfigBytes {
+			return fmt.Errorf("node %s config is %d bytes, exceeding the limit of %d", node.ID, len(body), cfg.MaxPipelineConfigBytes)
+		}
+		if node.Ingestion != nil && node.Ingestion.PageSize > cfg.MaxPipelineNodePageSize {
+			return fmt.Errorf("node %s ingestion pageSize %d exceeds the limit of %d", node.ID, node.Ingestion.PageSize, cfg.MaxPipelineNodePageSize)
+		}
+	}
+	if def.Concurrency != nil && def.Concurrency.MaxParallelNodes > cfg.MaxPipelineMaxParallel {
+		return fmt.Errorf("concurrency.maxParallelNodes %d exceeds the limit of %d", def.Concurrency.MaxParallelNodes, cfg.MaxPipelineMaxParallel)
+	}
 	return nil
 }
 
@@ -439,6 +542,9 @@ func (s *Server) backfillCreate(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return badRequest(ErrInvalidRequest, err.Error())
 	}
+	if plan.PartitionCount > s.Config.MaxBackfillPartitions {
+		return badRequest(ErrInvalidRequest, fmt.Sprintf("backfill has %d partitions, exceeding the limit of %d", plan.PartitionCount, s.Config.MaxBackfillPartitions))
+	}
 	row, def, err := s.loadPipeline(r, r.PathValue("rowId"))
 	if err != nil {
 		return err
@@ -670,18 +776,39 @@ func (s *Server) lineageWorkspace(w http.ResponseWriter, r *http.Request) error 
 }
 
 type fieldOrigin struct {
-	assetID string
-	field   string
+	assetURN        string
+	field           string
+	fieldType       string
+	nullable        bool
+	transformNodeID string
+}
+
+type lineageField struct {
+	fieldType string
+	nullable  bool
 }
 
 var mapFieldPattern = regexp.MustCompile(`(\w+)\s*:\s*r\.(\w+)`)
 
-func assetURN(cfg map[string]interface{}) (string, string, bool) {
+func assetURN(cfg map[string]interface{}) (string, string, string, string, bool) {
 	bucket, key, layer := stringValue(cfg["bucket"]), stringValue(cfg["key"]), stringValue(cfg["layer"])
 	if bucket == "" || key == "" || layer == "" {
-		return "", "", false
+		return "", "", "", "", false
 	}
-	return fmt.Sprintf("s3://%s/%s", bucket, key), layer, true
+	return fmt.Sprintf("s3://%s/%s", bucket, key), bucket, key, layer, true
+}
+
+func lineageContractSchema(value interface{}) map[string]interface{} {
+	switch value := value.(type) {
+	case map[string]interface{}:
+		return value
+	case string:
+		var schema map[string]interface{}
+		if err := json.Unmarshal([]byte(value), &schema); err == nil {
+			return schema
+		}
+	}
+	return nil
 }
 
 // buildWorkspaceLineage walks each pipeline's node chain (assumed linear —
@@ -692,17 +819,19 @@ func buildWorkspaceLineage(rows []map[string]interface{}) map[string]interface{}
 	nodes := []map[string]interface{}{}
 	edges := []map[string]interface{}{}
 	columnEdges := []map[string]interface{}{}
-	assetSchemas := map[string]map[string]bool{}
+	assetSchemas := map[string]map[string]lineageField{}
 	assetTouchedBy := map[string]map[string]bool{}
 	assetOrder := []string{}
 
-	ensureAsset := func(urn, layer string) string {
+	ensureAsset := func(urn, bucket, key, layer string) string {
 		id := "asset:" + urn
 		if _, ok := assetSchemas[id]; !ok {
-			assetSchemas[id] = map[string]bool{}
+			assetSchemas[id] = map[string]lineageField{}
 			assetTouchedBy[id] = map[string]bool{}
 			assetOrder = append(assetOrder, id)
-			nodes = append(nodes, map[string]interface{}{"id": id, "kind": "asset", "asset": map[string]interface{}{"urn": urn, "layer": layer}})
+			nodes = append(nodes, map[string]interface{}{"id": id, "kind": "asset", "asset": map[string]interface{}{
+				"urn": urn, "platform": "s3", "namespace": bucket, "name": key, "type": "file", "layer": layer,
+			}})
 		}
 		return id
 	}
@@ -710,11 +839,20 @@ func buildWorkspaceLineage(rows []map[string]interface{}) map[string]interface{}
 	for _, row := range rows {
 		rowID := stringValue(row["id"])
 		pipelineNodeID := "pipeline:" + rowID
-		nodes = append(nodes, map[string]interface{}{"id": pipelineNodeID, "kind": "pipeline", "pipeline": map[string]interface{}{"rowId": row["id"], "pipelineKey": row["pipeline_key"], "name": row["name"], "version": row["version"], "status": row["status"], "environment": row["environment"]}})
-
 		raw, _ := json.Marshal(row["definition"])
 		var def model.PipelineDefinition
-		if err := json.Unmarshal(raw, &def); err != nil || len(def.Nodes) == 0 {
+		definitionErr := json.Unmarshal(raw, &def)
+		pipeline := map[string]interface{}{"rowId": row["id"], "pipelineKey": row["pipeline_key"], "name": row["name"], "version": row["version"], "status": row["status"], "environment": row["environment"]}
+		if definitionErr == nil {
+			if def.Metadata != nil {
+				pipeline["metadata"] = def.Metadata
+			}
+			if def.SLO != nil {
+				pipeline["slo"] = def.SLO
+			}
+		}
+		nodes = append(nodes, map[string]interface{}{"id": pipelineNodeID, "kind": "pipeline", "pipeline": pipeline})
+		if definitionErr != nil || len(def.Nodes) == 0 {
 			continue
 		}
 		byID := map[string]model.Node{}
@@ -736,21 +874,30 @@ func buildWorkspaceLineage(rows []map[string]interface{}) map[string]interface{}
 			}
 		}
 		schema := map[string]fieldOrigin{}
-		var upstreamAsset string
+		var upstreamAssetURN string
 		for current != "" {
 			node := byID[current]
 			if node.Type == "source" {
-				if urn, layer, ok := assetURN(node.Config); ok {
-					assetID := ensureAsset(urn, layer)
+				if urn, bucket, key, layer, ok := assetURN(node.Config); ok {
+					assetID := ensureAsset(urn, bucket, key, layer)
 					assetTouchedBy[assetID][rowID] = true
-					edges = append(edges, map[string]interface{}{"source": assetID, "target": pipelineNodeID})
-					upstreamAsset = assetID
+					edges = append(edges, map[string]interface{}{
+						"id": fmt.Sprintf("edge:%s:%s:source", rowID, node.ID), "source": assetID, "target": pipelineNodeID,
+						"pipelineRowId": rowID, "nodeId": node.ID,
+					})
+					upstreamAssetURN = urn
 				}
 			}
 			if node.ActivityType == "transform.contract" {
-				if schemaJSON, ok := node.Config["schemaJson"].(map[string]interface{}); ok {
-					for field := range schemaJSON {
-						schema[field] = fieldOrigin{assetID: upstreamAsset, field: field}
+				if schemaJSON := lineageContractSchema(node.Config["schemaJson"]); schemaJSON != nil {
+					for field, rawType := range schemaJSON {
+						fieldType := stringValue(rawType)
+						nullable := strings.HasSuffix(fieldType, "?")
+						fieldType = strings.TrimSuffix(fieldType, "?")
+						if fieldType == "" {
+							fieldType = "unknown"
+						}
+						schema[field] = fieldOrigin{assetURN: upstreamAssetURN, field: field, fieldType: fieldType, nullable: nullable, transformNodeID: node.ID}
 					}
 				}
 			}
@@ -760,6 +907,7 @@ func buildWorkspaceLineage(rows []map[string]interface{}) map[string]interface{}
 					for _, match := range mapFieldPattern.FindAllStringSubmatch(expression, -1) {
 						newField, oldField := match[1], match[2]
 						if origin, known := schema[oldField]; known {
+							origin.transformNodeID = node.ID
 							next[newField] = origin
 						}
 					}
@@ -769,14 +917,24 @@ func buildWorkspaceLineage(rows []map[string]interface{}) map[string]interface{}
 				}
 			}
 			if node.Type == "sink" {
-				if urn, layer, ok := assetURN(node.Config); ok {
-					assetID := ensureAsset(urn, layer)
+				if urn, bucket, key, layer, ok := assetURN(node.Config); ok {
+					assetID := ensureAsset(urn, bucket, key, layer)
 					assetTouchedBy[assetID][rowID] = true
-					edges = append(edges, map[string]interface{}{"source": pipelineNodeID, "target": assetID})
+					edges = append(edges, map[string]interface{}{
+						"id": fmt.Sprintf("edge:%s:%s:sink", rowID, node.ID), "source": pipelineNodeID, "target": assetID,
+						"pipelineRowId": rowID, "nodeId": node.ID,
+					})
 					for renamed, origin := range schema {
-						assetSchemas[assetID][origin.field] = true
-						if origin.assetID != "" {
-							columnEdges = append(columnEdges, map[string]interface{}{"source": fmt.Sprintf("%s:%s", origin.assetID, origin.field), "target": fmt.Sprintf("%s:%s", assetID, renamed)})
+						assetSchemas[assetID][renamed] = lineageField{fieldType: origin.fieldType, nullable: origin.nullable}
+						if origin.assetURN != "" {
+							columnEdge := map[string]interface{}{
+								"id": fmt.Sprintf("column:%s:%s:%s:%s", rowID, node.ID, origin.field, renamed), "pipelineRowId": rowID,
+								"sourceAssetUrn": origin.assetURN, "sourceField": origin.field, "targetAssetUrn": urn, "targetField": renamed,
+							}
+							if origin.transformNodeID != "" {
+								columnEdge["transformNodeId"] = origin.transformNodeID
+							}
+							columnEdges = append(columnEdges, columnEdge)
 						}
 					}
 				}
@@ -791,8 +949,12 @@ func buildWorkspaceLineage(rows []map[string]interface{}) map[string]interface{}
 		}
 		assetID := node["id"].(string)
 		fields := []map[string]interface{}{}
-		for name := range assetSchemas[assetID] {
-			fields = append(fields, map[string]interface{}{"name": name})
+		for name, field := range assetSchemas[assetID] {
+			item := map[string]interface{}{"name": name, "type": field.fieldType}
+			if field.nullable {
+				item["nullable"] = true
+			}
+			fields = append(fields, item)
 		}
 		if len(fields) > 0 {
 			node["asset"].(map[string]interface{})["schema"] = map[string]interface{}{"fields": fields}

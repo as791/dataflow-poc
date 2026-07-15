@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/dataflow-poc/workflow-go/internal/config"
 	"github.com/dataflow-poc/workflow-go/internal/database"
 	"github.com/dataflow-poc/workflow-go/internal/model"
 	"github.com/dataflow-poc/workflow-go/internal/objectstore"
+	"github.com/dataflow-poc/workflow-go/internal/security"
 )
 
 func contains(values []string, wanted string) bool {
@@ -39,17 +41,25 @@ type HandlerContext struct {
 type Handler func(context.Context, interface{}, map[string]interface{}, HandlerContext) (interface{}, map[string]interface{}, error)
 
 type Runtime struct {
-	DB       *database.DB
-	Store    *objectstore.Store
-	Config   config.Config
-	HTTP     *http.Client
+	DB     *database.DB
+	Store  *objectstore.Store
+	Config config.Config
+	HTTP   *http.Client
+	// SafeHTTP is the shared client for outbound requests to user/tenant
+	// supplied URLs (HTTP connector fetch/sink, ClickHouse sink connector
+	// instances, alert destinations). It enforces HTTPS and re-validates
+	// the resolved IP against the private/metadata denylist at dial time.
+	// HTTP requests to platform-owned infra (e.g. the system ClickHouse or
+	// SaaS OAuth endpoints) intentionally keep using HTTP, since those are
+	// not attacker-influenced and may legitimately live on private ranges.
+	SafeHTTP *http.Client
 	Registry *Registry
 	Sources  map[string]Source
 	Handlers map[string]Handler
 }
 
 func NewRuntime(db *database.DB, store *objectstore.Store, cfg config.Config, httpClient *http.Client, registry *Registry) *Runtime {
-	r := &Runtime{DB: db, Store: store, Config: cfg, HTTP: httpClient, Registry: registry, Sources: map[string]Source{}, Handlers: map[string]Handler{}}
+	r := &Runtime{DB: db, Store: store, Config: cfg, HTTP: httpClient, SafeHTTP: security.NewHTTPClient(30 * time.Second), Registry: registry, Sources: map[string]Source{}, Handlers: map[string]Handler{}}
 	r.registerTransforms()
 	r.registerHTTP()
 	r.registerDatabases()

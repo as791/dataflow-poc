@@ -46,14 +46,14 @@ export function TeamPage() {
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
       <div className="mb-6">
-        <h1 className="page-heading">Workspace team</h1>
+        <h2 className="page-heading">Workspace team</h2>
         <p className="page-subtitle mt-1">Manage members and pending invitations.</p>
       </div>
       {msg && <div className="mb-4 text-xs opacity-70">{msg}</div>}
 
       {isOwner && (
         <section className="glass-panel p-5 mb-6">
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><UserPlus size={16} className="text-brand-300" /> Invite teammate</h2>
+          <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold"><UserPlus size={16} className="text-brand-300" /> Invite teammate</h3>
           <form onSubmit={invite} className="flex flex-wrap gap-2 items-end">
             <label className="glass-label flex-1 min-w-[200px]">Email
               <input className="glass-input" type="email" required value={email}
@@ -72,7 +72,7 @@ export function TeamPage() {
       )}
 
       <section className="glass-panel p-5 mb-6">
-        <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Users size={16} className="text-cyan" /> Members ({members.length})</h2>
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Users size={16} className="text-cyan" /> Members ({members.length})</h3>
         <ul className="text-sm divide-y divide-white/5">
           {members.map(m => (
             <li key={m.id} className="py-2 flex justify-between items-center">
@@ -88,7 +88,7 @@ export function TeamPage() {
 
       {isOwner && (
         <section className="glass-panel p-5">
-          <h2 className="text-sm font-semibold mb-3">Pending invites ({invites.length})</h2>
+          <h3 className="text-sm font-semibold mb-3">Pending invites ({invites.length})</h3>
           {invites.length === 0 ? (
             <p className="text-xs opacity-60">None.</p>
           ) : (

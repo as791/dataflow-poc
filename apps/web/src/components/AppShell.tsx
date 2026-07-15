@@ -3,9 +3,10 @@ import {
 } from 'lucide-react';
 import { AtomMark } from './AtomMark';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { RouteErrorBoundary } from './RouteErrorBoundary';
 
 const NAV = [
   { to: '/pipelines',  label: 'Pipelines',  icon: Workflow,  end: false },
@@ -37,8 +38,10 @@ export function AppShell() {
   const { user, logout } = useAuth();
   const { dark, toggle } = useTheme();
   const navigate = useNavigate();
+  const doLogout = async () => { await logout(); navigate('/login', { replace: true }); };
   const { pathname } = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(false); // ponytail: session-only dismiss, reappears on reload by design
   const meta = PAGE_META[pathname] ?? PAGE_META[Object.keys(PAGE_META).find(k => pathname.startsWith(k + '/')) ?? ''] ?? PAGE_META['/pipelines'];
   const initials = user?.email?.slice(0, 2).toUpperCase() ?? 'DF';
 
@@ -51,16 +54,25 @@ export function AppShell() {
           <aside className="absolute left-0 top-0 bottom-0 flex w-[200px] flex-col items-center gap-1 py-3
             border-r border-gray-200 dark:border-white/[0.08]
             bg-white/98 dark:bg-[#0d0f17]/98 backdrop-blur-lg">
-            <button className="self-end mr-2 mb-2 flex h-8 w-8 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.08]" onClick={() => setSidebarOpen(false)}><X size={15} /></button>
+            <button aria-label="Close menu" onClick={() => setSidebarOpen(false)}
+              className="relative self-end mr-2 mb-2 flex h-8 w-8 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.08] before:absolute before:-inset-[6px] before:content-['']">
+              <X size={15} />
+            </button>
             {NAV.map(({ to, label, icon: Icon, end }) => (
               <NavLink key={to} to={to} end={end} onClick={() => setSidebarOpen(false)}
-                className={({ isActive }) => `flex w-[180px] items-center gap-3 px-3 h-9 rounded-[10px] border transition-all ${
+                className={({ isActive }) => `flex w-[180px] items-center gap-3 px-3 h-11 rounded-[10px] border transition-all ${
                   isActive ? 'border-brand-300/20 bg-brand-500/15 text-brand-500 dark:text-brand-300' : 'border-transparent text-gray-600 dark:text-white/50 hover:bg-gray-100 dark:hover:bg-white/[0.055]'
                 }`}>
                 <Icon size={17} strokeWidth={1.75} />
                 <span className="text-sm font-medium">{label}</span>
               </NavLink>
             ))}
+            <div className="my-1 h-px w-[180px] bg-gray-200 dark:bg-white/[0.08]" />
+            <button onClick={doLogout}
+              className="flex w-[180px] items-center gap-3 px-3 h-11 rounded-[10px] border border-transparent text-gray-600 dark:text-white/50 hover:bg-gray-100 dark:hover:bg-white/[0.055] hover:text-red-500 dark:hover:text-red-400 transition-all">
+              <LogOut size={17} strokeWidth={1.75} />
+              <span className="text-sm font-medium">Sign out</span>
+            </button>
           </aside>
         </div>
       )}
@@ -143,6 +155,17 @@ export function AppShell() {
 
       {/* ── content ── */}
       <div className="flex flex-1 flex-col min-w-0 min-h-0">
+        {!bannerDismissed && (
+          <div role="status" className="flex items-center justify-center gap-2 px-4 py-1.5 shrink-0
+            border-b border-amber-300 dark:border-amber-400/25
+            bg-amber-100 dark:bg-amber-500/15 text-[11px] font-medium text-amber-900 dark:text-amber-200">
+            <span>Pre-release demo — single-zone deployment, not highly available. Data may be reset.</span>
+            <button onClick={() => setBannerDismissed(true)} aria-label="Dismiss demo notice"
+              className="flex h-5 w-5 items-center justify-center rounded hover:bg-amber-200 dark:hover:bg-amber-400/20">
+              <X size={12} />
+            </button>
+          </div>
+        )}
         <header className="flex items-center px-4 sm:px-6 h-14 border-b border-gray-200 dark:border-white/[0.06]
           bg-white/90 dark:bg-black/20 backdrop-blur-lg shrink-0">
           <button className="flex sm:hidden h-8 w-8 items-center justify-center rounded-[10px] text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.08] mr-2" onClick={() => setSidebarOpen(true)} aria-label="Menu">
@@ -161,7 +184,13 @@ export function AppShell() {
             {dark ? <Sun size={15} /> : <Moon size={15} />}
           </button>
         </header>
-        <main className="flex-1 overflow-y-auto"><Outlet /></main>
+        <main className="flex-1 overflow-y-auto">
+          <RouteErrorBoundary key={pathname}>
+            <Suspense fallback={<div role="status" aria-live="polite" className="flex h-32 items-center justify-center text-xs text-gray-400 dark:text-white/40">Loading page…</div>}>
+              <Outlet />
+            </Suspense>
+          </RouteErrorBoundary>
+        </main>
       </div>
     </div>
   );

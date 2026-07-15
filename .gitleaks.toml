@@ -1,0 +1,18 @@
+title = "DataFlow secret scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "tracked-secret-file"
+description = "Files under secrets/ must never be tracked"
+regex = '''(?m).+'''
+path = '''(^|/)secrets/[^/]+$'''
+
+[[allowlists]]
+description = "Deterministic public wire-format fixture"
+paths = ['''^tests/contracts/backend-wire\.json$''']
+
+[[allowlists]]
+description = "Upstream Google Storage HTTP replay fixtures"
+paths = ['''^apps/workflow-go/vendor/cloud\.google\.com/go/storage/storage\.replay$''']

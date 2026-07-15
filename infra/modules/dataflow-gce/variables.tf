@@ -16,6 +16,17 @@ variable "disk_gb" {
   default     = 50
 }
 
+variable "data_disk_gb" {
+  description = "Persistent Docker and database volume size"
+  type        = number
+  default     = 200
+}
+
+variable "region" {
+  description = "GCP region"
+  type        = string
+}
+
 variable "zone" {
   description = "GCP Zone"
   type        = string
@@ -30,7 +41,11 @@ variable "ssh_public_key_path" {
 variable "admin_cidr" {
   description = "CIDR allowed to SSH (GCP firewall uses this)"
   type        = string
-  default     = "0.0.0.0/0"
+}
+
+variable "service_account_email" {
+  description = "Dedicated least-privilege VM service account"
+  type        = string
 }
 
 variable "repo" {
@@ -42,4 +57,10 @@ variable "repo" {
 variable "branch" {
   type    = string
   default = "main"
+}
+
+variable "static_ip" {
+  description = "Existing ephemeral IP to promote to static (empty = allocate a new address)"
+  type        = string
+  default     = ""
 }

@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -21,9 +23,105 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"github.com/dataflow-poc/workflow-go/internal/security"
 )
 
 var identifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var snowflakePath = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$`)
+
+// connPoolCap bounds how many live connections each connector instance (one
+// tenant's one postgres/mysql/snowflake/mongo credential) may hold in this
+// worker process. Kept at 5, not something like 20: a worker pod runs many
+// concurrent pipeline executions spanning many tenants, so a small per-tenant
+// cap prevents one noisy tenant from exhausting the source database's
+// max_connections. Override with DB_POOL_MAX_CONNS for deployments with
+// known extra headroom.
+var connPoolCap = envInt32("DB_POOL_MAX_CONNS", 5)
+
+func envInt32(name string, fallback int32) int32 {
+	if value, err := strconv.ParseInt(os.Getenv(name), 10, 32); err == nil && value > 0 {
+		return int32(value)
+	}
+	return fallback
+}
+
+// dbBatchSize caps rows per multi-row INSERT/BulkWrite call. PostgreSQL batches
+// are reduced further based on their column count to stay within the protocol's
+// 65535 bind-parameter limit.
+const dbBatchSize = 500
+const postgresMaxBindParams = 65535
+
+func postgresBatchRows(columnCount int) (int, error) {
+	if columnCount < 1 {
+		return 0, fmt.Errorf("sink.postgres: records must contain at least one column")
+	}
+	rows := postgresMaxBindParams / columnCount
+	if rows < 1 {
+		return 0, fmt.Errorf("sink.postgres: %d columns exceed the bind-parameter limit", columnCount)
+	}
+	return min(dbBatchSize, rows), nil
+}
+
+// connCache is a worker-scoped pool cache keyed by connector-instance ID
+// (connectionId / connector_instances.id): repeated fetch/sink calls for the
+// SAME instance reuse one bounded pool instead of dialing a fresh connection
+// per page or batch. One process runs one Runtime, so a package-level cache
+// is effectively worker-scoped.
+type connCache struct {
+	mu        sync.Mutex
+	postgres  map[string]*pgxpool.Pool
+	mysql     map[string]*sql.DB
+	snowflake map[string]*sql.DB
+	mongo     map[string]*mongoConn
+}
+type mongoConn struct {
+	client   *mongo.Client
+	database string
+}
+
+var connectorPools = &connCache{
+	postgres:  map[string]*pgxpool.Pool{},
+	mysql:     map[string]*sql.DB{},
+	snowflake: map[string]*sql.DB{},
+	mongo:     map[string]*mongoConn{},
+}
+
+// CloseConnectorPools releases every cached database connection pool. Call it
+// once on worker shutdown (e.g. alongside db.Close()/temporal.Close() in
+// cmd/activity-worker/main.go's defer chain).
+func (r *Runtime) CloseConnectorPools() {
+	connectorPools.mu.Lock()
+	defer connectorPools.mu.Unlock()
+	for _, pool := range connectorPools.postgres {
+		pool.Close()
+	}
+	for _, db := range connectorPools.mysql {
+		_ = db.Close()
+	}
+	for _, db := range connectorPools.snowflake {
+		_ = db.Close()
+	}
+	for _, conn := range connectorPools.mongo {
+		_ = conn.client.Disconnect(context.Background())
+	}
+	connectorPools.postgres = map[string]*pgxpool.Pool{}
+	connectorPools.mysql = map[string]*sql.DB{}
+	connectorPools.snowflake = map[string]*sql.DB{}
+	connectorPools.mongo = map[string]*mongoConn{}
+}
+
+func boundedPageSize(values ...interface{}) int {
+	values = append(values, 1000)
+	page := int(firstNumber(values...))
+	if page < 1 {
+		return 1
+	}
+	if page > 10000 {
+		return 10000
+	}
+	return page
+}
 
 func quoteIdentifier(value string) (string, error) {
 	if !identifier.MatchString(value) {
@@ -71,6 +169,12 @@ func (r *Runtime) registerDatabases() {
 	r.Handlers["sink.clickhouse"] = r.clickhouseSink
 }
 func (r *Runtime) postgresConnection(ctx context.Context, id string) (*pgxpool.Pool, error) {
+	connectorPools.mu.Lock()
+	if pool, ok := connectorPools.postgres[id]; ok {
+		connectorPools.mu.Unlock()
+		return pool, nil
+	}
+	connectorPools.mu.Unlock()
 	row, err := r.credential(ctx, id)
 	if err != nil {
 		return nil, err
@@ -78,7 +182,23 @@ func (r *Runtime) postgresConnection(ctx context.Context, id string) (*pgxpool.P
 	cfg, _ := row["extra"].(map[string]interface{})
 	secret, _ := row["secret_value"].(map[string]interface{})
 	dsn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s", url.QueryEscape(stringValue(cfg["user"])), url.QueryEscape(stringValue(secret["password"])), stringValue(cfg["host"]), int(firstNumber(cfg["port"], 5432)), url.PathEscape(stringValue(cfg["database"])), firstString(cfg["sslMode"], "disable"))
-	return pgxpool.New(ctx, dsn)
+	poolConfig, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	poolConfig.MaxConns = connPoolCap
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		return nil, err
+	}
+	connectorPools.mu.Lock()
+	defer connectorPools.mu.Unlock()
+	if existing, ok := connectorPools.postgres[id]; ok {
+		pool.Close()
+		return existing, nil
+	}
+	connectorPools.postgres[id] = pool
+	return pool, nil
 }
 func (r *Runtime) postgresFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
 	table, err := quotePath(stringValue(p.Config["table"]))
@@ -89,15 +209,12 @@ func (r *Runtime) postgresFetch(ctx context.Context, p SourceParams) (SourceResu
 	if err != nil {
 		return SourceResult{}, fmt.Errorf("postgres.fetch: cursorColumn required")
 	}
-	page := int(firstNumber(func() interface{} {
+	page := boundedPageSize(func() interface{} {
 		if p.Ingestion != nil {
 			return p.Ingestion.PageSize
 		}
 		return nil
-	}(), p.Config["pageSize"], 1000))
-	if page > 10000 {
-		page = 10000
-	}
+	}(), p.Config["pageSize"])
 	columns := "*"
 	if value := stringValue(p.Config["columns"]); value != "" && value != "*" {
 		items := []string{}
@@ -133,7 +250,6 @@ func (r *Runtime) postgresFetch(ctx context.Context, p SourceParams) (SourceResu
 	if err != nil {
 		return SourceResult{}, err
 	}
-	defer pool.Close()
 	rows, err := pool.Query(ctx, query, args...)
 	if err != nil {
 		return SourceResult{}, err
@@ -179,6 +295,10 @@ func (r *Runtime) postgresSink(ctx context.Context, input interface{}, cfg map[s
 		return nil, nil, err
 	}
 	columns := allColumns(rows)
+	batchSize, err := postgresBatchRows(len(columns))
+	if err != nil {
+		return nil, nil, err
+	}
 	quoted := []string{}
 	for _, column := range columns {
 		value, err := quoteIdentifier(column)
@@ -192,36 +312,47 @@ func (r *Runtime) postgresSink(ctx context.Context, input interface{}, cfg map[s
 	if err != nil {
 		return nil, nil, err
 	}
-	defer pool.Close()
-	for _, row := range rows {
-		placeholders := make([]string, len(columns))
-		args := make([]interface{}, len(columns))
-		for i, column := range columns {
-			placeholders[i] = fmt.Sprintf("$%d", i+1)
-			args[i] = row[column]
+	conflictClause := ""
+	if len(conflict) > 0 {
+		keys := []string{}
+		for _, key := range conflict {
+			quotedKey, _ := quoteIdentifier(key)
+			keys = append(keys, quotedKey)
 		}
-		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", table, strings.Join(quoted, ","), strings.Join(placeholders, ","))
-		if len(conflict) > 0 {
-			keys := []string{}
-			updates := []string{}
-			for _, key := range conflict {
-				quotedKey, _ := quoteIdentifier(key)
-				keys = append(keys, quotedKey)
+		updates := []string{}
+		for _, column := range columns {
+			if contains(conflict, column) {
+				continue
 			}
-			for _, column := range columns {
-				if contains(conflict, column) {
-					continue
-				}
-				quotedColumn, _ := quoteIdentifier(column)
-				updates = append(updates, quotedColumn+"=EXCLUDED."+quotedColumn)
-			}
-			query += " ON CONFLICT (" + strings.Join(keys, ",") + ") DO "
-			if len(updates) > 0 {
-				query += "UPDATE SET " + strings.Join(updates, ",")
-			} else {
-				query += "NOTHING"
-			}
+			quotedColumn, _ := quoteIdentifier(column)
+			updates = append(updates, quotedColumn+"=EXCLUDED."+quotedColumn)
 		}
+		conflictClause = " ON CONFLICT (" + strings.Join(keys, ",") + ") DO "
+		if len(updates) > 0 {
+			conflictClause += "UPDATE SET " + strings.Join(updates, ",")
+		} else {
+			conflictClause += "NOTHING"
+		}
+	}
+	// Batch rows into multi-row INSERTs (dbBatchSize per statement) instead of
+	// one round trip per row.
+	for start := 0; start < len(rows); start += batchSize {
+		end := start + batchSize
+		if end > len(rows) {
+			end = len(rows)
+		}
+		batch := rows[start:end]
+		groups := make([]string, len(batch))
+		args := make([]interface{}, 0, len(batch)*len(columns))
+		for i, row := range batch {
+			placeholders := make([]string, len(columns))
+			for j, column := range columns {
+				args = append(args, row[column])
+				placeholders[j] = fmt.Sprintf("$%d", len(args))
+			}
+			groups[i] = "(" + strings.Join(placeholders, ",") + ")"
+		}
+		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", table, strings.Join(quoted, ","), strings.Join(groups, ",")) + conflictClause
 		if _, err = pool.Exec(ctx, query, args...); err != nil {
 			return nil, nil, err
 		}
@@ -244,6 +375,12 @@ func allColumns(rows []map[string]interface{}) []string {
 }
 
 func (r *Runtime) mysqlDB(ctx context.Context, id string) (*sql.DB, error) {
+	connectorPools.mu.Lock()
+	if db, ok := connectorPools.mysql[id]; ok {
+		connectorPools.mu.Unlock()
+		return db, nil
+	}
+	connectorPools.mu.Unlock()
 	row, err := r.credential(ctx, id)
 	if err != nil {
 		return nil, err
@@ -252,10 +389,24 @@ func (r *Runtime) mysqlDB(ctx context.Context, id string) (*sql.DB, error) {
 	secret, _ := row["secret_value"].(map[string]interface{})
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true", stringValue(cfg["user"]), stringValue(secret["password"]), stringValue(cfg["host"]), int(firstNumber(cfg["port"], 3306)), stringValue(cfg["database"]))
 	db, err := sql.Open("mysql", dsn)
-	if err == nil {
-		err = db.PingContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return db, err
+	db.SetMaxOpenConns(int(connPoolCap))
+	db.SetMaxIdleConns(int(connPoolCap))
+	db.SetConnMaxLifetime(30 * time.Minute)
+	if err = db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	connectorPools.mu.Lock()
+	defer connectorPools.mu.Unlock()
+	if existing, ok := connectorPools.mysql[id]; ok {
+		_ = db.Close()
+		return existing, nil
+	}
+	connectorPools.mysql[id] = db
+	return db, nil
 }
 func (r *Runtime) mysqlFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
 	table := stringValue(p.Config["table"])
@@ -263,7 +414,7 @@ func (r *Runtime) mysqlFetch(ctx context.Context, p SourceParams) (SourceResult,
 	if !identifier.MatchString(table) || !identifier.MatchString(column) {
 		return SourceResult{}, fmt.Errorf("mysql.fetch: invalid table or cursor column")
 	}
-	page := int(firstNumber(p.Config["pageSize"], 1000))
+	page := boundedPageSize(p.Config["pageSize"])
 	query := fmt.Sprintf("SELECT * FROM `%s`", table)
 	args := []interface{}{}
 	if p.Cursor["value"] != nil {
@@ -276,7 +427,6 @@ func (r *Runtime) mysqlFetch(ctx context.Context, p SourceParams) (SourceResult,
 	if err != nil {
 		return SourceResult{}, err
 	}
-	defer db.Close()
 	result, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return SourceResult{}, err
@@ -333,7 +483,6 @@ func (r *Runtime) mysqlSink(ctx context.Context, input interface{}, cfg map[stri
 	if err != nil {
 		return nil, nil, err
 	}
-	defer db.Close()
 	quoted := []string{}
 	for _, column := range columns {
 		if !identifier.MatchString(column) {
@@ -341,7 +490,7 @@ func (r *Runtime) mysqlSink(ctx context.Context, input interface{}, cfg map[stri
 		}
 		quoted = append(quoted, "`"+column+"`")
 	}
-	placeholders := strings.TrimRight(strings.Repeat("?,", len(columns)), ",")
+	rowPlaceholder := "(" + strings.TrimRight(strings.Repeat("?,", len(columns)), ",") + ")"
 	keys := keyFields(cfg["primaryKey"])
 	updates := []string{}
 	for _, column := range columns {
@@ -349,15 +498,27 @@ func (r *Runtime) mysqlSink(ctx context.Context, input interface{}, cfg map[stri
 			updates = append(updates, "`"+column+"`=VALUES(`"+column+"`)")
 		}
 	}
-	query := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s)", table, strings.Join(quoted, ","), placeholders)
+	updateClause := ""
 	if len(updates) > 0 {
-		query += " ON DUPLICATE KEY UPDATE " + strings.Join(updates, ",")
+		updateClause = " ON DUPLICATE KEY UPDATE " + strings.Join(updates, ",")
 	}
-	for _, row := range rows {
-		args := []interface{}{}
-		for _, column := range columns {
-			args = append(args, row[column])
+	// Batch rows into multi-row INSERTs (dbBatchSize per statement) instead of
+	// one round trip per row.
+	for start := 0; start < len(rows); start += dbBatchSize {
+		end := start + dbBatchSize
+		if end > len(rows) {
+			end = len(rows)
 		}
+		batch := rows[start:end]
+		groups := make([]string, len(batch))
+		args := make([]interface{}, 0, len(batch)*len(columns))
+		for i, row := range batch {
+			groups[i] = rowPlaceholder
+			for _, column := range columns {
+				args = append(args, row[column])
+			}
+		}
+		query := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES %s", table, strings.Join(quoted, ","), strings.Join(groups, ",")) + updateClause
 		if _, err = db.ExecContext(ctx, query, args...); err != nil {
 			return nil, nil, err
 		}
@@ -366,6 +527,12 @@ func (r *Runtime) mysqlSink(ctx context.Context, input interface{}, cfg map[stri
 }
 
 func (r *Runtime) mongoClient(ctx context.Context, id string) (*mongo.Client, string, error) {
+	connectorPools.mu.Lock()
+	if conn, ok := connectorPools.mongo[id]; ok {
+		connectorPools.mu.Unlock()
+		return conn.client, conn.database, nil
+	}
+	connectorPools.mu.Unlock()
 	row, err := r.credential(ctx, id)
 	if err != nil {
 		return nil, "", err
@@ -390,25 +557,36 @@ func (r *Runtime) mongoClient(ctx context.Context, id string) (*mongo.Client, st
 			uri += "&tls=true"
 		}
 	}
-	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetServerSelectionTimeout(10 * time.Second))
-	if err == nil {
-		err = client.Ping(ctx, nil)
+	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetServerSelectionTimeout(10 * time.Second).SetMaxPoolSize(uint64(connPoolCap)))
+	if err != nil {
+		return nil, "", err
 	}
-	return client, stringValue(cfg["database"]), err
+	if err = client.Ping(ctx, nil); err != nil {
+		_ = client.Disconnect(context.Background())
+		return nil, "", err
+	}
+	database := stringValue(cfg["database"])
+	connectorPools.mu.Lock()
+	defer connectorPools.mu.Unlock()
+	if existing, ok := connectorPools.mongo[id]; ok {
+		_ = client.Disconnect(context.Background())
+		return existing.client, existing.database, nil
+	}
+	connectorPools.mongo[id] = &mongoConn{client: client, database: database}
+	return client, database, nil
 }
 func (r *Runtime) mongoFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
 	client, database, err := r.mongoClient(ctx, stringValue(p.Config["connectionId"]))
 	if err != nil {
 		return SourceResult{}, err
 	}
-	defer client.Disconnect(ctx)
 	collection := client.Database(database).Collection(stringValue(p.Config["collection"]))
 	field := firstString(p.Config["cursorField"], "_id")
 	filter := bson.M{}
 	if p.Cursor["value"] != nil {
 		filter[field] = bson.M{"$gt": p.Cursor["value"]}
 	}
-	page := int(firstNumber(p.Config["pageSize"], 1000))
+	page := boundedPageSize(p.Config["pageSize"])
 	cursor, err := collection.Find(ctx, filter, options.Find().SetSort(bson.D{{Key: field, Value: 1}}).SetLimit(int64(page+1)))
 	if err != nil {
 		return SourceResult{}, err
@@ -443,11 +621,21 @@ func (r *Runtime) mongoSink(ctx context.Context, input interface{}, cfg map[stri
 	if err != nil {
 		return nil, nil, err
 	}
-	defer client.Disconnect(ctx)
 	collection := client.Database(database).Collection(stringValue(cfg["collection"]))
 	key := firstString(cfg["keyField"], "_id")
-	for _, row := range rows {
-		if _, err = collection.ReplaceOne(ctx, bson.M{key: row[key]}, row, options.Replace().SetUpsert(true)); err != nil {
+	// Batch upserts into BulkWrite calls (dbBatchSize per call) instead of one
+	// round trip per row.
+	for start := 0; start < len(rows); start += dbBatchSize {
+		end := start + dbBatchSize
+		if end > len(rows) {
+			end = len(rows)
+		}
+		batch := rows[start:end]
+		models := make([]mongo.WriteModel, len(batch))
+		for i, row := range batch {
+			models[i] = mongo.NewReplaceOneModel().SetFilter(bson.M{key: row[key]}).SetReplacement(row).SetUpsert(true)
+		}
+		if _, err = collection.BulkWrite(ctx, models); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -455,6 +643,12 @@ func (r *Runtime) mongoSink(ctx context.Context, input interface{}, cfg map[stri
 }
 
 func (r *Runtime) snowflakeDB(ctx context.Context, id string) (*sql.DB, error) {
+	connectorPools.mu.Lock()
+	if db, ok := connectorPools.snowflake[id]; ok {
+		connectorPools.mu.Unlock()
+		return db, nil
+	}
+	connectorPools.mu.Unlock()
 	row, err := r.credential(ctx, id)
 	if err != nil {
 		return nil, err
@@ -467,20 +661,37 @@ func (r *Runtime) snowflakeDB(ctx context.Context, id string) (*sql.DB, error) {
 		return nil, err
 	}
 	db, err := sql.Open("snowflake", dsn)
-	if err == nil {
-		err = db.PingContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return db, err
+	db.SetMaxOpenConns(int(connPoolCap))
+	db.SetMaxIdleConns(int(connPoolCap))
+	db.SetConnMaxLifetime(30 * time.Minute)
+	if err = db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	connectorPools.mu.Lock()
+	defer connectorPools.mu.Unlock()
+	if existing, ok := connectorPools.snowflake[id]; ok {
+		_ = db.Close()
+		return existing, nil
+	}
+	connectorPools.snowflake[id] = db
+	return db, nil
 }
 func (r *Runtime) snowflakeFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
 	table := stringValue(p.Config["table"])
-	if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*$`).MatchString(table) {
+	if !snowflakePath.MatchString(table) {
 		return SourceResult{}, fmt.Errorf("snowflake.fetch: invalid table")
 	}
-	page := int(firstNumber(p.Config["pageSize"], 1000))
+	page := boundedPageSize(p.Config["pageSize"])
 	query := "SELECT * FROM " + table
 	args := []interface{}{}
 	column := stringValue(p.Config["cursorColumn"])
+	if column != "" && !identifier.MatchString(column) {
+		return SourceResult{}, fmt.Errorf("snowflake.fetch: invalid cursor column")
+	}
 	if column != "" && p.Cursor["value"] != nil {
 		query += " WHERE " + column + ">?"
 		args = append(args, p.Cursor["value"])
@@ -493,7 +704,6 @@ func (r *Runtime) snowflakeFetch(ctx context.Context, p SourceParams) (SourceRes
 	if err != nil {
 		return SourceResult{}, err
 	}
-	defer db.Close()
 	result, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return SourceResult{}, err
@@ -518,22 +728,37 @@ func (r *Runtime) snowflakeSink(ctx context.Context, input interface{}, cfg map[
 		return nil, nil, err
 	}
 	table := stringValue(cfg["table"])
-	if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*$`).MatchString(table) {
+	if !snowflakePath.MatchString(table) {
 		return nil, nil, fmt.Errorf("sink.snowflake: invalid table")
 	}
 	columns := allColumns(rows)
+	for _, column := range columns {
+		if !identifier.MatchString(column) {
+			return nil, nil, fmt.Errorf("sink.snowflake: invalid column")
+		}
+	}
 	db, err := r.snowflakeDB(ctx, stringValue(cfg["connectionId"]))
 	if err != nil {
 		return nil, nil, err
 	}
-	defer db.Close()
-	placeholders := strings.TrimRight(strings.Repeat("?,", len(columns)), ",")
-	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", table, strings.Join(columns, ","), placeholders)
-	for _, row := range rows {
-		args := []interface{}{}
-		for _, column := range columns {
-			args = append(args, row[column])
+	rowPlaceholder := "(" + strings.TrimRight(strings.Repeat("?,", len(columns)), ",") + ")"
+	// Batch rows into multi-row INSERTs (dbBatchSize per statement) instead of
+	// one round trip per row.
+	for start := 0; start < len(rows); start += dbBatchSize {
+		end := start + dbBatchSize
+		if end > len(rows) {
+			end = len(rows)
 		}
+		batch := rows[start:end]
+		groups := make([]string, len(batch))
+		args := make([]interface{}, 0, len(batch)*len(columns))
+		for i, row := range batch {
+			groups[i] = rowPlaceholder
+			for _, column := range columns {
+				args = append(args, row[column])
+			}
+		}
+		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", table, strings.Join(columns, ","), strings.Join(groups, ","))
 		if _, err = db.ExecContext(ctx, query, args...); err != nil {
 			return nil, nil, err
 		}
@@ -557,6 +782,9 @@ func (r *Runtime) clickhouseSink(ctx context.Context, input interface{}, cfg map
 		return nil, nil, fmt.Errorf("sink.clickhouse: invalid table")
 	}
 	endpoint := strings.TrimSuffix(stringValue(extra["url"]), "/") + "/?query=" + url.QueryEscape("INSERT INTO "+table+" FORMAT JSONEachRow")
+	if _, err := security.ValidateURL(endpoint); err != nil {
+		return nil, nil, fmt.Errorf("sink.clickhouse: %w", err)
+	}
 	var body bytes.Buffer
 	encoder := json.NewEncoder(&body)
 	for _, row := range rows {
@@ -564,7 +792,7 @@ func (r *Runtime) clickhouseSink(ctx context.Context, input interface{}, cfg map
 	}
 	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &body)
 	request.SetBasicAuth(stringValue(extra["user"]), stringValue(secret["password"]))
-	response, err := r.HTTP.Do(request)
+	response, err := r.SafeHTTP.Do(request)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/dataflow-poc/workflow-go/internal/model"
+	"github.com/dataflow-poc/workflow-go/internal/security"
 )
 
 func (r *Runtime) registerHTTP() {
@@ -71,6 +72,9 @@ func (r *Runtime) fetchManifest(ctx context.Context, m model.ConnectorManifest, 
 	endpoint, err := url.Parse(interpolate(firstString(p.Config["url"], m.URL), p.Config))
 	if err != nil {
 		return SourceResult{}, err
+	}
+	if _, err := security.ValidateURL(endpoint.String()); err != nil {
+		return SourceResult{}, fmt.Errorf("http.fetch: %w", err)
 	}
 	query := endpoint.Query()
 	if params, ok := p.Config["params"].(map[string]interface{}); ok {
@@ -133,7 +137,7 @@ func (r *Runtime) fetchManifest(ctx context.Context, m model.ConnectorManifest, 
 	case "basic":
 		request.SetBasicAuth(stringValue(auth["username"]), stringValue(auth["password"]))
 	}
-	response, err := r.HTTP.Do(request)
+	response, err := r.SafeHTTP.Do(request)
 	if err != nil {
 		return SourceResult{}, err
 	}
@@ -214,6 +218,9 @@ func (r *Runtime) webhookSink(ctx context.Context, input interface{}, cfg map[st
 	if endpoint == "" {
 		return nil, nil, fmt.Errorf("sink.webhook: URL or HTTP connector instance required")
 	}
+	if _, err := security.ValidateURL(endpoint); err != nil {
+		return nil, nil, fmt.Errorf("sink.webhook: %w", err)
+	}
 	body, _ := json.Marshal(map[string]interface{}{"records": input})
 	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
@@ -222,7 +229,7 @@ func (r *Runtime) webhookSink(ctx context.Context, input interface{}, cfg map[st
 		_, _ = mac.Write(body)
 		request.Header.Set("X-Signature-SHA256", hex.EncodeToString(mac.Sum(nil)))
 	}
-	response, err := r.HTTP.Do(request)
+	response, err := r.SafeHTTP.Do(request)
 	if err != nil {
 		return nil, nil, err
 	}

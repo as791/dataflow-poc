@@ -27,7 +27,7 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-lg space-y-8 px-6 py-10">
       <div>
-        <h1 className="page-heading flex items-center gap-2"><Settings size={20} /> Settings</h1>
+        <h2 className="page-heading flex items-center gap-2"><Settings size={20} /> Settings</h2>
         <p className="page-subtitle mt-1">Workspace and display preferences. Saved locally in this browser.</p>
       </div>
 

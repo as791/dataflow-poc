@@ -19,9 +19,19 @@ variable "instance_type" {
 }
 
 variable "admin_cidr" {
-  description = "Your IP/32 for SSH; default open"
+  description = "Trusted administrator CIDR for SSH, normally your public IP/32"
   type        = string
-  default     = "0.0.0.0/0"
+
+  validation {
+    condition     = var.admin_cidr != "0.0.0.0/0"
+    error_message = "admin_cidr must not expose SSH to the entire internet."
+  }
+}
+
+variable "data_disk_gb" {
+  description = "Persistent disk for Docker, kind PVCs, and embedded databases"
+  type        = number
+  default     = 200
 }
 
 variable "ssh_public_key_path" {
@@ -32,4 +42,28 @@ variable "ssh_public_key_path" {
 variable "branch" {
   type    = string
   default = "main"
+}
+
+variable "static_ip" {
+  description = "Existing ephemeral IP to promote to static (empty = allocate a new address)"
+  type        = string
+  default     = "34.14.212.157"
+}
+
+variable "payload_bucket_name" {
+  description = "S3 bucket holding S3-backed node payload objects (PAYLOAD_S3_BUCKET). Empty skips the lifecycle rule."
+  type        = string
+  default     = ""
+}
+
+variable "payload_bucket_region" {
+  description = "AWS region of the payload S3 bucket (PAYLOAD_S3_REGION)"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "payload_retention_days" {
+  description = "Days to retain S3-backed node payload objects before expiry. Match PAYLOAD_RETENTION_DAYS if that env var is set."
+  type        = number
+  default     = 30
 }
