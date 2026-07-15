@@ -339,7 +339,7 @@ export default function LineagePage() {
           {selected.data.schema?.fields?.length > 0 && <div className="mt-3"><p className="text-[10px] font-semibold uppercase text-gray-400">Contract fields</p><p className="mt-1 text-[10px] text-gray-600 dark:text-white/55">{selected.data.schema.fields.slice(0, 8).map((field: any) => `${field.name}: ${field.type}${field.nullable ? '?' : ''}`).join(' · ')}</p></div>}
           {selectedColumns.length > 0 && <div className="mt-3"><p className="text-[10px] font-semibold uppercase text-gray-400">Column lineage</p><div className="mt-1 max-h-32 space-y-1 overflow-auto">{selectedColumns.slice(0, 20).map(edge => <p key={edge.id} className="truncate text-[10px] text-gray-600 dark:text-white/55" title={`${edge.sourceAssetUrn}.${edge.sourceField} → ${edge.targetAssetUrn}.${edge.targetField}`}>{edge.sourceField} → {edge.targetField}</p>)}</div></div>}
         </aside>}
-        <ReactFlow nodes={impact.nodes} edges={impact.edges} nodeTypes={nodeTypes} fitView onlyRenderVisibleElements
+        <ReactFlow nodes={impact.nodes} edges={impact.edges} nodeTypes={nodeTypes} fitView
           onInit={setFlowInstance}
           nodesDraggable={false} nodesConnectable={false} elementsSelectable
           onNodeClick={(_, node) => setSelectedId(node.id)} onPaneClick={() => setSelectedId(null)}>
