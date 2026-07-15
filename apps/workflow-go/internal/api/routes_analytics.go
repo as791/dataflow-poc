@@ -3,11 +3,11 @@ package api
 import (
 	"bufio"
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,8 +16,6 @@ import (
 	"github.com/dataflow-poc/workflow-go/internal/chsql"
 	"github.com/jackc/pgx/v5"
 )
-
-var ch = chsql.ClickHouse
 
 // ponytail: flat per-query caps; make per-tenant if a tenant needs more
 const (
@@ -78,8 +76,8 @@ func analyticsTimeRangeClauses(from, to string) ([]chsql.Expr, error) {
 		return nil, fmt.Errorf("timeRange.from must be before timeRange.to")
 	}
 	return []chsql.Expr{
-		chsql.Raw("created_at >= ") + ch.Literal("date", start.UTC().Format(time.RFC3339)),
-		chsql.Raw("created_at < ") + ch.Literal("date", end.UTC().Format(time.RFC3339)),
+		chsql.Raw("created_at >= ") + chsql.Literal("date", start.UTC().Format(time.RFC3339)),
+		chsql.Raw("created_at < ") + chsql.Literal("date", end.UTC().Format(time.RFC3339)),
 	}, nil
 }
 func (s *Server) clickhouseQuery(r *http.Request, query string) ([]map[string]interface{}, error) {
@@ -114,7 +112,7 @@ func (s *Server) clickhouseQuery(r *http.Request, query string) ([]map[string]in
 
 func (s *Server) analyticsDatasets(w http.ResponseWriter, r *http.Request) error {
 	tenant := tenantFrom(r)
-	query, err := ch.Select().
+	query, err := chsql.NewSelect().
 		Column(chsql.Raw("collection"), "").
 		Column(chsql.Raw("count()"), "row_count").
 		From("sink_records").Final().
@@ -172,7 +170,7 @@ func inferSchema(rows []map[string]interface{}) []map[string]string {
 }
 func (s *Server) datasetRecords(r *http.Request, name string) ([]map[string]interface{}, error) {
 	tenant := tenantFrom(r)
-	query, err := ch.Select().
+	query, err := chsql.NewSelect().
 		Column(chsql.Raw("record"), "").
 		From("sink_records").Final().
 		Where(analyticsScope(tenant.TenantID, name)...).
@@ -220,7 +218,7 @@ func (s *Server) analyticsRows(w http.ResponseWriter, r *http.Request) error {
 		offset = 0
 	}
 	scope := analyticsScope(tenant.TenantID, name)
-	countQuery, err := ch.Select().
+	countQuery, err := chsql.NewSelect().
 		Column(chsql.Raw("count()"), "total").
 		From("sink_records").Final().
 		Where(scope...).
@@ -232,7 +230,7 @@ func (s *Server) analyticsRows(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return &HTTPError{Status: http.StatusBadGateway, Message: "clickhouse error"}
 	}
-	rowsQuery, err := ch.Select().
+	rowsQuery, err := chsql.NewSelect().
 		Column(chsql.Raw("record"), "").
 		Column(chsql.Raw("created_at"), "").
 		From("sink_records").Final().
@@ -300,9 +298,9 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 		if !ok {
 			return "", fmt.Errorf("Field %q is not in the dataset schema", name)
 		}
-		return ch.JSONField(chsql.Raw("record"), name, kind)
+		return chsql.JSONField(chsql.Raw("record"), name, kind)
 	}
-	builder := ch.Select().From("sink_records").Final()
+	builder := chsql.NewSelect().From("sink_records").Final()
 	hasColumns := false
 	for _, name := range spec.Select {
 		expr, err := field(name)
@@ -319,7 +317,7 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 			return badRequest(ErrInvalidRequest, err.Error())
 		}
 		groupExprs = append(groupExprs, expr)
-		if !contains(spec.Select, name) {
+		if !slices.Contains(spec.Select, name) {
 			builder.Column(expr, name)
 			hasColumns = true
 		}
@@ -376,11 +374,11 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 			}
 			literals := make([]chsql.Expr, len(values))
 			for i, value := range values {
-				literals[i] = ch.Literal(kind, value)
+				literals[i] = chsql.Literal(kind, value)
 			}
 			builder.Where(chsql.In(expr, literals))
 		} else {
-			cond, err := chsql.Compare(expr, clause.Op, ch.Literal(kind, clause.Value))
+			cond, err := chsql.Compare(expr, clause.Op, chsql.Literal(kind, clause.Value))
 			if err != nil {
 				return badRequest(ErrInvalidRequest, "invalid operator")
 			}
@@ -420,15 +418,6 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request) error {
 	jsonResponse(w, http.StatusOK, map[string]interface{}{"rows": rows, "count": len(rows)})
 	return nil
 }
-func contains(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *Server) dashboardList(w http.ResponseWriter, r *http.Request) error {
 	tenant := tenantFrom(r)
 	rows, err := tenantQueryRows(r.Context(), s.DB, tenant.TenantID, `SELECT id,name,definition,created_by,created_at,updated_at FROM dashboards ORDER BY updated_at DESC`)
@@ -544,7 +533,7 @@ func (s *Server) dashboardShare(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	tenant := tenantFrom(r)
-	token := hexToken()
+	token := randomToken()
 	expires := time.Now().Add(24 * time.Hour)
 	err := s.DB.TenantTx(r.Context(), tenant.TenantID, func(tx pgx.Tx) error {
 		var one string
@@ -595,10 +584,6 @@ func (s *Server) dashboardShareRevoke(w http.ResponseWriter, r *http.Request) er
 	return nil
 }
 
-func hexToken() string {
-	raw, _ := base64.RawURLEncoding.DecodeString(randomToken())
-	return fmt.Sprintf("%x", raw)
-}
 func (s *Server) analyticsShared(w http.ResponseWriter, r *http.Request) error {
 	var dashboardID, tenantID string
 	var expires time.Time

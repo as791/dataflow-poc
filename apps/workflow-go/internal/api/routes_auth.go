@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dataflow-poc/workflow-go/internal/model"
+	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -337,52 +337,21 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// verifyOIDCIDToken decodes the ID token payload and checks iss, aud, and exp.
+// verifyOIDCIDToken parses the ID token payload and checks iss, aud, sub, and exp.
 // We cannot JWKS-verify the signature without a new dependency; integrity is
 // anchored by cross-checking sub against the userinfo response, which is
 // fetched over TLS from the issuer using the access token.
 func verifyOIDCIDToken(idToken, issuer, clientID, userinfoSub string) error {
-	parts := strings.Split(idToken, ".")
-	if len(parts) != 3 {
-		return fmt.Errorf("malformed id_token")
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return fmt.Errorf("id_token payload: %w", err)
-	}
-	var claims struct {
-		Iss string      `json:"iss"`
-		Aud interface{} `json:"aud"`
-		Exp int64       `json:"exp"`
-		Sub string      `json:"sub"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
+	claims := &jwt.RegisteredClaims{}
+	if _, _, err := jwt.NewParser().ParseUnverified(idToken, claims); err != nil {
 		return fmt.Errorf("id_token claims: %w", err)
 	}
-	if issuer == "" || strings.TrimSuffix(claims.Iss, "/") != issuer {
+	if issuer == "" || strings.TrimSuffix(claims.Issuer, "/") != issuer {
 		return fmt.Errorf("id_token issuer mismatch")
 	}
-	audOK := false
-	switch aud := claims.Aud.(type) {
-	case string:
-		audOK = aud == clientID
-	case []interface{}:
-		for _, a := range aud {
-			if a == clientID {
-				audOK = true
-			}
-		}
-	}
-	if clientID == "" || !audOK {
-		return fmt.Errorf("id_token audience mismatch")
-	}
-	if claims.Exp <= time.Now().Unix() {
-		return fmt.Errorf("id_token expired")
-	}
-	if claims.Sub == "" || claims.Sub != userinfoSub {
-		return fmt.Errorf("id_token subject mismatch")
-	}
-	return nil
+	return jwt.NewValidator(
+		jwt.WithAudience(clientID), jwt.WithSubject(userinfoSub), jwt.WithExpirationRequired(),
+	).Validate(claims)
 }
 
 func (s *Server) resolveIdentity(r *http.Request, column, sub, email, provider string) (string, error) {

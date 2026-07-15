@@ -3,7 +3,6 @@ package chsql
 import "testing"
 
 func TestLiteralByKind(t *testing.T) {
-	d := ClickHouse
 	cases := []struct {
 		kind  string
 		value interface{}
@@ -18,19 +17,18 @@ func TestLiteralByKind(t *testing.T) {
 		{"string", "O'Reilly", "'O''Reilly'"},
 	}
 	for _, tc := range cases {
-		if got := d.Literal(tc.kind, tc.value); string(got) != tc.want {
+		if got := Literal(tc.kind, tc.value); string(got) != tc.want {
 			t.Errorf("Literal(%q, %#v) = %q, want %q", tc.kind, tc.value, got, tc.want)
 		}
 	}
 }
 
 func TestIdentRejectsInjection(t *testing.T) {
-	d := ClickHouse
-	if _, err := d.Ident("user_id"); err != nil {
+	if _, err := Ident("user_id"); err != nil {
 		t.Fatalf("valid ident rejected: %v", err)
 	}
 	for _, bad := range []string{"a b", "x;DROP TABLE t", "`tick`", "1abc", ""} {
-		if _, err := d.Ident(bad); err == nil {
+		if _, err := Ident(bad); err == nil {
 			t.Errorf("Ident(%q) accepted, want error", bad)
 		}
 	}
@@ -46,19 +44,17 @@ func TestCompareWhitelistsOps(t *testing.T) {
 }
 
 func TestJSONField(t *testing.T) {
-	d := ClickHouse
-	got, err := d.JSONField("record", "amount", "number")
+	got, err := JSONField("record", "amount", "number")
 	if err != nil || string(got) != "JSONExtract(record,'amount','Float64')" {
 		t.Fatalf("got %q, err %v", got, err)
 	}
-	if _, err := d.JSONField("record", "a'; DROP", "string"); err == nil {
+	if _, err := JSONField("record", "a'; DROP", "string"); err == nil {
 		t.Fatal("bad path accepted")
 	}
 }
 
 func TestSelectBuild(t *testing.T) {
-	d := ClickHouse
-	q, err := d.Select().
+	q, err := NewSelect().
 		Column(Raw("count()"), "row_count").
 		Column("collection", "").
 		From("sink_records").Final().
@@ -80,16 +76,16 @@ func TestSelectBuild(t *testing.T) {
 }
 
 func TestSelectRequiresColumnAndTable(t *testing.T) {
-	if _, err := ClickHouse.Select().From("t").Build(); err == nil {
+	if _, err := NewSelect().From("t").Build(); err == nil {
 		t.Fatal("no columns accepted")
 	}
-	if _, err := ClickHouse.Select().Column(Raw("1"), "").Build(); err == nil {
+	if _, err := NewSelect().Column(Raw("1"), "").Build(); err == nil {
 		t.Fatal("no table accepted")
 	}
 }
 
 func TestSelectBadAliasPropagates(t *testing.T) {
-	if _, err := ClickHouse.Select().Column(Raw("1"), "bad alias").From("t").Build(); err == nil {
+	if _, err := NewSelect().Column(Raw("1"), "bad alias").From("t").Build(); err == nil {
 		t.Fatal("bad alias accepted")
 	}
 }

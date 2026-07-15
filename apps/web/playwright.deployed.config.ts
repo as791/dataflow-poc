@@ -1,13 +1,10 @@
 import { defineConfig } from '@playwright/test';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { loadEnvFile } from 'node:process';
 
 // Load QA credentials from gitignored secrets/qa.env; shell env wins.
 try {
-  for (const line of readFileSync(join(__dirname, '../../secrets/qa.env'), 'utf8').split('\n')) {
-    const eq = line.indexOf('=');
-    if (eq > 0 && !line.startsWith('#')) process.env[line.slice(0, eq)] ??= line.slice(eq + 1);
-  }
+  loadEnvFile(join(__dirname, '../../secrets/qa.env'));
 } catch {
   // no secrets file — rely on shell env
 }

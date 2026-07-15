@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict';
+import * as assert from 'node:assert/strict';
 import { flowToDefinition } from './pipelineConvert';
 import { deriveStage, displayEnvironment } from './pipelineStage';
 

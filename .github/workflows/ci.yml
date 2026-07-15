@@ -108,7 +108,9 @@ jobs:
           --set secrets.appUrl=https://dataflow.example.com
           --set secrets.databaseUrl=postgres://u:p@h:5432/db
           --set secrets.appDatabaseUrl=postgres://u:p@h:5432/db
+          --set secrets.postgresPassword=dummy
           --set secrets.redisUrl=redis://h:6379
+          --set secrets.redisPassword=dummy
           --set secrets.googleClientId=dummy
           --set secrets.googleClientSecret=dummy
           --set secrets.smtpFrom=noreply@example.com

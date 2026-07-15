@@ -10,20 +10,6 @@ import (
 	"strings"
 )
 
-// Dialect carries the syntax that differs between SQL engines. Only
-// ClickHouse ships today; a second engine adds a value here, not a rewrite.
-type Dialect struct {
-	QuoteIdent       func(string) string
-	ParseDate        func(expr string) string // wrap into a datetime expression; errors on bad input
-	ParseDateLenient func(expr string) string // as ParseDate but yields NULL on bad input
-}
-
-var ClickHouse = Dialect{
-	QuoteIdent:       func(name string) string { return "`" + name + "`" },
-	ParseDate:        func(expr string) string { return "parseDateTimeBestEffort(" + expr + ")" },
-	ParseDateLenient: func(expr string) string { return "parseDateTimeBestEffortOrNull(" + expr + ")" },
-}
-
 // Expr is a rendered, injection-safe SQL fragment. Construct via the helpers
 // in this package only.
 type Expr string
@@ -31,11 +17,11 @@ type Expr string
 var identPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*$`)
 
 // Ident validates and quotes an identifier (column, alias, JSON path).
-func (d Dialect) Ident(name string) (Expr, error) {
+func Ident(name string) (Expr, error) {
 	if !identPattern.MatchString(name) {
 		return "", fmt.Errorf("invalid identifier %q", name)
 	}
-	return Expr(d.QuoteIdent(name)), nil
+	return Expr("`" + name + "`"), nil
 }
 
 // String renders a single-quoted, escaped string literal.
@@ -45,7 +31,7 @@ func String(v string) Expr {
 
 // Literal renders a value typed to the given schema kind, so comparisons
 // match the type of the expression they're compared against.
-func (d Dialect) Literal(kind string, value interface{}) Expr {
+func Literal(kind string, value interface{}) Expr {
 	switch kind {
 	case "number":
 		if f, ok := value.(float64); ok {
@@ -62,7 +48,7 @@ func (d Dialect) Literal(kind string, value interface{}) Expr {
 			return Expr(strconv.FormatBool(b))
 		}
 	case "date":
-		return Expr(d.ParseDate(string(String(fmt.Sprint(value)))))
+		return Expr("parseDateTimeBestEffort(" + string(String(fmt.Sprint(value))) + ")")
 	}
 	return String(fmt.Sprint(value))
 }
@@ -91,7 +77,7 @@ func In(left Expr, values []Expr) Expr {
 func Raw(sql string) Expr { return Expr(sql) }
 
 // JSONField renders typed extraction of a field from a JSON string column.
-func (d Dialect) JSONField(column Expr, path, kind string) (Expr, error) {
+func JSONField(column Expr, path, kind string) (Expr, error) {
 	if !identPattern.MatchString(path) {
 		return "", fmt.Errorf("invalid column name %q", path)
 	}
@@ -102,7 +88,7 @@ func (d Dialect) JSONField(column Expr, path, kind string) (Expr, error) {
 	case "boolean":
 		return "JSONExtract(" + column + "," + p + ",'Bool')", nil
 	case "date":
-		return Expr(d.ParseDateLenient("JSONExtractString(" + string(column) + "," + string(p) + ")")), nil
+		return Expr("parseDateTimeBestEffortOrNull(JSONExtractString(" + string(column) + "," + string(p) + "))"), nil
 	default:
 		return "JSONExtractString(" + column + "," + p + ")", nil
 	}
@@ -116,7 +102,6 @@ type orderBy struct {
 }
 
 type Select struct {
-	dialect  Dialect
 	columns  []Expr
 	from     string
 	final    bool
@@ -129,12 +114,12 @@ type Select struct {
 	err      error
 }
 
-func (d Dialect) Select() *Select { return &Select{dialect: d, limit: -1, offset: -1} }
+func NewSelect() *Select { return &Select{limit: -1, offset: -1} }
 
 // Column adds a select expression, optionally aliased.
 func (s *Select) Column(expr Expr, alias string) *Select {
 	if alias != "" {
-		ident, err := s.dialect.Ident(alias)
+		ident, err := Ident(alias)
 		if err != nil {
 			s.err = err
 			return s
