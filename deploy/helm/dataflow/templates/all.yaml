@@ -20,6 +20,8 @@ stringData:
   databaseUrl: {{ if .Values.runtime.production }}{{ required "secrets.databaseUrl is required when runtime.production=true" .Values.secrets.databaseUrl | quote }}{{ else }}{{ default "postgres://dataflow:dataflow@postgres:5432/dataflow?sslmode=disable" .Values.secrets.databaseUrl | quote }}{{ end }}
   appDatabaseUrl: {{ if .Values.runtime.production }}{{ required "secrets.appDatabaseUrl is required when runtime.production=true" .Values.secrets.appDatabaseUrl | quote }}{{ else }}{{ default "postgres://dataflow_app:dataflow_app@postgres:5432/dataflow?sslmode=disable" .Values.secrets.appDatabaseUrl | quote }}{{ end }}
   redisUrl: {{ if .Values.runtime.production }}{{ required "secrets.redisUrl is required when runtime.production=true" .Values.secrets.redisUrl | quote }}{{ else }}{{ default "redis://redis:6379" .Values.secrets.redisUrl | quote }}{{ end }}
+  postgresPassword: {{ if .Values.runtime.production }}{{ required "secrets.postgresPassword is required when runtime.production=true" .Values.secrets.postgresPassword | quote }}{{ else }}{{ default "dataflow" .Values.secrets.postgresPassword | quote }}{{ end }}
+  redisPassword: {{ if .Values.runtime.production }}{{ required "secrets.redisPassword is required when runtime.production=true" .Values.secrets.redisPassword | quote }}{{ else }}{{ default "" .Values.secrets.redisPassword | quote }}{{ end }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -45,7 +47,7 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - {name: POSTGRES_USER, value: dataflow}
-            - {name: POSTGRES_PASSWORD, value: dataflow}
+            - {name: POSTGRES_PASSWORD, valueFrom: {secretKeyRef: {name: dataflow-secrets, key: postgresPassword}}}
             - {name: POSTGRES_DB, value: dataflow}
           ports: [{containerPort: 5432}]
           readinessProbe: {exec: {command: [pg_isready, -U, dataflow]}, periodSeconds: 3}
@@ -76,9 +78,13 @@ spec:
         - name: redis
           image: {{ .Values.images.redis }}
           imagePullPolicy: IfNotPresent
-          args: [redis-server, --appendonly, "yes", --appendfsync, everysec]
+          args: [redis-server, --appendonly, "yes", --appendfsync, everysec, --requirepass, "$(REDIS_PASSWORD)"]
+          env:
+            - {name: REDIS_PASSWORD, valueFrom: {secretKeyRef: {name: dataflow-secrets, key: redisPassword}}}
           ports: [{containerPort: 6379}]
-          readinessProbe: {exec: {command: [redis-cli, ping]}, periodSeconds: 3}
+          readinessProbe:
+            exec: {command: [sh, -c, "if [ -n \"$REDIS_PASSWORD\" ]; then redis-cli -a \"$REDIS_PASSWORD\" --no-auth-warning ping; else redis-cli ping; fi"]}
+            periodSeconds: 3
           volumeMounts: [{name: data, mountPath: /data}]
       volumes:
         - name: data
@@ -168,7 +174,7 @@ spec:
             - {name: DB, value: postgres12}
             - {name: DB_PORT, value: "5432"}
             - {name: POSTGRES_USER, value: dataflow}
-            - {name: POSTGRES_PWD, value: dataflow}
+            - {name: POSTGRES_PWD, valueFrom: {secretKeyRef: {name: dataflow-secrets, key: postgresPassword}}}
             - {name: POSTGRES_SEEDS, value: postgres}
             - {name: DBNAME, value: temporal}
             - {name: VISIBILITY_DBNAME, value: temporal_visibility}
