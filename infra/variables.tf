@@ -49,3 +49,21 @@ variable "static_ip" {
   type        = string
   default     = "34.14.212.157"
 }
+
+variable "payload_bucket_name" {
+  description = "S3 bucket holding S3-backed node payload objects (PAYLOAD_S3_BUCKET). Empty skips the lifecycle rule."
+  type        = string
+  default     = ""
+}
+
+variable "payload_bucket_region" {
+  description = "AWS region of the payload S3 bucket (PAYLOAD_S3_REGION)"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "payload_retention_days" {
+  description = "Days to retain S3-backed node payload objects before expiry. Match PAYLOAD_RETENTION_DAYS if that env var is set."
+  type        = number
+  default     = 30
+}
