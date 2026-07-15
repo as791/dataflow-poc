@@ -45,7 +45,6 @@ type Config struct {
 	NodeRunRetentionDays         int
 	PayloadRetentionDays         int
 	OutboxRetentionDays          int
-	RedisStreamMaxLen            int64
 	BackfillDispatchInterval     time.Duration
 	MaxPipelineListPageSize      int
 	MaxPipelineNodes             int
@@ -98,7 +97,6 @@ func Load() Config {
 		NodeRunRetentionDays:         intEnv("NODE_RUN_RETENTION_DAYS", 90),
 		PayloadRetentionDays:         intEnv("PAYLOAD_RETENTION_DAYS", 30),
 		OutboxRetentionDays:          intEnv("OUTBOX_RETENTION_DAYS", 30),
-		RedisStreamMaxLen:            int64(intEnv("REDIS_STREAM_MAXLEN", 100000)),
 		BackfillDispatchInterval:     time.Duration(intEnv("BACKFILL_DISPATCH_INTERVAL_MS", 5000)) * time.Millisecond,
 		MaxPipelineListPageSize:      intEnv("MAX_PIPELINE_LIST_PAGE_SIZE", 200),
 		MaxPipelineNodes:             intEnv("MAX_PIPELINE_NODES", 500),

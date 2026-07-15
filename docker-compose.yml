@@ -121,6 +121,9 @@ services:
       - ./db/020_cross_run_dedupe.sql:/docker-entrypoint-initdb.d/020_cross_run_dedupe.sql:ro
       - ./db/021_engine_entitlements.sql:/docker-entrypoint-initdb.d/021_engine_entitlements.sql:ro
       - ./db/022_flink_execution_state.sql:/docker-entrypoint-initdb.d/022_flink_execution_state.sql:ro
+      - ./db/023_lineage_payload.sql:/docker-entrypoint-initdb.d/023_lineage_payload.sql:ro
+      - ./db/024_pipeline_list_indexes.sql:/docker-entrypoint-initdb.d/024_pipeline_list_indexes.sql:ro
+      - ./db/025_retention_function.sql:/docker-entrypoint-initdb.d/025_retention_function.sql:ro
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dataflow"]

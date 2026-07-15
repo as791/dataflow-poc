@@ -157,7 +157,7 @@ export default function LifecyclePage() {
 
   const refresh = useCallback(async () => {
     setLoading(true); setError(null);
-    try { setRows((await api.listPipelines({ limit: '500' })).rows); }
+    try { setRows(await api.listAllPipelines()); }
     catch (e: any) { setError(e.message ?? 'Failed to load pipelines'); }
     finally { setLoading(false); }
   }, []);

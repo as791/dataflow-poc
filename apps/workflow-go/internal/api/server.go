@@ -148,9 +148,9 @@ func (s *Server) StartBackground(ctx context.Context) {
 	go s.assetEventSubscriber(ctx)
 }
 
-// dataRetention purges rows and stream entries past their configured
-// retention window. Every statement is a bounded-age DELETE (or XTRIM), so
-// re-running it on the next tick is a no-op if nothing new has aged out.
+// dataRetention purges database rows past their configured retention window.
+// The Redis stream is intentionally excluded: successful entries are already
+// XACKed and deleted, while trimming a backlog could drop undelivered events.
 func (s *Server) dataRetention(ctx context.Context) {
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
@@ -165,37 +165,14 @@ func (s *Server) dataRetention(ctx context.Context) {
 }
 
 func (s *Server) purgeAgedData(ctx context.Context) {
-	if _, err := s.DB.Pool.Exec(ctx, `DELETE FROM audit_log WHERE created_at < now() - ($1 || ' days')::interval`, s.Config.AuditRetentionDays); err != nil {
-		slog.Error("audit_log purge failed", "error", err)
-	}
-	// Executions past retention; node_runs/node_payloads have no FK to
-	// executions so each is purged independently by its own age column.
-	if _, err := s.DB.Pool.Exec(ctx, `DELETE FROM executions WHERE completed_at IS NOT NULL AND completed_at < now() - ($1 || ' days')::interval`, s.Config.ExecutionRetentionDays); err != nil {
-		slog.Error("executions purge failed", "error", err)
-	}
-	if _, err := s.DB.Pool.Exec(ctx, `DELETE FROM node_runs WHERE finished_at < now() - ($1 || ' days')::interval`, s.Config.NodeRunRetentionDays); err != nil {
-		slog.Error("node_runs purge failed", "error", err)
-	}
-	// node_payloads only holds the "pg" DataRef type (payload stored inline
-	// in Postgres). S3-backed payloads ("s3" type) carry no age index in the
-	// app; expire those via a bucket lifecycle rule on PAYLOAD_S3_BUCKET
-	// instead of app code.
-	if _, err := s.DB.Pool.Exec(ctx, `DELETE FROM node_payloads WHERE created_at < now() - ($1 || ' days')::interval`, s.Config.PayloadRetentionDays); err != nil {
-		slog.Error("node_payloads purge failed", "error", err)
-	}
-	if _, err := s.DB.Pool.Exec(ctx, `DELETE FROM openlineage_outbox WHERE sent_at IS NOT NULL AND sent_at < now() - ($1 || ' days')::interval`, s.Config.OutboxRetentionDays); err != nil {
-		slog.Error("openlineage_outbox purge failed", "error", err)
-	}
-	if _, err := s.DB.Pool.Exec(ctx, `DELETE FROM pipeline_event_outbox WHERE published_at IS NOT NULL AND published_at < now() - ($1 || ' days')::interval`, s.Config.OutboxRetentionDays); err != nil {
-		slog.Error("pipeline_event_outbox purge failed", "error", err)
-	}
-	if _, err := s.DB.Pool.Exec(ctx, `DELETE FROM pipeline_alert_notification_outbox WHERE sent_at IS NOT NULL AND sent_at < now() - ($1 || ' days')::interval`, s.Config.OutboxRetentionDays); err != nil {
-		slog.Error("pipeline_alert_notification_outbox purge failed", "error", err)
-	}
-	// Safety cap on the pipeline-events stream: entries are XAck+XDel'd on
-	// successful delivery already, so this only trims a stuck/backlogged
-	// stream rather than doing routine cleanup.
-	if err := s.Redis.XTrimMaxLenApprox(ctx, "dataflow:pipeline-events", s.Config.RedisStreamMaxLen, 0).Err(); err != nil {
-		slog.Error("pipeline-events stream trim failed", "error", err)
+	_, err := s.DB.Pool.Exec(ctx, `SELECT public.purge_aged_data($1,$2,$3,$4,$5)`,
+		s.Config.AuditRetentionDays,
+		s.Config.ExecutionRetentionDays,
+		s.Config.NodeRunRetentionDays,
+		s.Config.PayloadRetentionDays,
+		s.Config.OutboxRetentionDays,
+	)
+	if err != nil {
+		slog.Error("data retention purge failed", "error", err)
 	}
 }

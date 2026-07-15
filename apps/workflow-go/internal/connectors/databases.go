@@ -46,10 +46,22 @@ func envInt32(name string, fallback int32) int32 {
 	return fallback
 }
 
-// dbBatchSize caps rows per multi-row INSERT/BulkWrite call so generated
-// statements stay well under driver/wire limits (e.g. postgres' ~65535 bind
-// params) without needing a separate config knob.
+// dbBatchSize caps rows per multi-row INSERT/BulkWrite call. PostgreSQL batches
+// are reduced further based on their column count to stay within the protocol's
+// 65535 bind-parameter limit.
 const dbBatchSize = 500
+const postgresMaxBindParams = 65535
+
+func postgresBatchRows(columnCount int) (int, error) {
+	if columnCount < 1 {
+		return 0, fmt.Errorf("sink.postgres: records must contain at least one column")
+	}
+	rows := postgresMaxBindParams / columnCount
+	if rows < 1 {
+		return 0, fmt.Errorf("sink.postgres: %d columns exceed the bind-parameter limit", columnCount)
+	}
+	return min(dbBatchSize, rows), nil
+}
 
 // connCache is a worker-scoped pool cache keyed by connector-instance ID
 // (connectionId / connector_instances.id): repeated fetch/sink calls for the
@@ -283,6 +295,10 @@ func (r *Runtime) postgresSink(ctx context.Context, input interface{}, cfg map[s
 		return nil, nil, err
 	}
 	columns := allColumns(rows)
+	batchSize, err := postgresBatchRows(len(columns))
+	if err != nil {
+		return nil, nil, err
+	}
 	quoted := []string{}
 	for _, column := range columns {
 		value, err := quoteIdentifier(column)
@@ -320,8 +336,8 @@ func (r *Runtime) postgresSink(ctx context.Context, input interface{}, cfg map[s
 	}
 	// Batch rows into multi-row INSERTs (dbBatchSize per statement) instead of
 	// one round trip per row.
-	for start := 0; start < len(rows); start += dbBatchSize {
-		end := start + dbBatchSize
+	for start := 0; start < len(rows); start += batchSize {
+		end := start + batchSize
 		if end > len(rows) {
 			end = len(rows)
 		}

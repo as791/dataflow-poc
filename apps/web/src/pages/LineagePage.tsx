@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import ReactFlow, {
   Background, BackgroundVariant, Controls, Handle, MiniMap, Position,
-  type Edge, type Node, type NodeProps,
+  type Edge, type Node, type NodeProps, type ReactFlowInstance,
 } from 'reactflow';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, Database, History, RefreshCw, Search, Workflow } from 'lucide-react';
@@ -138,6 +138,7 @@ export default function LineagePage() {
   const [focusDepth, setFocusDepth] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
 
   const refresh = async () => {
     setLoading(true); setError(null);
@@ -183,6 +184,18 @@ export default function LineagePage() {
     }
     return { nodes: flow.nodes.filter(node => matched.has(node.id)), edges: flow.edges.filter(edge => matched.has(edge.source) && matched.has(edge.target)) };
   }, [flow, healthFilter]);
+  const visibleNodeKey = useMemo(() => visible.nodes.map(node => node.id).sort().join('\u0000'), [visible.nodes]);
+  useEffect(() => {
+    if (!flowInstance || !visibleNodeKey) return;
+    const frame = requestAnimationFrame(() => {
+      void flowInstance.fitView({
+        nodes: visibleNodeKey.split('\u0000').map(id => ({ id })),
+        padding: 0.15,
+        duration: 250,
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [flowInstance, visibleNodeKey]);
   const impact = useMemo(() => {
     if (!selectedId || !visible.nodes.some(node => node.id === selectedId)) {
       return { ...visible, upstream: new Set<string>(), downstream: new Set<string>() };
@@ -327,6 +340,7 @@ export default function LineagePage() {
           {selectedColumns.length > 0 && <div className="mt-3"><p className="text-[10px] font-semibold uppercase text-gray-400">Column lineage</p><div className="mt-1 max-h-32 space-y-1 overflow-auto">{selectedColumns.slice(0, 20).map(edge => <p key={edge.id} className="truncate text-[10px] text-gray-600 dark:text-white/55" title={`${edge.sourceAssetUrn}.${edge.sourceField} → ${edge.targetAssetUrn}.${edge.targetField}`}>{edge.sourceField} → {edge.targetField}</p>)}</div></div>}
         </aside>}
         <ReactFlow nodes={impact.nodes} edges={impact.edges} nodeTypes={nodeTypes} fitView onlyRenderVisibleElements
+          onInit={setFlowInstance}
           nodesDraggable={false} nodesConnectable={false} elementsSelectable
           onNodeClick={(_, node) => setSelectedId(node.id)} onPaneClick={() => setSelectedId(null)}>
           <Background variant={BackgroundVariant.Dots} gap={24} size={1} color={dark ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.06)'} />

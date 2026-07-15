@@ -160,7 +160,7 @@ export default function RunsPage() {
   };
 
   useEffect(() => { refresh(); }, [refresh]);
-  useEffect(() => { api.listPipelines({ limit: '500' }).then(page => setPipelines(page.rows)).catch(() => {}); }, []);
+  useEffect(() => { api.listAllPipelines().then(setPipelines).catch(() => {}); }, []);
 
   const setF = (k: keyof typeof filters, v: string) => setFilters(f => ({ ...f, [k]: v }));
 

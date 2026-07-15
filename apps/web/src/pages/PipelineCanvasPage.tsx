@@ -100,10 +100,10 @@ export default function PipelineCanvasPage() {
   // stays a manual effect: it drives multi-field hydration + a `hydrated`
   // ref guard rather than rendering a single resource, so it doesn't fit the
   // data/error/loading shape.
-  const pipelinesQuery = useApiQuery(() => api.listPipelines({ limit: '500' }), []);
+  const pipelinesQuery = useApiQuery(() => api.listAllPipelines(), []);
   const upstreamPipelines = useMemo(() => {
     const byKey = new Map<string, { pipeline_key: string; name: string }>();
-    (pipelinesQuery.data?.rows ?? []).forEach((row: any) => { if (!byKey.has(row.pipeline_key)) byKey.set(row.pipeline_key, row); });
+    (pipelinesQuery.data ?? []).forEach((row: any) => { if (!byKey.has(row.pipeline_key)) byKey.set(row.pipeline_key, row); });
     return [...byKey.values()];
   }, [pipelinesQuery.data]);
 

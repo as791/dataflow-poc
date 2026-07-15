@@ -169,7 +169,7 @@ jobs:
         with:
           working_directory: infra
       - name: Trivy config scan — Helm chart
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           scan-ref: deploy/helm/dataflow
@@ -185,13 +185,13 @@ jobs:
       - name: Build web image
         run: docker build -f apps/web/Dockerfile -t dataflow-web:ci .
       - name: Scan workflow-go image
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: dataflow-workflow-go:ci
           severity: HIGH,CRITICAL
           exit-code: '1'
       - name: Scan web image
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: dataflow-web:ci
           severity: HIGH,CRITICAL

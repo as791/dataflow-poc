@@ -566,6 +566,19 @@ func (a *Activities) MarkExecution(ctx context.Context, p MarkExecutionParams) e
 		return err
 	}
 	_, _ = a.DB.Pool.Exec(ctx, `WITH changed AS (UPDATE backfill_partitions bp SET status=$2,completed_at=now() FROM executions e WHERE e.id=$1 AND e.backfill_partition_id=bp.id RETURNING bp.job_id) UPDATE backfill_jobs bj SET status=CASE WHEN EXISTS(SELECT 1 FROM backfill_partitions p WHERE p.job_id=bj.id AND p.status='failed') THEN 'failed' WHEN EXISTS(SELECT 1 FROM backfill_partitions p WHERE p.job_id=bj.id AND p.status='cancelled') THEN 'cancelled' ELSE 'completed' END,completed_at=now() FROM changed WHERE bj.id=changed.job_id AND NOT EXISTS(SELECT 1 FROM backfill_partitions p WHERE p.job_id=bj.id AND p.status IN('pending','starting','running'))`, p.ExecutionID, p.Phase)
+	if p.Phase == "failed" {
+		if _, err := a.DB.Pool.Exec(ctx, `INSERT INTO pipeline_alerts (tenant_id,pipeline_id,execution_id,fingerprint,kind,severity,message,details)
+			SELECT e.tenant_id,e.pipeline_id,e.id,'execution_failed','execution_failed','critical',
+			  COALESCE('Node '||nr.node_id||' failed: '||nr.error,'Node '||nr.node_id||' failed','Execution failed'),
+			  jsonb_strip_nulls(jsonb_build_object('executionId',e.id,'nodeId',nr.node_id))
+			FROM executions e
+			LEFT JOIN LATERAL (SELECT node_id,error FROM node_runs WHERE execution_id=e.id AND status='failed' ORDER BY finished_at DESC NULLS LAST LIMIT 1) nr ON true
+			WHERE e.id=$1
+			ON CONFLICT (tenant_id,pipeline_id,fingerprint) WHERE status IN ('open','acknowledged')
+			DO UPDATE SET last_seen_at=now(),execution_id=EXCLUDED.execution_id,message=EXCLUDED.message,details=EXCLUDED.details`, p.ExecutionID); err != nil {
+			slog.Warn("failed to record pipeline alert", "executionId", p.ExecutionID, "error", err)
+		}
+	}
 	return nil
 }
 

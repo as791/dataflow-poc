@@ -29,6 +29,41 @@ const j = async (r: Response) => {
   return r.json();
 };
 
+type PipelineListParams = {
+  limit?: string;
+  cursor?: string;
+  search?: string;
+  stage?: string;
+  trigger?: string;
+};
+
+type PipelineListPage = { rows: any[]; nextCursor: string | null };
+
+const listPipelines = (params?: PipelineListParams) => {
+  const clean = Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][];
+  const qs = clean.length ? '?' + new URLSearchParams(Object.fromEntries(clean)) : '';
+  return request(`/api/pipelines${qs}`).then(j) as Promise<PipelineListPage>;
+};
+
+async function listAllPipelines(
+  params: Omit<PipelineListParams, 'limit' | 'cursor'> = {},
+  pageSize = 200,
+): Promise<any[]> {
+  const limit = Number.isFinite(pageSize) ? Math.min(200, Math.max(1, Math.floor(pageSize))) : 200;
+  const rows: any[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+
+  while (true) {
+    const page = await listPipelines({ ...params, limit: String(limit), cursor });
+    rows.push(...page.rows);
+    if (!page.nextCursor) return rows;
+    if (seenCursors.has(page.nextCursor)) throw new Error('Pipeline pagination returned a repeated cursor');
+    seenCursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
+}
+
 export const api = {
   // Pipelines / executions
   savePipeline: (def: any) => request('/api/pipelines', { method: 'POST', body: JSON.stringify(def) }).then(j),
@@ -40,11 +75,8 @@ export const api = {
     request(`/api/pipelines/${rowId}/stage`, { method: 'POST', body: JSON.stringify({ to, allowBreakingContract }) }).then(j),
   run:          (rowId: string) =>
     request(`/api/pipelines/${rowId}/run`, { method: 'POST', body: JSON.stringify({}) }).then(j),
-  listPipelines: (params?: { limit?: string; cursor?: string; search?: string; stage?: string; trigger?: string }) => {
-    const clean = Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][];
-    const qs = clean.length ? '?' + new URLSearchParams(Object.fromEntries(clean)) : '';
-    return request(`/api/pipelines${qs}`).then(j) as Promise<{ rows: any[]; nextCursor: string | null }>;
-  },
+  listPipelines,
+  listAllPipelines,
   getPipeline: (rowId: string) => request(`/api/pipelines/${rowId}`).then(j),
   planBackfill: (rowId: string, body: { from: string; to: string; partitionDays: number; maxConcurrency: number }) =>
     request(`/api/pipelines/${rowId}/backfills/plan`, { method: 'POST', body: JSON.stringify(body) }).then(j),

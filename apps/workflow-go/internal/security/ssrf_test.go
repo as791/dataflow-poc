@@ -70,3 +70,40 @@ func TestNewHTTPClientAllowsPublicHost(t *testing.T) {
 		t.Fatalf("expected public IP not to be rejected by the SSRF denylist, got %v", err)
 	}
 }
+
+func TestNewHTTPClientRedirectPolicy(t *testing.T) {
+	client := NewHTTPClient(2 * time.Second)
+	original, _ := http.NewRequest(http.MethodGet, "https://example.com/start", nil)
+
+	t.Run("same-origin HTTPS", func(t *testing.T) {
+		redirect, _ := http.NewRequest(http.MethodGet, "https://example.com/next", nil)
+		if err := client.CheckRedirect(redirect, []*http.Request{original}); err != nil {
+			t.Fatalf("expected same-origin HTTPS redirect to be allowed, got %v", err)
+		}
+	})
+
+	t.Run("HTTP downgrade", func(t *testing.T) {
+		redirect, _ := http.NewRequest(http.MethodGet, "http://example.com/next", nil)
+		if err := client.CheckRedirect(redirect, []*http.Request{original}); err == nil || !strings.Contains(err.Error(), "must use https") {
+			t.Fatalf("expected HTTP downgrade to be rejected, got %v", err)
+		}
+	})
+
+	t.Run("cross-origin", func(t *testing.T) {
+		redirect, _ := http.NewRequest(http.MethodGet, "https://other.example/next", nil)
+		if err := client.CheckRedirect(redirect, []*http.Request{original}); err == nil || !strings.Contains(err.Error(), "original origin") {
+			t.Fatalf("expected cross-origin redirect to be rejected, got %v", err)
+		}
+	})
+
+	t.Run("redirect limit", func(t *testing.T) {
+		redirect, _ := http.NewRequest(http.MethodGet, "https://example.com/next", nil)
+		via := make([]*http.Request, maxRedirects)
+		for i := range via {
+			via[i] = original
+		}
+		if err := client.CheckRedirect(redirect, via); err == nil || !strings.Contains(err.Error(), "stopped after") {
+			t.Fatalf("expected redirect limit to be enforced, got %v", err)
+		}
+	})
+}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ChevronRight, Clock, Play, RefreshCw, RotateCcw, Search, X,
@@ -314,6 +314,8 @@ export default function PipelinesPage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selected, setSelected] = useState<Pipeline | null>(null);
+  const requestGeneration = useRef(0);
+  const activeQuerySignature = useRef('');
 
   // Debounce the search box before it hits the server-side ILIKE filter.
   useEffect(() => {
@@ -327,24 +329,49 @@ export default function PipelinesPage() {
     stage: STAGE_PARAM[filter],
     trigger: triggerFilter === 'all' ? undefined : triggerFilter,
   };
+  const querySignature = `${filter}\u0000${triggerFilter}\u0000${debouncedSearch}`;
+  activeQuerySignature.current = querySignature;
 
   const load = () => {
-    setLoading(true); setError(null); setNextCursor(null);
+    const generation = ++requestGeneration.current;
+    const requestQuery = querySignature;
+    setLoading(true); setLoadingMore(false); setError(null); setNextCursor(null);
     api.listPipelines(queryParams)
-      .then(page => { setRows(page.rows); setNextCursor(page.nextCursor); setLoading(false); })
-      .catch((e: Error) => { setError(e.message); setLoading(false); });
+      .then(page => {
+        if (generation !== requestGeneration.current || requestQuery !== activeQuerySignature.current) return;
+        setRows(page.rows); setNextCursor(page.nextCursor);
+      })
+      .catch((e: Error) => {
+        if (generation === requestGeneration.current && requestQuery === activeQuerySignature.current) setError(e.message);
+      })
+      .finally(() => {
+        if (generation === requestGeneration.current && requestQuery === activeQuerySignature.current) setLoading(false);
+      });
   };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [filter, triggerFilter, debouncedSearch]);
+  useEffect(() => {
+    load();
+    return () => { requestGeneration.current++; };
+  }, [filter, triggerFilter, debouncedSearch]);
 
   const loadMore = () => {
     if (!nextCursor) return;
+    const generation = ++requestGeneration.current;
+    const requestQuery = querySignature;
+    const cursor = nextCursor;
     setLoadingMore(true);
-    api.listPipelines({ ...queryParams, cursor: nextCursor })
-      .then(page => { setRows(r => [...r, ...page.rows]); setNextCursor(page.nextCursor); })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoadingMore(false));
+    api.listPipelines({ ...queryParams, cursor })
+      .then(page => {
+        if (generation !== requestGeneration.current || requestQuery !== activeQuerySignature.current) return;
+        setRows(r => [...r, ...page.rows]); setNextCursor(page.nextCursor);
+      })
+      .catch((e: Error) => {
+        if (generation === requestGeneration.current && requestQuery === activeQuerySignature.current) setError(e.message);
+      })
+      .finally(() => {
+        if (generation === requestGeneration.current && requestQuery === activeQuerySignature.current) setLoadingMore(false);
+      });
   };
 
   // failedOnly narrows only the currently-loaded page — cheap client filter,

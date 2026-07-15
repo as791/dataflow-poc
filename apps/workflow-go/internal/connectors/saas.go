@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -300,6 +301,8 @@ func (r *Runtime) excelFetch(ctx context.Context, p SourceParams) (SourceResult,
 	return SourceResult{Records: records, NextCursor: cursor}, nil
 }
 
+var zendeskSubdomainRE = regexp.MustCompile(`^[a-z0-9-]+$`)
+
 func (r *Runtime) zendeskFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
 	row, err := r.oauthConnection(ctx, stringValue(p.Config["connectionId"]))
 	if err != nil {
@@ -309,6 +312,9 @@ func (r *Runtime) zendeskFetch(ctx context.Context, p SourceParams) (SourceResul
 	subdomain := firstString(extra["subdomain"], p.Config["subdomain"])
 	if subdomain == "" {
 		return SourceResult{}, fmt.Errorf("zendesk.fetch: subdomain missing on connection")
+	}
+	if !zendeskSubdomainRE.MatchString(subdomain) {
+		return SourceResult{}, fmt.Errorf("zendesk.fetch: invalid subdomain %q", subdomain)
 	}
 	resource := firstString(p.Config["resource"], "tickets")
 	endpoint := fmt.Sprintf("https://%s.zendesk.com/api/v2/incremental/%s/cursor.json", subdomain, resource)

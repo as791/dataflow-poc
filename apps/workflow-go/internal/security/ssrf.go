@@ -10,8 +10,11 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
+
+const maxRedirects = 10
 
 // deniedNetworks are the private/reserved ranges outbound requests to
 // user-supplied URLs must never reach: RFC1918 space, loopback, and
@@ -120,5 +123,36 @@ func NewHTTPClient(timeout time.Duration) *http.Client {
 		Transport: &http.Transport{
 			DialContext: dialContext,
 		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxRedirects {
+				return fmt.Errorf("stopped after %d redirects", maxRedirects)
+			}
+			if _, err := ValidateURL(req.URL.String()); err != nil {
+				return fmt.Errorf("redirect target: %w", err)
+			}
+			if len(via) > 0 && !sameOrigin(via[0].URL, req.URL) {
+				return fmt.Errorf("redirect target must remain on the original origin")
+			}
+			return nil
+		},
 	}
+}
+
+func sameOrigin(left, right *url.URL) bool {
+	return strings.EqualFold(left.Scheme, right.Scheme) &&
+		strings.EqualFold(left.Hostname(), right.Hostname()) &&
+		effectivePort(left) == effectivePort(right)
+}
+
+func effectivePort(value *url.URL) string {
+	if port := value.Port(); port != "" {
+		return port
+	}
+	if strings.EqualFold(value.Scheme, "https") {
+		return "443"
+	}
+	if strings.EqualFold(value.Scheme, "http") {
+		return "80"
+	}
+	return ""
 }
