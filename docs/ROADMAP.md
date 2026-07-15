@@ -49,33 +49,52 @@ tested. These are blockers, not aspirational features.
 
 ## Gate 1 — ten daily users / 10K stored DAGs
 
-- [ ] Replace `GET /api/pipelines` full-definition list with keyset pagination,
+- [x] Replace `GET /api/pipelines` full-definition list with keyset pagination,
   a summary projection, server-side stage/trigger/search filters, and separate
   detail fetch. Acceptance: p95 under 300 ms with 10K definitions.
-- [ ] Add pipeline definition limits: nodes, edges, config bytes, fan-out,
+  *(2026-07-15: shipped; no composite index on (tenant_id,created_at,id) or
+  executions(pipeline_id,started_at) yet — recommend adding before the p95
+  claim is measured at 10K scale.)*
+- [x] Add pipeline definition limits: nodes, edges, config bytes, fan-out,
   max-parallel, page size, and backfill partitions. Reject before persistence.
-- [ ] Cap payload reads and merged refs; stream or spill large merges. Acceptance:
+- [x] Cap payload reads and merged refs; stream or spill large merges. Acceptance:
   worker RSS stays within its configured limit for worst allowed input.
-- [ ] Batch PostgreSQL/MySQL/Snowflake writes and MongoDB bulk upserts; reuse
+  *(2026-07-15: review caught two bugs before landing — an S3 ciphertext-vs-
+  plaintext size-cap mismatch that would reject legitimate near-limit payloads,
+  and an unbounded merge write-back that defeated the RSS guarantee — both fixed.)*
+- [x] Batch PostgreSQL/MySQL/Snowflake writes and MongoDB bulk upserts; reuse
   bounded worker-scoped connection pools. Acceptance: no connection-per-page
   churn and documented pool caps per tenant/provider.
-- [ ] Add lifecycle retention for executions, node runs, payloads, audit data,
+- [x] Add lifecycle retention for executions, node runs, payloads, audit data,
   outboxes, object storage, Redis streams, and Temporal histories.
+  *(2026-07-15: S3-backed payload objects have no age index in-app — needs a
+  bucket lifecycle rule at the infra layer, not app code; flagged as follow-up.)*
 - [ ] Move production metadata to Cloud SQL HA with PITR; Redis to Memorystore or
   replace event delivery with Pub/Sub; payloads to GCS with lifecycle/versioning;
   select a backed-up ClickHouse service.
-- [ ] Add SSRF protection for HTTP connectors, webhooks, alerts, and user-provided
+  *(Deferred: real recurring cloud spend + live cutover, needs explicit sign-off
+  before starting.)*
+- [x] Add SSRF protection for HTTP connectors, webhooks, alerts, and user-provided
   endpoints: HTTPS policy, DNS/IP revalidation, private/metadata denylist, egress policy.
 - [ ] Make refresh rotation atomic; add email verification, password reset,
   MFA-ready session model, session revocation, and admin/editor/operator/viewer roles.
-- [ ] Add CSP/HSTS at HTTPS edge, Kubernetes NetworkPolicies, resource requests
+  *(Deferred: security-critical, each sub-item needs its own scoped design pass.)*
+- [x] Add CSP/HSTS at HTTPS edge, Kubernetes NetworkPolicies, resource requests
   and limits, non-root/read-only security contexts where images permit.
-- [ ] Fix mobile editor information architecture and all WCAG 2.1 AA findings:
+  *(2026-07-15: kind's default kindnet CNI does not enforce NetworkPolicy —
+  policies are correct and in place but inert until a real CNI is used.)*
+- [x] Fix mobile editor information architecture and all WCAG 2.1 AA findings:
   touch targets, contrast, headings, labels, focus, keyboard paths, and screen-reader names.
-- [ ] Break `PipelineCanvasPage` into feature components and move API state to a
+  *(2026-07-15: review caught the first pass fixed AppShell's touch
+  targets/labels but skipped the actual canvas editor rail — closed; a full
+  responsive collapse of the rail at narrow widths is still a follow-up.)*
+- [x] Break `PipelineCanvasPage` into feature components and move API state to a
   typed query/cache layer with abortable requests and shared errors.
-- [ ] Add CI: deployed E2E smoke, secret scan, CodeQL/SAST, dependency and license
+- [x] Add CI: deployed E2E smoke, secret scan, CodeQL/SAST, dependency and license
   review, IaC/container scan, SBOM, image digest/signature, Helm render, Terraform validate.
+  *(2026-07-15: review caught the license-review job had no license policy
+  (vuln-only) — deny-licenses list added. Deployed E2E smoke stays manual/
+  on-demand — CI runners have no live URL to target.)*
 
 ## Gate 2 — 100K stored DAGs / high-throughput data plane
 
