@@ -271,6 +271,7 @@ export default function RuntimeLineage() {
     ...(environment ? { environment } : {}),
     ...(status ? { status } : {}),
     ...(pipeline ? { pipeline } : {}),
+    ...(layerFilter ? { layer: layerFilter } : {}),
   });
 
   const refresh = async () => {
@@ -296,7 +297,7 @@ export default function RuntimeLineage() {
     }
   };
 
-  useEffect(() => { void refresh(); }, [preset, environment, status, pipeline, debouncedSearch]);
+  useEffect(() => { void refresh(); }, [preset, environment, status, pipeline, layerFilter, debouncedSearch]);
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 275);
     return () => clearTimeout(timer);
@@ -470,6 +471,11 @@ export default function RuntimeLineage() {
             <ReactFlow nodes={flow.nodes} edges={flow.edges} nodeTypes={nodeTypes} fitView
               fitViewOptions={FIT_VIEW_OPTIONS} defaultViewport={DEFAULT_VIEWPORT} minZoom={0.05}
               onInit={setFlowInstance}
+              onNodeClick={(_, node) => {
+                if (node.type === 'pipeline' && node.data.pipelineKey) {
+                  setPipeline(current => current === String(node.data.pipelineKey) ? '' : String(node.data.pipelineKey));
+                }
+              }}
               nodesDraggable={false} nodesConnectable={false} elementsSelectable={false}>
               <Background variant={BackgroundVariant.Dots} gap={24} size={1} color={dark ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.06)'} />
               <Controls showInteractive={false} />

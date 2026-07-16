@@ -12,10 +12,13 @@ export const LAYER_X: Record<LineageLayer, number> = { external: 40, bronze: 640
 export const LAYER_COLOR: Record<LineageLayer, string> = {
   external: '#64748b', bronze: '#b7791f', silver: '#94a3b8', gold: '#eab308',
 };
+// Card sizes are ENFORCED via node style (ReactFlow does not constrain the
+// DOM node to the declared width/height on its own — runtime metric lines
+// made cards outgrow their layout slot and overlap neighbouring lanes).
 export const ASSET_WIDTH = 360;
-export const ASSET_HEIGHT = 128;
+export const ASSET_HEIGHT = 152;
 export const PIPELINE_WIDTH = 200;
-export const PIPELINE_HEIGHT = 100;
+export const PIPELINE_HEIGHT = 128;
 export const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 0.35 };
 export const FIT_VIEW_OPTIONS = { padding: 0.25, minZoom: 0.15, maxZoom: 0.4 };
 export const normalizeLayer = (layer: unknown): LineageLayer =>
@@ -55,7 +58,7 @@ const AssetNode = memo(function AssetNode({ data }: NodeProps) {
   const layer = normalizeLayer(data.layer);
   const metrics: RuntimeNodeMetrics | undefined = data.metrics;
   return (
-    <div className="h-full w-full rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm dark:border-white/10 dark:bg-[#12151f]/95">
+    <div className="h-full w-full overflow-hidden rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm dark:border-white/10 dark:bg-[#12151f]/95">
       <Handle type="target" position={Position.Left} />
       <div className="flex items-center gap-2">
         <Database size={14} style={{ color: LAYER_COLOR[layer] }} />
@@ -84,7 +87,7 @@ const PipelineNode = memo(function PipelineNode({ data }: NodeProps) {
   const health = data.health ?? 'unmonitored';
   const metrics: RuntimeNodeMetrics | undefined = data.metrics;
   return (
-    <div className="h-full w-full rounded-xl border bg-brand-50 px-3 py-2 shadow-md dark:bg-brand-500/10"
+    <div className="h-full w-full overflow-hidden rounded-xl border bg-brand-50 px-3 py-2 shadow-md dark:bg-brand-500/10"
       style={{ borderColor: HEALTH_COLOR[health] }}>
       <Handle type="target" position={Position.Left} />
       <div className="flex items-center gap-2">
@@ -145,6 +148,7 @@ export function buildFlow(graph: WorkspaceLineage, healthById: Record<string, Pi
       return {
         id: node.id, type: 'asset', position: assetPosition.get(node.id)!,
         width: ASSET_WIDTH, height: ASSET_HEIGHT,
+        style: { width: ASSET_WIDTH, height: ASSET_HEIGHT },
         data: { ...node.asset, layer: lane, materialization: node.materialization, quality: node.quality, metrics }, draggable: false,
       };
     }
@@ -173,6 +177,7 @@ export function buildFlow(graph: WorkspaceLineage, healthById: Record<string, Pi
     return {
       id: node.id, type: 'pipeline', position: { x, y },
       width: PIPELINE_WIDTH, height: PIPELINE_HEIGHT,
+      style: { width: PIPELINE_WIDTH, height: PIPELINE_HEIGHT },
       data, draggable: false,
     };
   });

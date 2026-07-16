@@ -57,11 +57,14 @@ func parseRuntimeWindow(q url.Values) (time.Time, time.Time, error) {
 	return from, to, nil
 }
 
+var runtimeLayers = map[string]bool{"external": true, "bronze": true, "silver": true, "gold": true}
+
 type runtimeFilters struct {
 	from, to    time.Time
 	environment string
 	pipelineKey string // resolved from the pipeline row id filter
 	status      string
+	layer       string // medallion layer any of the pipeline's nodes touches
 }
 
 func (s *Server) parseRuntimeFilters(r *http.Request) (runtimeFilters, error) {
@@ -76,6 +79,10 @@ func (s *Server) parseRuntimeFilters(r *http.Request) (runtimeFilters, error) {
 	}
 	if filters.status != "" && !runtimePhases[filters.status] {
 		return runtimeFilters{}, badRequest(ErrInvalidRequest, "status must be running, completed, failed, or cancelled")
+	}
+	filters.layer = q.Get("layer")
+	if filters.layer != "" && !runtimeLayers[filters.layer] {
+		return runtimeFilters{}, badRequest(ErrInvalidRequest, "layer must be external, bronze, silver, or gold")
 	}
 	if pipeline := q.Get("pipeline"); pipeline != "" {
 		tenant := tenantFrom(r)
@@ -107,6 +114,10 @@ func (f runtimeFilters) executionWhere(args *[]interface{}) string {
 	if f.status != "" {
 		*args = append(*args, f.status)
 		where = append(where, fmt.Sprintf("e.phase=$%d", len(*args)))
+	}
+	if f.layer != "" {
+		*args = append(*args, f.layer)
+		where = append(where, fmt.Sprintf(`EXISTS (SELECT 1 FROM jsonb_array_elements(p.definition->'nodes') node WHERE node->'config'->>'layer'=$%d)`, len(*args)))
 	}
 	return strings.Join(where, " AND ")
 }
