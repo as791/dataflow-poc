@@ -8,11 +8,13 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/dataflow-poc/workflow-go/internal/connectors"
 	"github.com/dataflow-poc/workflow-go/internal/database"
 	"github.com/dataflow-poc/workflow-go/internal/model"
+	"github.com/google/uuid"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 )
@@ -58,7 +60,10 @@ func (a *Activities) PrepareScheduledExecution(ctx context.Context, p ScheduledE
 	if _, err = tx.Exec(ctx, `UPDATE usage_counters SET execution_count=execution_count+1 WHERE tenant_id=$1 AND month=date_trunc('month',now() at time zone 'utc')::date`, p.TenantID); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO executions (id,pipeline_id,tenant_id,trigger_type,phase,environment,workflow_id,run_id) VALUES ($1,$2,$3,'cron','running',$4,$5,$6) ON CONFLICT(id) DO NOTHING`, p.ExecutionID, p.PipelineRowID, p.TenantID, p.Environment, p.WorkflowID, p.RunID); err != nil {
+	// Cron firings have no inbound trace context; mint a W3C-shaped trace id
+	// here (activity side — workflow code must stay deterministic).
+	traceID := strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, err = tx.Exec(ctx, `INSERT INTO executions (id,pipeline_id,tenant_id,trigger_type,phase,environment,workflow_id,run_id,trace_id) VALUES ($1,$2,$3,'cron','running',$4,$5,$6,$7) ON CONFLICT(id) DO NOTHING`, p.ExecutionID, p.PipelineRowID, p.TenantID, p.Environment, p.WorkflowID, p.RunID, traceID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -110,7 +115,7 @@ func (a *Activities) FetchSourcePage(ctx context.Context, p FetchSourceParams) (
 	started := time.Now()
 	result, err := a.Runtime.Fetch(ctx, p.ActivityType, connectors.SourceParams{Config: p.Config, Cursor: p.Cursor, Ingestion: p.Ingestion, TenantID: p.TenantID})
 	if err != nil {
-		_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "failed", time.Since(started), 0, err.Error())
+		_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "failed", started, time.Since(started), 0, err.Error())
 		return FetchSourceResult{}, err
 	}
 	dek, err := a.dek(p.EncryptedDEK)
@@ -121,7 +126,7 @@ func (a *Activities) FetchSourcePage(ctx context.Context, p FetchSourceParams) (
 	if err != nil {
 		return FetchSourceResult{}, err
 	}
-	_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "success", time.Since(started), len(result.Records), "")
+	_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "success", started, time.Since(started), len(result.Records), "")
 	return FetchSourceResult{OutputRef: ref, HasMore: result.HasMore, RecordCount: len(result.Records), Checkpoint: result.NextCursor, LagRecords: result.LagRecords}, nil
 }
 
@@ -227,7 +232,7 @@ func (a *Activities) DispatchNode(ctx context.Context, p DispatchParams) (model.
 	}
 	duration := time.Since(started)
 	if err != nil {
-		_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "failed", duration, 0, err.Error())
+		_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "failed", started, duration, 0, err.Error())
 		return model.NodeResult{}, err
 	}
 	var ref *model.DataRef
@@ -243,7 +248,7 @@ func (a *Activities) DispatchNode(ctx context.Context, p DispatchParams) (model.
 	} else if p.InputRef != nil {
 		count = p.InputRef.RecordCount
 	}
-	_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "success", duration, count, "")
+	_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "success", started, duration, count, "")
 	if meta == nil {
 		meta = map[string]interface{}{}
 	}
@@ -397,7 +402,7 @@ type MergeParams struct {
 func (a *Activities) MergeRefs(ctx context.Context, p MergeParams) (model.NodeResult, error) {
 	started := time.Now()
 	fail := func(err error) (model.NodeResult, error) {
-		_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "failed", time.Since(started), 0, err.Error())
+		_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "failed", started, time.Since(started), 0, err.Error())
 		return model.NodeResult{}, err
 	}
 	dek, err := a.dek(p.EncryptedDEK)
@@ -427,7 +432,7 @@ func (a *Activities) MergeRefs(ctx context.Context, p MergeParams) (model.NodeRe
 		if err != nil {
 			return fail(err)
 		}
-		_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "success", time.Since(started), count, "")
+		_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "success", started, time.Since(started), count, "")
 		return model.NodeResult{NodeID: p.NodeID, Status: "success", OutputRef: ref, Meta: map[string]interface{}{"durationMs": time.Since(started).Milliseconds(), "recordCount": count}}, nil
 	}
 
@@ -451,7 +456,7 @@ func (a *Activities) MergeRefs(ctx context.Context, p MergeParams) (model.NodeRe
 	if err != nil {
 		return fail(err)
 	}
-	_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "success", time.Since(started), len(merged), "")
+	_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "success", started, time.Since(started), len(merged), "")
 	return model.NodeResult{NodeID: p.NodeID, Status: "success", OutputRef: ref, Meta: map[string]interface{}{"durationMs": time.Since(started).Milliseconds(), "recordCount": len(merged)}}, nil
 }
 
@@ -582,8 +587,18 @@ func (a *Activities) MarkExecution(ctx context.Context, p MarkExecutionParams) e
 	return nil
 }
 
-func (a *Activities) recordNodeRun(ctx context.Context, executionID, nodeID, tenantID, status string, duration time.Duration, count int, errorText string) error {
-	_, err := a.DB.Pool.Exec(ctx, `INSERT INTO node_runs (execution_id,node_id,tenant_id,status,duration_ms,record_count,error) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(execution_id,node_id) DO UPDATE SET status=$4,duration_ms=$5,record_count=$6,error=$7,finished_at=now()`, executionID, nodeID, tenantID, status, duration.Milliseconds(), nullableCount(count), redactError(errorText))
+// recordNodeRun upserts the step row. A node can be recorded multiple times
+// within one execution (paged source fetches, Temporal activity retries): the
+// first write pins started_at, later writes refresh status/duration/counts,
+// and a write that follows a recorded failure counts as a new attempt and
+// restarts the step clock.
+func (a *Activities) recordNodeRun(ctx context.Context, executionID, nodeID, tenantID, status string, startedAt time.Time, duration time.Duration, count int, errorText string) error {
+	_, err := a.DB.Pool.Exec(ctx, `INSERT INTO node_runs (execution_id,node_id,tenant_id,status,duration_ms,record_count,error,started_at,attempt)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1)
+ON CONFLICT(execution_id,node_id) DO UPDATE SET status=$4,duration_ms=$5,record_count=$6,error=$7,finished_at=now(),
+  started_at=CASE WHEN node_runs.status='failed' THEN EXCLUDED.started_at ELSE coalesce(node_runs.started_at,EXCLUDED.started_at) END,
+  attempt=node_runs.attempt+CASE WHEN node_runs.status='failed' THEN 1 ELSE 0 END`,
+		executionID, nodeID, tenantID, status, duration.Milliseconds(), nullableCount(count), redactError(errorText), startedAt.UTC())
 	return err
 }
 func nullableCount(value int) interface{} {

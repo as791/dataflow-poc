@@ -123,6 +123,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerAlerts(private)
 	s.registerTeam(private)
 	s.registerPipelines(private)
+	s.registerLineageRuntime(private)
 	s.registerExecutions(private)
 	s.registerConnectors(private)
 	s.registerAnalytics(private)

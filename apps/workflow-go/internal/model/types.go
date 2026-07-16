@@ -156,6 +156,7 @@ type WorkflowInput struct {
 	Environment       Environment         `json:"environment,omitempty"`
 	ExecutionPrepared bool                `json:"executionPrepared,omitempty"`
 	Trigger           TriggerInput        `json:"trigger"`
+	TraceID           string              `json:"traceId,omitempty"`
 	EncryptedDEK      string              `json:"encryptedDek,omitempty"`
 	DEKIV             string              `json:"dekIv,omitempty"`
 	Stream            *StreamStatus       `json:"stream,omitempty"`

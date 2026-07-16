@@ -91,6 +91,20 @@ export const api = {
     return request(`/api/pipelines/lineage/changes?${params}`).then(j);
   },
 
+  // Runtime lineage: windowed execution metrics (7-day max, defaults to the
+  // last hour when from/to are omitted).
+  runtimeLineageOverview: (params: Record<string, string> = {}) => {
+    const clean = Object.entries(params).filter(([, value]) => value) as [string, string][];
+    const qs = clean.length ? `?${new URLSearchParams(Object.fromEntries(clean))}` : '';
+    return request(`/api/lineage/runtime/overview${qs}`).then(j);
+  },
+  runtimeLineageRuns: (params: Record<string, string> = {}) => {
+    const clean = Object.entries(params).filter(([, value]) => value) as [string, string][];
+    const qs = clean.length ? `?${new URLSearchParams(Object.fromEntries(clean))}` : '';
+    return request(`/api/lineage/runtime/runs${qs}`).then(j);
+  },
+  runtimeLineageRun: (id: string) => request(`/api/lineage/runtime/runs/${encodeURIComponent(id)}`).then(j),
+
   // Connector catalog (coded + manifest-driven). Returns { catalog }.
   getConnectorCatalog: () => request('/api/connectors/catalog').then(j),
 
