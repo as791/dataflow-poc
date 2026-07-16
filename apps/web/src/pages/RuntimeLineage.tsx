@@ -236,6 +236,7 @@ export default function RuntimeLineage() {
   const [status, setStatus] = useState('');
   const [pipeline, setPipeline] = useState('');
   const [layerFilter, setLayerFilter] = useState('');
+  const [activeOnly, setActiveOnly] = useState(true);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [overview, setOverview] = useState<RuntimeOverview | null>(null);
@@ -335,11 +336,25 @@ export default function RuntimeLineage() {
     return map;
   }, [overview]);
 
+  // New Relic-style default: the map shows only entities that reported data in
+  // the window. Idle pipelines stay reachable via the toggle / pipeline filter.
   const filteredGraph = useMemo(() => {
     if (!overview) return null;
-    const graph = { ...overview, columnEdges: [] } as unknown as WorkspaceLineage;
+    let nodes = overview.nodes, edges = overview.edges;
+    if (activeOnly) {
+      const activePipelines = new Set(nodes
+        .filter(node => node.kind === 'pipeline' && (node.metrics?.runs ?? 0) > 0)
+        .map(node => node.id));
+      const activeAssets = new Set(edges
+        .filter(edge => activePipelines.has(edge.source) || activePipelines.has(edge.target))
+        .flatMap(edge => [edge.source, edge.target]));
+      nodes = nodes.filter(node => activePipelines.has(node.id) || (node.kind === 'asset' && activeAssets.has(node.id)));
+      const kept = new Set(nodes.map(node => node.id));
+      edges = edges.filter(edge => kept.has(edge.source) && kept.has(edge.target));
+    }
+    const graph = { ...overview, nodes, edges, columnEdges: [] } as unknown as WorkspaceLineage;
     return layerFilter ? filterWorkspaceLineage(graph, { layers: [layerFilter as any] }) : graph;
-  }, [overview, layerFilter]);
+  }, [overview, layerFilter, activeOnly]);
   const flow = useMemo(() => filteredGraph ? buildFlow(filteredGraph, healthById) : { nodes: [], edges: [] }, [filteredGraph, healthById]);
   const flowNodeKey = useMemo(() => flow.nodes.map(node => node.id).sort().join('\u0000'), [flow.nodes]);
   useEffect(() => {
@@ -411,10 +426,12 @@ export default function RuntimeLineage() {
                 placeholder="Execution, run, or trace ID" aria-label="Search runs by id" />
             </span>
           </label>
+          <label className="flex shrink-0 cursor-pointer items-center gap-1.5">
+            <input type="checkbox" className="h-3.5 w-3.5 accent-brand-500" checked={activeOnly}
+              onChange={event => setActiveOnly(event.target.checked)} aria-label="Show only pipelines with runs in window" />
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Active only</span>
+          </label>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-            {stats && <span className="whitespace-nowrap text-[11px] text-gray-500 dark:text-white/50" aria-live="polite">
-              {stats.runs} runs · {stats.failed} failed · {stats.running} running · {stats.activePipelines}/{stats.pipelines} pipelines active
-            </span>}
             <button className="glass-btn-ghost flex items-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 text-xs"
               onClick={refresh} disabled={loading} aria-label="Refresh runtime lineage">
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
@@ -422,6 +439,20 @@ export default function RuntimeLineage() {
           </div>
         </div>
         {windowError && <p className="mt-1.5 text-[11px] text-red-500" role="alert">{windowError}</p>}
+        {stats && <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-5" aria-live="polite">
+          {[
+            { label: 'Runs', value: stats.runs, tone: '' },
+            { label: 'Error rate', value: stats.runs > 0 ? `${Math.round((stats.failed / stats.runs) * 1000) / 10}%` : '—', tone: stats.failed > 0 ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400' },
+            { label: 'Failed', value: stats.failed, tone: stats.failed > 0 ? 'text-red-500' : '' },
+            { label: 'Running', value: stats.running, tone: stats.running > 0 ? 'text-blue-500' : '' },
+            { label: 'Active pipelines', value: `${stats.activePipelines}/${stats.pipelines}`, tone: '' },
+          ].map(tile => (
+            <div key={tile.label} className="rounded-lg border border-gray-100 bg-white/60 px-3 py-1.5 dark:border-white/[0.07] dark:bg-white/[0.03]">
+              <p className="text-[9px] font-semibold uppercase tracking-wider text-gray-400">{tile.label}</p>
+              <p className={`text-base font-semibold leading-tight text-gray-900 dark:text-white/90 ${tile.tone}`}>{tile.value}</p>
+            </div>
+          ))}
+        </div>}
       </div>
       {error && <div className="m-4"><ApiError message={error} onRetry={refresh} /></div>}
       <div className="relative min-h-0 flex-1 overflow-hidden">
