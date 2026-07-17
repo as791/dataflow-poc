@@ -7,10 +7,3 @@ AVD-GCP-0031
 # headless service. The role is namespace-scoped to `spark` and bound to a
 # single service account; it grants no cluster-wide access.
 AVD-KSV-0056
-
-# Helm chart pod-hardening backlog (single-box demo): readOnlyRootFilesystem
-# and explicit non-root security contexts need per-container writable-path
-# audits (temporal, clickhouse, ollama write to /). Tracked as follow-up work;
-# waived rather than blanket-applied so the running stack doesn't break.
-AVD-KSV-0014
-AVD-KSV-0118
