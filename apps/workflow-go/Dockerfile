@@ -8,7 +8,9 @@ RUN CGO_ENABLED=0 go build -mod=vendor -trimpath -ldflags="-s -w" -o /out/api ./
     CGO_ENABLED=0 go build -mod=vendor -trimpath -ldflags="-s -w" -o /out/workflow-worker ./cmd/worker
 
 FROM alpine:3.21
-RUN addgroup -S dataflow && adduser -S dataflow -G dataflow
+# Pull patched OS package revisions (openssl/c-ares CVE fixes land as -rN
+# package updates within the 3.21 branch, not as new image tags).
+RUN apk -U upgrade --no-cache && addgroup -S dataflow && adduser -S dataflow -G dataflow
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/api /out/activity-worker /out/workflow-worker /usr/local/bin/
 USER dataflow
