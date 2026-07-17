@@ -37,6 +37,10 @@ kind: Deployment
 metadata: {name: postgres}
 spec:
   replicas: 1
+  # Single replica on a ReadWriteOnce PVC with an on-disk lock: the old pod
+  # must release the volume before the new one starts (same for the other
+  # PVC-backed singletons below).
+  strategy: {type: Recreate}
   selector: {matchLabels: {app: postgres}}
   template:
     metadata: {labels: {app: postgres}}
@@ -81,6 +85,7 @@ kind: Deployment
 metadata: {name: redis}
 spec:
   replicas: 1
+  strategy: {type: Recreate}
   selector: {matchLabels: {app: redis}}
   template:
     metadata: {labels: {app: redis}}
@@ -134,6 +139,7 @@ kind: Deployment
 metadata: {name: clickhouse}
 spec:
   replicas: 1
+  strategy: {type: Recreate}
   selector: {matchLabels: {app: clickhouse}}
   template:
     metadata: {labels: {app: clickhouse}}
@@ -318,6 +324,7 @@ kind: Deployment
 metadata: {name: ollama}
 spec:
   replicas: 1
+  strategy: {type: Recreate}
   selector: {matchLabels: {app: ollama}}
   template:
     metadata: {labels: {app: ollama}}
@@ -391,9 +398,10 @@ spec:
         - name: api
           image: {{ .Values.images.app }}
           imagePullPolicy: Never
-          # Dockerfile already runs as USER dataflow (non-root); no local
-          # writes in this binary, so the rootfs can stay read-only.
-          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: {drop: [ALL]}}
+          # The image's USER dataflow is a named user (uid 100), so kubelet
+          # needs the numeric uid to verify runAsNonRoot. No local writes in
+          # this binary, so the rootfs stays read-only.
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 100, runAsGroup: 101, capabilities: {drop: [ALL]}}
           resources:
             requests: {cpu: 100m, memory: 128Mi}
             limits: {cpu: 500m, memory: 512Mi}
@@ -436,7 +444,8 @@ spec:
           imagePullPolicy: Never
           # Merge activities spill to a temp file (internal/activities/activities.go),
           # so /tmp needs to stay writable even with a read-only rootfs.
-          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: {drop: [ALL]}}
+          # uid 100 = the image's named USER dataflow (kubelet needs it numeric).
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 100, runAsGroup: 101, capabilities: {drop: [ALL]}}
           resources:
             requests: {cpu: 100m, memory: 128Mi}
             limits: {cpu: 500m, memory: 512Mi}
@@ -475,7 +484,7 @@ spec:
         - name: worker
           image: {{ $.Values.images.app }}
           imagePullPolicy: Never
-          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: {drop: [ALL]}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 100, runAsGroup: 101, capabilities: {drop: [ALL]}}
           resources:
             requests: {cpu: 50m, memory: 64Mi}
             limits: {cpu: 250m, memory: 256Mi}
@@ -498,14 +507,16 @@ spec:
   template:
     metadata: {labels: {app: web}}
     spec:
-      securityContext: {fsGroup: 101, runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      # ip_unprivileged_port_start is a kubelet-safe sysctl; it lets non-root
+      # nginx bind :80 (an added NET_BIND_SERVICE never becomes ambient for a
+      # non-root process, so a capability grant alone can't).
+      securityContext: {fsGroup: 101, runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}, sysctls: [{name: net.ipv4.ip_unprivileged_port_start, value: "0"}]}
       containers:
         - name: web
           image: {{ .Values.images.web }}
           imagePullPolicy: Never
-          # nginx:alpine runs as root by default; force the built-in nginx
-          # user and grant just enough capability to bind port 80.
-          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 101, runAsGroup: 101, capabilities: {drop: [ALL], add: [NET_BIND_SERVICE]}}
+          # nginx:alpine runs as root by default; force the built-in nginx user.
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 101, runAsGroup: 101, capabilities: {drop: [ALL]}}
           resources:
             requests: {cpu: 25m, memory: 32Mi}
             limits: {cpu: 100m, memory: 128Mi}
