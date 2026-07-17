@@ -15,7 +15,8 @@ set -euo pipefail
 BASE_URL=${BASE_URL:-${API:-http://localhost:4000}}
 DEMO_EMAIL=${DEMO_EMAIL:-demo@dataflow.dev}
 DEMO_PASSWORD=${DEMO_PASSWORD:-demo-dataflow-1}
-SOURCE_URL=${SOURCE_URL:-http://api:4000/health}
+# http.fetch enforces HTTPS; a plain-http default would fail at the source step.
+SOURCE_URL=${SOURCE_URL:-https://jsonplaceholder.typicode.com/posts}
 BAD_SOURCE_URL=${BAD_SOURCE_URL:-${SOURCE_URL}/nope}
 CONN_NAME="Demo HTTP API"
 COLLECTION="demo_health_checks"

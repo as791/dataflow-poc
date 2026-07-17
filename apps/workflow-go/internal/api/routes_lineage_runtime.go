@@ -54,6 +54,12 @@ func parseRuntimeWindow(q url.Values) (time.Time, time.Time, error) {
 	if to.Sub(from) > maxRuntimeWindow {
 		return time.Time{}, time.Time{}, badRequest(ErrInvalidRequest, "time range cannot exceed 7 days")
 	}
+	// The whole runtime view is bounded to the last seven days (the detail
+	// endpoint enforces the same recency), so a bounded-but-older custom
+	// window would list runs whose drill-down 404s. Reject it up front.
+	if from.Before(time.Now().UTC().Add(-maxRuntimeWindow - time.Minute)) {
+		return time.Time{}, time.Time{}, badRequest(ErrInvalidRequest, "time range must fall within the last 7 days")
+	}
 	return from, to, nil
 }
 
@@ -86,7 +92,7 @@ func (s *Server) parseRuntimeFilters(r *http.Request) (runtimeFilters, error) {
 	}
 	if pipeline := q.Get("pipeline"); pipeline != "" {
 		tenant := tenantFrom(r)
-		rows, err := tenantQueryRows(r.Context(), s.DB, tenant.TenantID, `SELECT pipeline_key FROM pipelines WHERE id=$1 OR pipeline_key::text=$1 LIMIT 1`, pipeline)
+		rows, err := tenantQueryRows(r.Context(), s.DB, tenant.TenantID, `SELECT pipeline_key FROM pipelines WHERE id::text=$1 OR pipeline_key::text=$1 LIMIT 1`, pipeline)
 		if err != nil {
 			return runtimeFilters{}, err
 		}

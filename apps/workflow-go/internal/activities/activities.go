@@ -432,6 +432,11 @@ func (a *Activities) MergeRefs(ctx context.Context, p MergeParams) (model.NodeRe
 		if err != nil {
 			return fail(err)
 		}
+		if ref != nil {
+			// Payloads.Write only counts []interface{} inputs; the spill path
+			// writes raw JSON, so carry the count it already computed.
+			ref.RecordCount = count
+		}
 		_ = a.recordNodeRun(ctx, p.ExecutionID, p.NodeID, p.TenantID, "success", started, time.Since(started), count, "")
 		return model.NodeResult{NodeID: p.NodeID, Status: "success", OutputRef: ref, Meta: map[string]interface{}{"durationMs": time.Since(started).Milliseconds(), "recordCount": count}}, nil
 	}
@@ -593,9 +598,17 @@ func (a *Activities) MarkExecution(ctx context.Context, p MarkExecutionParams) e
 // and a write that follows a recorded failure counts as a new attempt and
 // restarts the step clock.
 func (a *Activities) recordNodeRun(ctx context.Context, executionID, nodeID, tenantID, status string, startedAt time.Time, duration time.Duration, count int, errorText string) error {
+	// Same-attempt re-writes (paged source fetches) keep the pinned start, so
+	// duration must be recomputed from that pinned start and record counts
+	// accumulated — otherwise a multi-page step reports only its last page.
+	// A write after a recorded failure is a fresh attempt: reset the clock.
 	_, err := a.DB.Pool.Exec(ctx, `INSERT INTO node_runs (execution_id,node_id,tenant_id,status,duration_ms,record_count,error,started_at,attempt)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1)
-ON CONFLICT(execution_id,node_id) DO UPDATE SET status=$4,duration_ms=$5,record_count=$6,error=$7,finished_at=now(),
+ON CONFLICT(execution_id,node_id) DO UPDATE SET status=$4,error=$7,finished_at=now(),
+  duration_ms=CASE WHEN node_runs.status='failed' THEN $5
+    ELSE greatest($5,round(extract(epoch FROM (now()-coalesce(node_runs.started_at,EXCLUDED.started_at)))*1000))::int END,
+  record_count=CASE WHEN node_runs.status='failed' THEN $6
+    ELSE nullif(coalesce(node_runs.record_count,0)+coalesce($6,0),0) END,
   started_at=CASE WHEN node_runs.status='failed' THEN EXCLUDED.started_at ELSE coalesce(node_runs.started_at,EXCLUDED.started_at) END,
   attempt=node_runs.attempt+CASE WHEN node_runs.status='failed' THEN 1 ELSE 0 END`,
 		executionID, nodeID, tenantID, status, duration.Milliseconds(), nullableCount(count), redactError(errorText), startedAt.UTC())

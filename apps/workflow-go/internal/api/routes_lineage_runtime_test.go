@@ -28,7 +28,8 @@ func TestParseRuntimeWindowValidation(t *testing.T) {
 		wantErr        bool
 	}{
 		{"exact 7 days ok", now.Add(-7 * 24 * time.Hour).Format(time.RFC3339), now.Format(time.RFC3339), false},
-		{"over 7 days rejected", now.Add(-7*24*time.Hour - time.Minute).Format(time.RFC3339), now.Format(time.RFC3339), true},
+		{"over 7 days rejected", now.Add(-7*24*time.Hour - 2*time.Minute).Format(time.RFC3339), now.Format(time.RFC3339), true},
+		{"bounded but older window rejected", now.Add(-9 * 24 * time.Hour).Format(time.RFC3339), now.Add(-8 * 24 * time.Hour).Format(time.RFC3339), true},
 		{"from after to rejected", now.Format(time.RFC3339), now.Add(-time.Hour).Format(time.RFC3339), true},
 		{"bad from rejected", "yesterday", now.Format(time.RFC3339), true},
 		{"bad to rejected", "", "later", true},
