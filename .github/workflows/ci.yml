@@ -164,10 +164,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: tfsec (Terraform)
-        uses: aquasecurity/tfsec-action@v1.0.3
+      # trivy replaced tfsec here: tfsec is archived and its frozen HCL parser
+      # rejects Terraform 1.7+ `removed` blocks (infra/secrets.tf).
+      - name: Trivy config scan — Terraform
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          working_directory: infra
+          scan-type: config
+          scan-ref: infra
+          severity: HIGH,CRITICAL
+          exit-code: '1'
       - name: Trivy config scan — Helm chart
         uses: aquasecurity/trivy-action@v0.36.0
         with:
