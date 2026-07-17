@@ -21,7 +21,10 @@ import (
 
 type contextKey string
 
-const tenantKey contextKey = "tenant"
+const (
+	tenantKey      contextKey = "tenant"
+	traceParentKey contextKey = "traceparent"
+)
 
 func tenantFrom(r *http.Request) model.TenantContext {
 	value, _ := r.Context().Value(tenantKey).(model.TenantContext)
@@ -152,6 +155,9 @@ func middleware(next http.Handler) http.Handler {
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
+		}
+		if traceparent := r.Header.Get("traceparent"); traceparent != "" {
+			r = r.WithContext(context.WithValue(r.Context(), traceParentKey, traceparent))
 		}
 		writer := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		started := time.Now()

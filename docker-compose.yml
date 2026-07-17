@@ -124,6 +124,7 @@ services:
       - ./db/023_lineage_payload.sql:/docker-entrypoint-initdb.d/023_lineage_payload.sql:ro
       - ./db/024_pipeline_list_indexes.sql:/docker-entrypoint-initdb.d/024_pipeline_list_indexes.sql:ro
       - ./db/025_retention_function.sql:/docker-entrypoint-initdb.d/025_retention_function.sql:ro
+      - ./db/026_runtime_lineage.sql:/docker-entrypoint-initdb.d/026_runtime_lineage.sql:ro
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dataflow"]

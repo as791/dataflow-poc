@@ -71,7 +71,14 @@ func (p *Payloads) Write(ctx context.Context, data interface{}, tenantID, execut
 		if err != nil {
 			return nil, err
 		}
-		payload, iv, encrypted = ciphertext, valueIV, true
+		// The jsonb column needs valid JSON: store the ciphertext as a JSON
+		// string (Read unmarshals it back with json.Unmarshal into a string).
+		// Passing the bare base64 string fails with SQLSTATE 22P02.
+		quoted, err := json.Marshal(ciphertext)
+		if err != nil {
+			return nil, err
+		}
+		payload, iv, encrypted = interface{}(json.RawMessage(quoted)), valueIV, true
 	}
 	err = p.DB.Pool.QueryRow(ctx, `INSERT INTO node_payloads
       (tenant_id,execution_id,node_id,payload,encrypted,encryption_iv)

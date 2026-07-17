@@ -225,10 +225,24 @@ func (s *Server) executionLogs(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) executionGet(w http.ResponseWriter, r *http.Request) error {
+	response, err := s.executionDetail(r, r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	if response == nil {
+		return notFound(ErrNotFound, "not found")
+	}
+	jsonResponse(w, http.StatusOK, response)
+	return nil
+}
+
+// executionDetail loads one execution with its definition graph, node runs,
+// and quality results. Returns nil when the id is unknown to this tenant.
+func (s *Server) executionDetail(r *http.Request, id string) (map[string]interface{}, error) {
 	tenant := tenantFrom(r)
 	var response map[string]interface{}
 	err := s.DB.TenantTx(r.Context(), tenant.TenantID, func(tx pgx.Tx) error {
-		rows, err := tx.Query(r.Context(), `SELECT e.*,p.name,p.definition FROM executions e JOIN pipelines p ON p.id=e.pipeline_id WHERE e.id=$1`, r.PathValue("id"))
+		rows, err := tx.Query(r.Context(), `SELECT e.*,p.name,p.definition FROM executions e JOIN pipelines p ON p.id=e.pipeline_id WHERE e.id=$1`, id)
 		if err != nil {
 			return err
 		}
@@ -238,7 +252,7 @@ func (s *Server) executionGet(w http.ResponseWriter, r *http.Request) error {
 		}
 		definition, _ := execution["definition"].(map[string]interface{})
 		delete(execution, "definition")
-		nodeRows, err := tx.Query(r.Context(), `SELECT node_id,status,duration_ms,record_count,error,finished_at FROM node_runs WHERE execution_id=$1`, r.PathValue("id"))
+		nodeRows, err := tx.Query(r.Context(), `SELECT node_id,status,duration_ms,record_count,error,started_at,finished_at,attempt FROM node_runs WHERE execution_id=$1`, id)
 		if err != nil {
 			return err
 		}
@@ -251,7 +265,7 @@ func (s *Server) executionGet(w http.ResponseWriter, r *http.Request) error {
 				run["error"] = redact(stringValue(run["error"]))
 			}
 		}
-		qualityRows, err := tx.Query(r.Context(), `SELECT node_id,status,passed_count,failed_count,error_samples,evaluated_at,(quarantine_ref IS NOT NULL) AS quarantine_available FROM data_quality_results WHERE execution_id=$1 ORDER BY evaluated_at`, r.PathValue("id"))
+		qualityRows, err := tx.Query(r.Context(), `SELECT node_id,status,passed_count,failed_count,error_samples,evaluated_at,(quarantine_ref IS NOT NULL) AS quarantine_available FROM data_quality_results WHERE execution_id=$1 ORDER BY evaluated_at`, id)
 		if err != nil {
 			return err
 		}
@@ -262,14 +276,7 @@ func (s *Server) executionGet(w http.ResponseWriter, r *http.Request) error {
 		response = map[string]interface{}{"execution": execution, "definition": map[string]interface{}{"nodes": definition["nodes"], "edges": definition["edges"]}, "nodeRuns": nodeRuns, "qualityResults": quality}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	if response == nil {
-		return notFound(ErrNotFound, "not found")
-	}
-	jsonResponse(w, http.StatusOK, response)
-	return nil
+	return response, err
 }
 
 func (s *Server) executionIdentity(r *http.Request) (environment, workflowID, runID string, phase interface{}, nodeRuns []map[string]interface{}, err error) {

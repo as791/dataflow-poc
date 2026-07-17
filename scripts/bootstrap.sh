@@ -107,15 +107,27 @@ process.stdin.on('end', () => {
     yaml += '  ' + k + ': ' + JSON.stringify(v) + '\n';
   }
   fs.writeFileSync(output, yaml, { mode: 0o600 });
-});" "$HELM_VALUES_FILE"
+  // Production mode hard-requires this set (see 'required' calls in the
+  // chart); missing any key would fail helm upgrade before install.
+  const needed = ['appDatabaseUrl','databaseUrl','googleClientId','googleClientSecret','jwt','oauthKey','postgresPassword','redisPassword','redisUrl','smtpFrom','smtpPass','smtpUser','temporalPayloadKey'];
+  const missing = needed.filter(k => !(k in secrets));
+  if (missing.length) { console.error('missing secret keys: ' + missing.join(', ')); process.exit(3); }
+});" "$HELM_VALUES_FILE" && SECRETS_READY=true || SECRETS_READY=false
   else
     echo "⚠️ Could not fetch secret $GCP_SECRET_MANAGER_NAME"
+    SECRETS_READY=false
   fi
 fi
 
 HELM_RUNTIME_ARGS=()
 if [ -n "$PUBLIC_IP" ]; then
-  HELM_RUNTIME_ARGS+=(--set runtime.production=true)
+  # Production mode only when the full secret set actually loaded — otherwise
+  # helm's required() checks abort the install and the stack never comes up.
+  if [ "${SECRETS_READY:-false}" = "true" ]; then
+    HELM_RUNTIME_ARGS+=(--set runtime.production=true)
+  else
+    echo "⚠️ Secrets incomplete or unavailable — installing WITHOUT runtime.production; rerun bootstrap once $GCP_SECRET_MANAGER_NAME is populated"
+  fi
   HELM_RUNTIME_ARGS+=(--set-string "secrets.appUrl=https://${PUBLIC_IP}.nip.io")
   if [ -n "${BACKUP_GCS_BUCKET:-}" ]; then
     HELM_RUNTIME_ARGS+=(--set-string "backup.gcsBucket=${BACKUP_GCS_BUCKET}")

@@ -1,0 +1,9 @@
+# Demo/single-box deployment: the GCE instance is intentionally internet-facing
+# (TLS on the public IP via nip.io IS the product URL). Revisit when infra
+# grows a private-network + load-balancer topology.
+AVD-GCP-0031
+
+# Spark-on-Kubernetes drivers must create/delete executor pods and the driver
+# headless service. The role is namespace-scoped to `spark` and bound to a
+# single service account; it grants no cluster-wide access.
+AVD-KSV-0056

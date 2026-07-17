@@ -37,11 +37,15 @@ kind: Deployment
 metadata: {name: postgres}
 spec:
   replicas: 1
+  # Single replica on a ReadWriteOnce PVC with an on-disk lock: the old pod
+  # must release the volume before the new one starts (same for the other
+  # PVC-backed singletons below).
+  strategy: {type: Recreate}
   selector: {matchLabels: {app: postgres}}
   template:
     metadata: {labels: {app: postgres}}
     spec:
-      securityContext: {fsGroup: 70}
+      securityContext: {fsGroup: 70, runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: postgres
           image: {{ .Values.images.postgres }}
@@ -81,11 +85,12 @@ kind: Deployment
 metadata: {name: redis}
 spec:
   replicas: 1
+  strategy: {type: Recreate}
   selector: {matchLabels: {app: redis}}
   template:
     metadata: {labels: {app: redis}}
     spec:
-      securityContext: {fsGroup: 1000}
+      securityContext: {fsGroup: 1000, runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: redis
           image: {{ .Values.images.redis }}
@@ -134,20 +139,21 @@ kind: Deployment
 metadata: {name: clickhouse}
 spec:
   replicas: 1
+  strategy: {type: Recreate}
   selector: {matchLabels: {app: clickhouse}}
   template:
     metadata: {labels: {app: clickhouse}}
     spec:
-      securityContext: {fsGroup: 101}
+      securityContext: {fsGroup: 101, runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: clickhouse
           image: {{ .Values.images.clickhouse }}
           imagePullPolicy: IfNotPresent
-          # readOnlyRootFilesystem is not set: the entrypoint rewrites
-          # /etc/clickhouse-server/users.d/default-user.xml at startup when a
-          # non-default CLICKHOUSE_USER is configured (verified against the
-          # upstream image), so the rootfs must stay writable.
-          securityContext: {allowPrivilegeEscalation: false, runAsNonRoot: true, runAsUser: 101, runAsGroup: 101, capabilities: {drop: [ALL]}}
+          # The entrypoint rewrites /etc/clickhouse-server/users.d/default-user.xml
+          # at startup when a non-default CLICKHOUSE_USER is configured, and the
+          # server logs to /var/log/clickhouse-server — both are emptyDir mounts
+          # (like /tmp) so the rest of the rootfs stays read-only.
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 101, runAsGroup: 101, capabilities: {drop: [ALL]}}
           resources:
             requests: {cpu: 200m, memory: 512Mi}
             limits: {cpu: "1", memory: 1Gi}
@@ -163,11 +169,20 @@ spec:
           volumeMounts:
             - {name: data, mountPath: /var/lib/clickhouse}
             - {name: init, mountPath: /docker-entrypoint-initdb.d/init.sql, subPath: init.sql}
+            - {name: users-d, mountPath: /etc/clickhouse-server/users.d}
+            - {name: logs, mountPath: /var/log/clickhouse-server}
+            - {name: tmp, mountPath: /tmp}
       volumes:
         - name: data
           persistentVolumeClaim: {claimName: clickhouse-data}
         - name: init
           hostPath: {path: {{ printf "%s/db/clickhouse" .Values.hostPath | quote }}, type: Directory}
+        - name: users-d
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -187,6 +202,7 @@ spec:
   template:
     metadata: {labels: {app: temporal}}
     spec:
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       initContainers:
         - name: wait-postgres
           image: {{ .Values.images.postgres }}
@@ -195,15 +211,22 @@ spec:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {cpu: 100m, memory: 64Mi}
           command: [sh, -c, "until pg_isready -h postgres -U dataflow; do sleep 2; done"]
+        # auto-setup renders /etc/temporal/config/docker.yaml at startup, so the
+        # image's config dir is copied into an emptyDir that stays writable while
+        # the rest of the rootfs is read-only.
+        - name: config-copy
+          image: {{ .Values.images.temporal }}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+          command: [sh, -c, "cp -r /etc/temporal/config/. /config/"]
+          volumeMounts: [{name: config, mountPath: /config}]
       containers:
         - name: temporal
           image: {{ .Values.images.temporal }}
           imagePullPolicy: IfNotPresent
-          # readOnlyRootFilesystem is not set: auto-setup renders
-          # /etc/temporal/config/docker.yaml from a template baked into the
-          # image at startup (verified against the upstream image), so the
-          # rootfs must stay writable.
-          securityContext: {allowPrivilegeEscalation: false, runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, capabilities: {drop: [ALL]}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, capabilities: {drop: [ALL]}}
           resources:
             requests: {cpu: 100m, memory: 256Mi}
             limits: {cpu: 500m, memory: 512Mi}
@@ -217,6 +240,10 @@ spec:
             - {name: VISIBILITY_DBNAME, value: temporal_visibility}
           ports: [{containerPort: 7233}]
           readinessProbe: {tcpSocket: {port: 7233}, initialDelaySeconds: 10, periodSeconds: 5}
+          volumeMounts: [{name: config, mountPath: /etc/temporal/config}]
+      volumes:
+        - name: config
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -232,6 +259,7 @@ spec:
   template:
     metadata: {labels: {app: temporal-ui}}
     spec:
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: temporal-ui
           image: {{ .Values.images.temporalUI }}
@@ -261,6 +289,7 @@ spec:
     metadata: {labels: {app: temporal-namespaces}}
     spec:
       restartPolicy: OnFailure
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: namespaces
           image: {{ .Values.images.temporalAdmin }}
@@ -295,18 +324,21 @@ kind: Deployment
 metadata: {name: ollama}
 spec:
   replicas: 1
+  strategy: {type: Recreate}
   selector: {matchLabels: {app: ollama}}
   template:
     metadata: {labels: {app: ollama}}
     spec:
+      securityContext: {fsGroup: 1000, runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: ollama
           image: {{ .Values.images.ollama }}
           imagePullPolicy: IfNotPresent
-          # Upstream image runs as root by default and its home/model-cache
-          # layout under non-root wasn't verified in this pass, so
-          # runAsNonRoot/readOnlyRootFilesystem are left unset (caveat).
-          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          # Runs as uid 1000 with HOME=/home/ollama (verified against the deployed
+          # image): ollama writes only under ~/.ollama (models PVC) and /tmp, both
+          # mounted writable, so the rootfs stays read-only. The PVC dir on the
+          # node must be owned by 1000:1000 (one-time chown, see deploy recipe).
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, capabilities: {drop: [ALL]}}
           command: [/bin/sh, -c]
           args:
             - |
@@ -318,15 +350,23 @@ spec:
           env:
             - {name: OLLAMA_HOST, value: "0.0.0.0:11434"}
             - {name: OLLAMA_MODEL, value: {{ .Values.ollamaModel | quote }}}
+            - {name: HOME, value: /home/ollama}
           ports: [{containerPort: 11434}]
           readinessProbe: {exec: {command: [test, -f, /tmp/model-ready]}, periodSeconds: 5}
-          volumeMounts: [{name: data, mountPath: /root/.ollama}]
+          volumeMounts:
+            - {name: home, mountPath: /home/ollama}
+            - {name: data, mountPath: /home/ollama/.ollama}
+            - {name: tmp, mountPath: /tmp}
           resources:
             requests: {cpu: 500m, memory: 1Gi}
             limits: {cpu: "4", memory: 4Gi}
       volumes:
         - name: data
           persistentVolumeClaim: {claimName: ollama-data}
+        - name: home
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -345,6 +385,7 @@ spec:
       annotations:
         checksum/secrets: {{ toJson .Values.secrets | sha256sum | quote }}
     spec:
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       initContainers:
         - name: wait-postgres
           image: {{ .Values.images.postgres }}
@@ -357,9 +398,10 @@ spec:
         - name: api
           image: {{ .Values.images.app }}
           imagePullPolicy: Never
-          # Dockerfile already runs as USER dataflow (non-root); no local
-          # writes in this binary, so the rootfs can stay read-only.
-          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: {drop: [ALL]}}
+          # The image's USER dataflow is a named user (uid 100), so kubelet
+          # needs the numeric uid to verify runAsNonRoot. No local writes in
+          # this binary, so the rootfs stays read-only.
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 100, runAsGroup: 101, capabilities: {drop: [ALL]}}
           resources:
             requests: {cpu: 100m, memory: 128Mi}
             limits: {cpu: 500m, memory: 512Mi}
@@ -395,13 +437,15 @@ spec:
       annotations:
         checksum/secrets: {{ toJson $.Values.secrets | sha256sum | quote }}
     spec:
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: worker
           image: {{ $.Values.images.app }}
           imagePullPolicy: Never
           # Merge activities spill to a temp file (internal/activities/activities.go),
           # so /tmp needs to stay writable even with a read-only rootfs.
-          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: {drop: [ALL]}}
+          # uid 100 = the image's named USER dataflow (kubelet needs it numeric).
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 100, runAsGroup: 101, capabilities: {drop: [ALL]}}
           resources:
             requests: {cpu: 100m, memory: 128Mi}
             limits: {cpu: 500m, memory: 512Mi}
@@ -435,11 +479,12 @@ spec:
       annotations:
         checksum/secrets: {{ toJson $.Values.secrets | sha256sum | quote }}
     spec:
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: worker
           image: {{ $.Values.images.app }}
           imagePullPolicy: Never
-          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: {drop: [ALL]}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 100, runAsGroup: 101, capabilities: {drop: [ALL]}}
           resources:
             requests: {cpu: 50m, memory: 64Mi}
             limits: {cpu: 250m, memory: 256Mi}
@@ -462,14 +507,16 @@ spec:
   template:
     metadata: {labels: {app: web}}
     spec:
-      securityContext: {fsGroup: 101}
+      # ip_unprivileged_port_start is a kubelet-safe sysctl; it lets non-root
+      # nginx bind :80 (an added NET_BIND_SERVICE never becomes ambient for a
+      # non-root process, so a capability grant alone can't).
+      securityContext: {fsGroup: 101, runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}, sysctls: [{name: net.ipv4.ip_unprivileged_port_start, value: "0"}]}
       containers:
         - name: web
           image: {{ .Values.images.web }}
           imagePullPolicy: Never
-          # nginx:alpine runs as root by default; force the built-in nginx
-          # user and grant just enough capability to bind port 80.
-          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 101, runAsGroup: 101, capabilities: {drop: [ALL], add: [NET_BIND_SERVICE]}}
+          # nginx:alpine runs as root by default; force the built-in nginx user.
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 101, runAsGroup: 101, capabilities: {drop: [ALL]}}
           resources:
             requests: {cpu: 25m, memory: 32Mi}
             limits: {cpu: 100m, memory: 128Mi}
@@ -515,14 +562,14 @@ spec:
         metadata: {labels: {app: db-backup}}
         spec:
           restartPolicy: Never
+          securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
           initContainers:
             - name: dump
               image: {{ .Values.images.postgres }}
-              # Stays root: it writes into /backups, a hostPath directory
-              # created (and owned by root) on the node, so a forced non-root
-              # UID would break the write without a host-side chown, which is
-              # out of scope here.
-              securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+              # Runs as the image's postgres user (70). /var/backups/dataflow on
+              # the node is chown'd to 70:70 (one-time, part of the deploy
+              # recipe) so the dump can write without root or a writable rootfs.
+              securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 70, runAsGroup: 70, capabilities: {drop: [ALL]}}
               resources:
                 requests: {cpu: 50m, memory: 128Mi}
                 limits: {cpu: 500m, memory: 512Mi}
@@ -544,9 +591,10 @@ spec:
           containers:
             - name: upload
               image: {{ .Values.images.curl }}
-              # curlimages/curl already runs as a non-root user by default; it
-              # only reads /backups, so the mount can be read-only too.
-              securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: {drop: [ALL]}}
+              # curlimages/curl's USER curl_user is a named user (uid 100), so
+              # kubelet needs the numeric uid to verify runAsNonRoot; it only
+              # reads /backups, so the mount can be read-only too.
+              securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 100, runAsGroup: 101, capabilities: {drop: [ALL]}}
               resources:
                 requests: {cpu: 25m, memory: 32Mi}
                 limits: {cpu: 100m, memory: 128Mi}

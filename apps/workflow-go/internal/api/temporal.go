@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/dataflow-poc/workflow-go/internal/model"
@@ -12,6 +14,24 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/client"
 )
+
+// W3C traceparent: version-traceid-parentid-flags. Trace id must be 32 hex
+// chars and non-zero. https://www.w3.org/TR/trace-context/
+var traceparentPattern = regexp.MustCompile(`^[0-9a-f]{2}-([0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$`)
+
+func newTraceID() string { return strings.ReplaceAll(uuid.NewString(), "-", "") }
+
+// traceIDFromContext reuses the trace id from an inbound W3C traceparent
+// header (stashed by middleware) so external callers can correlate an
+// execution with their own distributed trace; otherwise a fresh id is minted.
+// The Temporal run_id is deliberately never used as a trace id.
+func traceIDFromContext(ctx context.Context) string {
+	header, _ := ctx.Value(traceParentKey).(string)
+	if match := traceparentPattern.FindStringSubmatch(strings.ToLower(strings.TrimSpace(header))); match != nil && match[1] != strings.Repeat("0", 32) {
+		return match[1]
+	}
+	return newTraceID()
+}
 
 type quotaExceeded struct{ Used, Limit int }
 
@@ -52,8 +72,9 @@ func (s *Server) fireExecution(ctx context.Context, def model.PipelineDefinition
 		return "", err
 	}
 	executionID := "exec-" + uuid.NewString()
+	traceID := traceIDFromContext(ctx)
 	input := model.WorkflowInput{Definition: def, TenantID: def.TenantID, ExecutionID: executionID,
-		Environment: environment, Trigger: model.TriggerInput{Type: triggerType, PayloadRef: payloadRef, FiredAt: time.Now().UTC().Format(time.RFC3339Nano)}, EncryptedDEK: encryptedDEK}
+		Environment: environment, Trigger: model.TriggerInput{Type: triggerType, PayloadRef: payloadRef, FiredAt: time.Now().UTC().Format(time.RFC3339Nano)}, TraceID: traceID, EncryptedDEK: encryptedDEK}
 	temporalClient := s.Temporal[string(environment)]
 	workflowName := "DynamicDAGWorkflow"
 	if def.Execution != nil && def.Execution.Engine == "stream-direct" {
@@ -72,8 +93,8 @@ func (s *Server) fireExecution(ctx context.Context, def model.PipelineDefinition
 	}
 	err = s.DB.TenantTx(ctx, def.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO executions
-      (id,pipeline_id,tenant_id,trigger_type,build_id,environment,workflow_id,run_id,retry_of,backfill_partition_id)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, executionID, pipelineRowID, def.TenantID, triggerType, nullString(os.Getenv("BUILD_ID")), environment, executionID, run.GetRunID(), nullString(retryOf), nullString(partitionID))
+      (id,pipeline_id,tenant_id,trigger_type,build_id,environment,workflow_id,run_id,retry_of,backfill_partition_id,trace_id)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, executionID, pipelineRowID, def.TenantID, triggerType, nullString(os.Getenv("BUILD_ID")), environment, executionID, run.GetRunID(), nullString(retryOf), nullString(partitionID), traceID)
 		if err != nil {
 			return err
 		}
