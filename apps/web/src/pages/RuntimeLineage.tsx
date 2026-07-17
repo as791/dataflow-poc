@@ -459,9 +459,6 @@ export default function RuntimeLineage() {
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <div className="flex h-full min-h-0 flex-col">
           <div className="relative min-h-0 flex-[3] overflow-hidden">
-            <div className="pointer-events-none absolute left-4 right-4 top-3 z-10 grid grid-cols-4 gap-2 text-center text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-white/35">
-              {(['external', 'bronze', 'silver', 'gold'] as const).map(layer => <span key={layer}>{layer === 'external' ? 'Sources' : layer}</span>)}
-            </div>
             {loading && <div role="status" aria-live="polite" className={`pointer-events-none absolute z-30 flex items-center justify-center ${overview ? 'left-1/2 top-12 -translate-x-1/2' : 'inset-0 bg-white/65 dark:bg-[#080a10]/65'}`}>
               <span className="flex items-center gap-2 rounded-full border border-gray-200 bg-white/95 px-3 py-1.5 text-xs text-gray-600 shadow-sm dark:border-white/10 dark:bg-[#11141d]/95 dark:text-white/65">
                 <RefreshCw size={13} className="animate-spin" /> {overview ? 'Refreshing…' : 'Loading runtime lineage…'}
