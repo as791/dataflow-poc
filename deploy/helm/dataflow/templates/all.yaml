@@ -591,9 +591,10 @@ spec:
           containers:
             - name: upload
               image: {{ .Values.images.curl }}
-              # curlimages/curl already runs as a non-root user by default; it
-              # only reads /backups, so the mount can be read-only too.
-              securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: {drop: [ALL]}}
+              # curlimages/curl's USER curl_user is a named user (uid 100), so
+              # kubelet needs the numeric uid to verify runAsNonRoot; it only
+              # reads /backups, so the mount can be read-only too.
+              securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 100, runAsGroup: 101, capabilities: {drop: [ALL]}}
               resources:
                 requests: {cpu: 25m, memory: 32Mi}
                 limits: {cpu: 100m, memory: 128Mi}
