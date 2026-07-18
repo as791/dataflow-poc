@@ -66,6 +66,66 @@ Open `http://localhost:3002`. Bootstrap generates local secrets and installs
 the full Kind/Helm stack. See [Local setup](docs/SETUP.md) for development and
 test commands.
 
+## Live demo host
+
+Current GCE demo box (rotates when the VM is recreated — confirm before
+sharing publicly):
+
+- App: https://34.14.212.157.nip.io
+- SSH: `ssh ubuntu@34.14.212.157` (key auth), repo at `/opt/dataflow`
+- Deploy: `sudo git pull --ff-only`, rebuild `dataflow-app:local` /
+  `dataflow-web:local` images, `sudo kind load docker-image --name dataflow <img>`
+  for both, then `kubectl rollout restart deploy/api deploy/web -n dataflow`
+  (~10-15 min). See [GCP deployment](docs/DEPLOYMENT_GCP.md) for a fresh
+  Terraform-provisioned host — `appUrl` derives from the reserved static IP,
+  so it changes per deployment.
+
+## Using DataFlow: build and run a pipeline
+
+1. Open the app, sign in, land on the pipeline canvas.
+2. Drag a source node from the palette (any connector in the catalog) onto
+   the canvas, configure its fields (URL, auth, filters).
+3. Drag a sink node, connect source → sink (add transforms in between as
+   needed). Or describe the pipeline in the AI builder box and let it draft
+   the graph, then edit by hand.
+4. Save — this creates an immutable pipeline version.
+5. Promote through the lifecycle: Integration (test run) → Production.
+6. Run manually, or let Temporal schedule/trigger it; watch progress, retries,
+   and backfills from the run view.
+7. Check Lineage, Data Quality, and Analytics tabs for output visibility and
+   OpenLineage export.
+
+## Registering a new connector
+
+Two paths, see [Connector development](docs/CONNECTORS.md) for full detail:
+
+- **No-code (REST/HTTP source):** drop a `*.manifest.json` file into
+  `connectors/manifests/` (bundled) or a directory pointed to by
+  `CONNECTORS_DIR` (no rebuild — restart worker + API). It auto-appears in
+  the catalog, canvas palette, and AI builder. Example:
+
+  ```json
+  {
+    "activityType": "rest.jsonplaceholder.fetch",
+    "label": "JSONPlaceholder (demo REST)",
+    "kind": "source",
+    "url": "https://jsonplaceholder.typicode.com/posts",
+    "method": "GET",
+    "pagination": { "style": "page", "param": "_page", "limitParam": "_limit", "limit": 20 }
+  }
+  ```
+
+- **Coded (OAuth, GraphQL, SDK auth, changes-feeds):** register a Go source/
+  sink in `apps/workflow-go/internal/connectors/`, then add catalog metadata
+  on the frontend if it needs canvas config fields.
+
+## Demo video
+
+<!-- Record a walkthrough (build → deploy → run → lineage/analytics), upload
+to YouTube, then replace this line with the link. -->
+
+[Watch on YouTube](TODO-add-youtube-link-here)
+
 ## Repository layout
 
 | Path | Purpose |
