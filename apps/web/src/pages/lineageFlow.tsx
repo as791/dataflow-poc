@@ -8,7 +8,6 @@ import type { WorkspaceLineage } from '@dataflow/shared';
 // `metrics` payload; architecture nodes leave it undefined.
 
 export type LineageLayer = 'external' | 'bronze' | 'silver' | 'gold';
-export const LAYER_X: Record<LineageLayer, number> = { external: 40, bronze: 640, silver: 1240, gold: 1840 };
 export const LAYER_COLOR: Record<LineageLayer, string> = {
   external: '#64748b', bronze: '#b7791f', silver: '#94a3b8', gold: '#eab308',
 };
@@ -22,7 +21,7 @@ export const PIPELINE_HEIGHT = 128;
 export const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 0.35 };
 export const FIT_VIEW_OPTIONS = { padding: 0.25, minZoom: 0.15, maxZoom: 0.4 };
 export const normalizeLayer = (layer: unknown): LineageLayer =>
-  typeof layer === 'string' && Object.prototype.hasOwnProperty.call(LAYER_X, layer)
+  typeof layer === 'string' && Object.prototype.hasOwnProperty.call(LAYER_COLOR, layer)
     ? layer as LineageLayer
     : 'external';
 export const HEALTH_COLOR: Record<string, string> = {
@@ -76,8 +75,6 @@ const AssetNode = memo(function AssetNode({ data }: NodeProps) {
       {!metrics && data.quality && <p className={`mt-1 text-[10px] font-semibold ${data.quality.status === 'passed' ? 'text-emerald-600 dark:text-emerald-400' : data.quality.status === 'failed' ? 'text-red-500 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`}>
         Quality {data.quality.status} · {data.quality.failedCount.toLocaleString()} rejected
       </p>}
-      <span className="mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white"
-        style={{ background: LAYER_COLOR[layer] }}>{layer}</span>
       <Handle type="source" position={Position.Right} />
     </div>
   );
@@ -122,64 +119,81 @@ const PipelineNode = memo(function PipelineNode({ data }: NodeProps) {
 
 export const nodeTypes = { asset: AssetNode, pipeline: PipelineNode };
 
+const COL_GAP = 160;
+const ROW_GAP = 32;
+
+// Layered layout: columns from longest-path rank (left → right along data flow),
+// row order from barycenter sweeps to minimise edge crossings. No dagre/elk dep.
 export function buildFlow(graph: WorkspaceLineage, healthById: Record<string, PipelineHealth>): { nodes: Node[]; edges: Edge[] } {
-  const edgeByNode = new Map<string, string[]>();
-  for (const edge of graph.edges) {
-    const sourceEdges = edgeByNode.get(edge.source);
-    if (sourceEdges) sourceEdges.push(edge.target);
-    else edgeByNode.set(edge.source, [edge.target]);
-    const targetEdges = edgeByNode.get(edge.target);
-    if (targetEdges) targetEdges.push(edge.source);
-    else edgeByNode.set(edge.target, [edge.source]);
+  const outgoing = new Map<string, string[]>(), incoming = new Map<string, string[]>();
+  const push = (map: Map<string, string[]>, key: string, value: string) => {
+    const list = map.get(key);
+    if (list) list.push(value); else map.set(key, [value]);
+  };
+  for (const edge of graph.edges) { push(outgoing, edge.source, edge.target); push(incoming, edge.target, edge.source); }
+
+  // Longest-path rank via Kahn; nodes on a cycle keep the rank reached before it closed.
+  const rank = new Map(graph.nodes.map(node => [node.id, 0]));
+  const indegree = new Map(graph.nodes.map(node => [node.id, incoming.get(node.id)?.length ?? 0]));
+  const queue = graph.nodes.filter(node => !indegree.get(node.id)).map(node => node.id);
+  for (let index = 0; index < queue.length; index++) {
+    const id = queue[index];
+    for (const next of outgoing.get(id) ?? []) {
+      rank.set(next, Math.max(rank.get(next)!, rank.get(id)! + 1));
+      const remaining = indegree.get(next)! - 1;
+      indegree.set(next, remaining);
+      if (!remaining) queue.push(next);
+    }
   }
-  const assetLayer = new Map<string, LineageLayer>();
-  const assetPosition = new Map<string, { x: number; y: number }>();
-  const laneCounts: Record<LineageLayer, number> = { external: 0, bronze: 0, silver: 0, gold: 0 };
-  for (const node of graph.nodes) if (node.kind === 'asset') {
-    const lane = normalizeLayer(node.asset.layer);
-    assetLayer.set(node.id, lane);
-    assetPosition.set(node.id, { x: LAYER_X[lane], y: 90 + laneCounts[lane]++ * (ASSET_HEIGHT + 24) });
+
+  const columns: string[][] = [];
+  for (const node of graph.nodes) (columns[rank.get(node.id)!] ??= []).push(node.id);
+  const orderIndex = new Map<string, number>();
+  for (const column of columns) column?.forEach((id, index) => orderIndex.set(id, index));
+  const barycenter = (id: string, neighbours: Map<string, string[]>) => {
+    const positions = (neighbours.get(id) ?? []).map(neighbour => orderIndex.get(neighbour)!);
+    return positions.length ? positions.reduce((sum, value) => sum + value, 0) / positions.length : orderIndex.get(id)!;
+  };
+  for (let sweep = 0; sweep < 4; sweep++) {
+    const neighbours = sweep % 2 === 0 ? incoming : outgoing;
+    for (const column of sweep % 2 === 0 ? columns : [...columns].reverse()) {
+      if (!column) continue;
+      column.sort((a, b) => barycenter(a, neighbours) - barycenter(b, neighbours));
+      column.forEach((id, index) => orderIndex.set(id, index));
+    }
   }
-  const nextPipelineY = new Map<number, number>();
+
+  const kindById = new Map(graph.nodes.map(node => [node.id, node.kind]));
+  const sizeOf = (id: string) => kindById.get(id) === 'asset'
+    ? { width: ASSET_WIDTH, height: ASSET_HEIGHT }
+    : { width: PIPELINE_WIDTH, height: PIPELINE_HEIGHT };
+  const position = new Map<string, { x: number; y: number }>();
+  let x = 0;
+  for (const column of columns) {
+    if (!column?.length) continue;
+    const columnWidth = Math.max(...column.map(id => sizeOf(id).width));
+    const columnHeight = column.reduce((sum, id) => sum + sizeOf(id).height + ROW_GAP, -ROW_GAP);
+    let y = -columnHeight / 2;
+    for (const id of column) {
+      const size = sizeOf(id);
+      position.set(id, { x: x + (columnWidth - size.width) / 2, y });
+      y += size.height + ROW_GAP;
+    }
+    x += columnWidth + COL_GAP;
+  }
+
   const nodes = graph.nodes.map<Node>(node => {
     const metrics = (node as any).metrics;
-    if (node.kind === 'asset') {
-      const lane = assetLayer.get(node.id) ?? 'external';
-      return {
-        id: node.id, type: 'asset', position: assetPosition.get(node.id)!,
-        width: ASSET_WIDTH, height: ASSET_HEIGHT,
-        style: { width: ASSET_WIDTH, height: ASSET_HEIGHT },
-        data: { ...node.asset, layer: lane, materialization: node.materialization, quality: node.quality, metrics }, draggable: false,
-      };
-    }
-    const neighbours = edgeByNode.get(node.id) ?? [];
-    const xs = neighbours.flatMap(id => {
-      const lane = assetLayer.get(id);
-      return lane ? [LAYER_X[lane]] : [];
-    });
-    const min = xs.length ? Math.min(...xs) : LAYER_X.external;
-    const max = xs.length ? Math.max(...xs) : LAYER_X.bronze;
-    const x = min === max
-      ? min + ASSET_WIDTH + 20
-      : (min + ASSET_WIDTH + max - PIPELINE_WIDTH) / 2;
-    const neighbourYs = neighbours.flatMap(id => {
-      const position = assetPosition.get(id);
-      return position ? [position.y + ASSET_HEIGHT / 2] : [];
-    });
-    const preferredY = neighbourYs.length
-      ? neighbourYs.reduce((sum, y) => sum + y, 0) / neighbourYs.length - PIPELINE_HEIGHT / 2
-      : 40;
-    const y = Math.max(40, preferredY, nextPipelineY.get(x) ?? 40);
-    nextPipelineY.set(x, y + PIPELINE_HEIGHT + 24);
+    const { width, height } = sizeOf(node.id);
+    const base = { id: node.id, position: position.get(node.id)!, width, height, style: { width, height }, draggable: false };
+    if (node.kind === 'asset') return {
+      ...base, type: 'asset',
+      data: { ...node.asset, layer: normalizeLayer(node.asset.layer), materialization: node.materialization, quality: node.quality, metrics },
+    };
     const data = node.kind === 'external-job'
       ? { ...node.externalJob, external: true, status: 'external', health: 'unmonitored', metrics }
       : { ...node.pipeline, ...(healthById[node.pipeline.rowId] ?? { health: 'unmonitored', breaches: [] }), metrics };
-    return {
-      id: node.id, type: 'pipeline', position: { x, y },
-      width: PIPELINE_WIDTH, height: PIPELINE_HEIGHT,
-      style: { width: PIPELINE_WIDTH, height: PIPELINE_HEIGHT },
-      data, draggable: false,
-    };
+    return { ...base, type: 'pipeline', data };
   });
   const edges = graph.edges.map<Edge>(edge => ({
     id: edge.id, source: edge.source, target: edge.target,
