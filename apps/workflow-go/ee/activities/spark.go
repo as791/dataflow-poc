@@ -1,3 +1,5 @@
+// Source-available under the Elastic License 2.0. See ee/LICENSE.
+
 package activities
 
 import (
@@ -13,8 +15,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dataflow-poc/workflow-go/internal/connectors"
+	"github.com/dataflow-poc/workflow-go/internal/database"
 	"github.com/dataflow-poc/workflow-go/internal/model"
-	sparkengine "github.com/dataflow-poc/workflow-go/internal/spark"
+	sparkengine "github.com/dataflow-poc/workflow-go/ee/spark"
 )
 
 type SparkJobParams struct {
@@ -26,7 +30,7 @@ type SparkJobRef struct {
 	Noop                                             bool
 }
 
-func (a *Activities) SubmitSparkJob(ctx context.Context, p SparkJobParams) (SparkJobRef, error) {
+func SubmitSparkJob(ctx context.Context, db *database.DB, rt *connectors.Runtime, p SparkJobParams) (SparkJobRef, error) {
 	var source, sink *model.Node
 	for i := range p.Definition.Nodes {
 		node := &p.Definition.Nodes[i]
@@ -42,7 +46,7 @@ func (a *Activities) SubmitSparkJob(ctx context.Context, p SparkJobParams) (Spar
 	if source != nil && source.ActivityType == "iceberg.fetch" {
 		ref.InputStateKey = "spark:" + p.Definition.ID + ":" + source.ID
 		var raw []byte
-		_ = a.DB.Pool.QueryRow(ctx, `SELECT cursor FROM connector_state WHERE tenant_id=$1 AND connection_id=$2`, p.TenantID, ref.InputStateKey).Scan(&raw)
+		_ = db.Pool.QueryRow(ctx, `SELECT cursor FROM connector_state WHERE tenant_id=$1 AND connection_id=$2`, p.TenantID, ref.InputStateKey).Scan(&raw)
 		var state map[string]interface{}
 		_ = json.Unmarshal(raw, &state)
 		previous = fmt.Sprint(state["snapshotId"])
@@ -50,7 +54,7 @@ func (a *Activities) SubmitSparkJob(ctx context.Context, p SparkJobParams) (Spar
 			previous = ""
 		}
 		var err error
-		current, err = a.Runtime.IcebergCurrentSnapshot(ctx, source.Config)
+		current, err = rt.IcebergCurrentSnapshot(ctx, source.Config)
 		if err != nil {
 			return ref, err
 		}
@@ -61,7 +65,7 @@ func (a *Activities) SubmitSparkJob(ctx context.Context, p SparkJobParams) (Spar
 		}
 	}
 	if sink != nil && sink.ActivityType == "sink.iceberg" {
-		ref.OutputBefore, _ = a.Runtime.IcebergCurrentSnapshot(ctx, sink.Config)
+		ref.OutputBefore, _ = rt.IcebergCurrentSnapshot(ctx, sink.Config)
 	}
 	namespace := envValue("SPARK_NAMESPACE", "spark")
 	spec, err := sparkengine.BuildApplication(p.Definition, p.ExecutionID, namespace, envValue("SPARK_SQL_IMAGE", "dataflow/spark-sql:latest"), previous, current)
@@ -75,7 +79,7 @@ func (a *Activities) SubmitSparkJob(ctx context.Context, p SparkJobParams) (Spar
 	return ref, err
 }
 
-func (a *Activities) SparkJobStatus(ctx context.Context, ref SparkJobRef) (map[string]string, error) {
+func SparkJobStatus(ctx context.Context, ref SparkJobRef) (map[string]string, error) {
 	path := "/apis/sparkoperator.k8s.io/v1beta2/namespaces/" + envValue("SPARK_NAMESPACE", "spark") + "/sparkapplications/" + ref.Name
 	body, err := kubernetesRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -92,19 +96,21 @@ func (a *Activities) SparkJobStatus(ctx context.Context, ref SparkJobRef) (map[s
 	return map[string]string{"state": value.Status.ApplicationState.State, "error": value.Status.ApplicationState.ErrorMessage}, nil
 }
 
-func (a *Activities) CancelSparkJob(ctx context.Context, ref SparkJobRef) error {
+func CancelSparkJob(ctx context.Context, ref SparkJobRef) error {
 	_, err := kubernetesRequest(ctx, http.MethodDelete, "/apis/sparkoperator.k8s.io/v1beta2/namespaces/"+envValue("SPARK_NAMESPACE", "spark")+"/sparkapplications/"+ref.Name, nil)
 	return err
 }
 
-func (a *Activities) CommitSparkJob(ctx context.Context, p struct {
+type CommitSparkJobParams struct {
 	Ref        SparkJobRef              `json:"ref"`
 	Definition model.PipelineDefinition `json:"definition"`
 	TenantID   string                   `json:"tenantId"`
-}) error {
+}
+
+func CommitSparkJob(ctx context.Context, db *database.DB, rt *connectors.Runtime, p CommitSparkJobParams) error {
 	for _, node := range p.Definition.Nodes {
 		if node.Type == "sink" && node.ActivityType == "sink.iceberg" {
-			after, err := a.Runtime.IcebergCurrentSnapshot(ctx, node.Config)
+			after, err := rt.IcebergCurrentSnapshot(ctx, node.Config)
 			if err != nil {
 				return err
 			}
@@ -114,7 +120,7 @@ func (a *Activities) CommitSparkJob(ctx context.Context, p struct {
 		}
 	}
 	if p.Ref.InputStateKey != "" && p.Ref.InputSnapshot != "" {
-		_, err := a.DB.Pool.Exec(ctx, `INSERT INTO connector_state(tenant_id,connection_id,cursor,updated_at) VALUES($1,$2,$3,now()) ON CONFLICT(tenant_id,connection_id) DO UPDATE SET cursor=$3,updated_at=now()`, p.TenantID, p.Ref.InputStateKey, map[string]string{"snapshotId": p.Ref.InputSnapshot})
+		_, err := db.Pool.Exec(ctx, `INSERT INTO connector_state(tenant_id,connection_id,cursor,updated_at) VALUES($1,$2,$3,now()) ON CONFLICT(tenant_id,connection_id) DO UPDATE SET cursor=$3,updated_at=now()`, p.TenantID, p.Ref.InputStateKey, map[string]string{"snapshotId": p.Ref.InputSnapshot})
 		return err
 	}
 	return nil

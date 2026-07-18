@@ -159,4 +159,9 @@ and [GOVERNANCE.md](GOVERNANCE.md). Report vulnerabilities privately using
 [SECURITY.md](SECURITY.md). Never commit `.env`, secret files, DB dumps,
 Terraform state, or generated credential values.
 
-Licensed under the [Apache License 2.0](LICENSE).
+Licensed under the [Apache License 2.0](LICENSE), except
+[`apps/workflow-go/ee/`](apps/workflow-go/ee/) — the enterprise features
+(Flink SQL, Spark SQL, realtime stream-direct) — which is source-available
+under the [Elastic License 2.0](apps/workflow-go/ee/LICENSE). Community builds
+(`go build ./...`) exclude `ee/` entirely; enterprise builds use
+`go build -tags ee ./...`.

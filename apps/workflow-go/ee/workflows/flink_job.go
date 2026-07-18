@@ -1,10 +1,12 @@
+// Source-available under the Elastic License 2.0. See ee/LICENSE.
+
 package workflows
 
 import (
 	"fmt"
 	"time"
 
-	"github.com/dataflow-poc/workflow-go/internal/activities"
+	activities "github.com/dataflow-poc/workflow-go/ee/activities"
 	"github.com/dataflow-poc/workflow-go/internal/model"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"

@@ -3,9 +3,12 @@ WORKDIR /src
 COPY apps/workflow-go/go.mod apps/workflow-go/go.sum* ./
 COPY apps/workflow-go/vendor ./vendor
 COPY apps/workflow-go ./
-RUN CGO_ENABLED=0 go build -mod=vendor -trimpath -ldflags="-s -w" -o /out/api ./cmd/api && \
-    CGO_ENABLED=0 go build -mod=vendor -trimpath -ldflags="-s -w" -o /out/activity-worker ./cmd/activity-worker && \
-    CGO_ENABLED=0 go build -mod=vendor -trimpath -ldflags="-s -w" -o /out/workflow-worker ./cmd/worker
+# BUILD_TAGS=ee links the enterprise code under ee/ (Elastic License 2.0);
+# build with --build-arg BUILD_TAGS= for a pure Apache-2.0 community image.
+ARG BUILD_TAGS=ee
+RUN CGO_ENABLED=0 go build -mod=vendor -tags "$BUILD_TAGS" -trimpath -ldflags="-s -w" -o /out/api ./cmd/api && \
+    CGO_ENABLED=0 go build -mod=vendor -tags "$BUILD_TAGS" -trimpath -ldflags="-s -w" -o /out/activity-worker ./cmd/activity-worker && \
+    CGO_ENABLED=0 go build -mod=vendor -tags "$BUILD_TAGS" -trimpath -ldflags="-s -w" -o /out/workflow-worker ./cmd/worker
 
 FROM alpine:3.21
 # Pull patched OS package revisions (openssl/c-ares CVE fixes land as -rN

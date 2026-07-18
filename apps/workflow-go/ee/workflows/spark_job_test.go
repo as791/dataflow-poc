@@ -1,10 +1,12 @@
+// Source-available under the Elastic License 2.0. See ee/LICENSE.
+
 package workflows
 
 import (
 	"context"
 	"testing"
 
-	"github.com/dataflow-poc/workflow-go/internal/activities"
+	activities "github.com/dataflow-poc/workflow-go/ee/activities"
 	"github.com/dataflow-poc/workflow-go/internal/model"
 	"github.com/stretchr/testify/mock"
 	"go.temporal.io/sdk/activity"

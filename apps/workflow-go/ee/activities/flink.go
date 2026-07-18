@@ -1,3 +1,5 @@
+// Source-available under the Elastic License 2.0. See ee/LICENSE.
+
 package activities
 
 import (
@@ -10,7 +12,8 @@ import (
 	"os"
 	"strings"
 
-	flinkengine "github.com/dataflow-poc/workflow-go/internal/flink"
+	flinkengine "github.com/dataflow-poc/workflow-go/ee/flink"
+	"github.com/dataflow-poc/workflow-go/internal/database"
 	"github.com/dataflow-poc/workflow-go/internal/model"
 )
 
@@ -23,7 +26,7 @@ type FlinkDeploymentRef struct {
 }
 type FlinkDeploymentStatus struct{ State, Error, Checkpoint string }
 
-func (a *Activities) DeployFlinkJob(ctx context.Context, p FlinkDeployParams) (FlinkDeploymentRef, error) {
+func DeployFlinkJob(ctx context.Context, db *database.DB, p FlinkDeployParams) (FlinkDeploymentRef, error) {
 	spec, err := flinkengine.BuildDeployment(p.Definition, p.ExecutionID)
 	if err != nil {
 		return FlinkDeploymentRef{}, err
@@ -54,11 +57,11 @@ func (a *Activities) DeployFlinkJob(ctx context.Context, p FlinkDeployParams) (F
 	if response.WorkflowID == "" {
 		return FlinkDeploymentRef{}, fmt.Errorf("Cohestra returned no workflow id")
 	}
-	_, _ = a.DB.Pool.Exec(ctx, `UPDATE executions SET cohestra_id=$2,desired_state='running',engine_last_error=NULL WHERE id=$1`, p.ExecutionID, response.WorkflowID)
+	_, _ = db.Pool.Exec(ctx, `UPDATE executions SET cohestra_id=$2,desired_state='running',engine_last_error=NULL WHERE id=$1`, p.ExecutionID, response.WorkflowID)
 	return FlinkDeploymentRef{ID: response.WorkflowID}, nil
 }
 
-func (a *Activities) FlinkJobStatus(ctx context.Context, ref FlinkDeploymentRef) (FlinkDeploymentStatus, error) {
+func FlinkJobStatus(ctx context.Context, ref FlinkDeploymentRef) (FlinkDeploymentStatus, error) {
 	var response struct {
 		Status    string `json:"status"`
 		LastError string `json:"lastError"`
@@ -86,10 +89,12 @@ func (a *Activities) FlinkJobStatus(ctx context.Context, ref FlinkDeploymentRef)
 	return FlinkDeploymentStatus{State: state, Error: response.LastError, Checkpoint: checkpoint}, err
 }
 
-func (a *Activities) FlinkJobAction(ctx context.Context, p struct {
+type FlinkActionParams struct {
 	Ref                 FlinkDeploymentRef `json:"ref"`
 	Action, ExecutionID string
-}) error {
+}
+
+func FlinkJobAction(ctx context.Context, db *database.DB, p FlinkActionParams) error {
 	if !map[string]bool{"pause": true, "resume": true, "cancel": true, "rollback": true}[p.Action] {
 		return fmt.Errorf("unsupported Flink action")
 	}
@@ -116,12 +121,14 @@ func (a *Activities) FlinkJobAction(ctx context.Context, p struct {
 	if err := cohestraRequest(ctx, http.MethodPost, path+"/"+action, body, &map[string]interface{}{}, map[string]string{"Idempotency-Key": p.ExecutionID + "-" + p.Action}); err != nil {
 		return err
 	}
-	_, _ = a.DB.Pool.Exec(ctx, `UPDATE executions SET desired_state=$2,engine_last_error=NULL WHERE id=$1`, p.ExecutionID, p.Action)
+	_, _ = db.Pool.Exec(ctx, `UPDATE executions SET desired_state=$2,engine_last_error=NULL WHERE id=$1`, p.ExecutionID, p.Action)
 	return nil
 }
 
-func (a *Activities) RecordFlinkError(ctx context.Context, p struct{ ExecutionID, Error string }) error {
-	_, err := a.DB.Pool.Exec(ctx, `UPDATE executions SET engine_last_error=$2 WHERE id=$1`, p.ExecutionID, p.Error)
+type RecordFlinkErrorParams struct{ ExecutionID, Error string }
+
+func RecordFlinkError(ctx context.Context, db *database.DB, p RecordFlinkErrorParams) error {
+	_, err := db.Pool.Exec(ctx, `UPDATE executions SET engine_last_error=$2 WHERE id=$1`, p.ExecutionID, p.Error)
 	return err
 }
 

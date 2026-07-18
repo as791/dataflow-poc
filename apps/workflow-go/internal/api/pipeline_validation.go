@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	flinkengine "github.com/dataflow-poc/workflow-go/internal/flink"
+	"github.com/dataflow-poc/workflow-go/internal/enterprise"
 	"github.com/dataflow-poc/workflow-go/internal/model"
-	sparkengine "github.com/dataflow-poc/workflow-go/internal/spark"
 	"github.com/google/uuid"
 )
 
@@ -96,7 +95,7 @@ func validatePipeline(def model.PipelineDefinition) error {
 }
 
 func validateFlinkSQL(def model.PipelineDefinition) error {
-	if err := flinkengine.ValidateSelect(def.Execution.TransformSQL); err != nil {
+	if err := enterprise.ValidateFlinkSelect(def.Execution.TransformSQL); err != nil {
 		return err
 	}
 	sources, sinks := 0, 0
@@ -120,12 +119,11 @@ func validateFlinkSQL(def model.PipelineDefinition) error {
 	if sources != 1 || sinks != 1 {
 		return fmt.Errorf("flink-sql requires one source and one sink")
 	}
-	_, err := flinkengine.BuildDeployment(def, "validation")
-	return err
+	return enterprise.ValidateFlinkDeployment(def, "validation")
 }
 
 func validateSparkSQL(def model.PipelineDefinition) error {
-	if err := sparkengine.ValidateSelect(def.Execution.TransformSQL); err != nil {
+	if err := enterprise.ValidateSparkSelect(def.Execution.TransformSQL); err != nil {
 		return err
 	}
 	sources, sinks := 0, 0

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dataflow-poc/workflow-go/internal/enterprise"
 	"github.com/jackc/pgx/v5"
 	smtp "github.com/wneessen/go-mail/smtp"
 )
@@ -21,6 +22,11 @@ var paidFeatureKeys = map[string]bool{
 
 func (s *Server) paidFeatures(r *http.Request) (map[string]bool, error) {
 	features := map[string]bool{"advancedConnectors": false, "realtime": false, "sparkSql": false, "flinkSql": false, "statefulProcessing": false, "deepObservability": false, "governance": s.Config.Edition == "enterprise"}
+	if !enterprise.Build {
+		// Community builds carry no enterprise code; entitlements cannot turn on
+		// features that are not in the binary.
+		return map[string]bool{}, nil
+	}
 	tenant := tenantFrom(r)
 	rows, err := tenantQueryRows(r.Context(), s.DB, tenant.TenantID, `SELECT feature,enabled FROM tenant_feature_entitlements WHERE tenant_id=$1`, tenant.TenantID)
 	if err != nil {
