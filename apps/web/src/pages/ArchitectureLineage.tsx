@@ -23,7 +23,6 @@ export default function ArchitectureLineage() {
   const [environment, setEnvironment] = useState('');
   const [healthFilter, setHealthFilter] = useState('');
   const [domainFilter, setDomainFilter] = useState('');
-  const [layerFilter, setLayerFilter] = useState('');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -59,9 +58,8 @@ export default function ArchitectureLineage() {
     node.kind === 'pipeline' ? [node.pipeline.metadata?.domain ?? 'Unassigned'] : []))].sort(), [graph]);
   const filteredGraph = useMemo(() => graph ? filterWorkspaceLineage(graph, {
     query: debouncedSearch, domains: domainFilter ? [domainFilter] : undefined,
-    layers: layerFilter ? [layerFilter as 'external' | 'bronze' | 'silver' | 'gold'] : undefined,
     focusId: focusDepth && selectedId ? selectedId : undefined, depth: focusDepth,
-  }) : null, [graph, debouncedSearch, domainFilter, layerFilter, focusDepth, selectedId]);
+  }) : null, [graph, debouncedSearch, domainFilter, focusDepth, selectedId]);
   const flow = useMemo(() => filteredGraph ? buildFlow(filteredGraph, healthById) : { nodes: [], edges: [] }, [filteredGraph, healthById]);
   const flowNodeById = useMemo(() => new Map(flow.nodes.map(node => [node.id, node])), [flow.nodes]);
   const visible = useMemo(() => {
@@ -121,10 +119,10 @@ export default function ArchitectureLineage() {
     edge.sourceAssetUrn === selected.data.urn || edge.targetAssetUrn === selected.data.urn) : [];
   const atRisk = [...impact.downstream].filter(id => flowNodeById.get(id)?.data.health === 'critical').length;
   const activeFilterCount = [
-    environment, healthFilter, domainFilter, layerFilter, search.trim(), focusDepth && selectedId ? 'focus' : '',
+    environment, healthFilter, domainFilter, search.trim(), focusDepth && selectedId ? 'focus' : '',
   ].filter(Boolean).length;
   const clearFilters = () => {
-    setEnvironment(''); setHealthFilter(''); setDomainFilter(''); setLayerFilter('');
+    setEnvironment(''); setHealthFilter(''); setDomainFilter('');
     setSearch(''); setDebouncedSearch(''); setFocusDepth(0); setSelectedId(null);
   };
 
@@ -152,14 +150,6 @@ export default function ArchitectureLineage() {
             <select className="glass-input w-auto max-w-36 py-1.5 text-[12px]" value={domainFilter}
               onChange={event => { setDomainFilter(event.target.value); setSelectedId(null); }} aria-label="Lineage domain">
               <option value="">All</option>{domains.map(domain => <option key={domain} value={domain}>{domain}</option>)}
-            </select>
-          </label>
-          <label className="flex shrink-0 items-center gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Layer</span>
-            <select className="glass-input w-auto py-1.5 text-[12px]" value={layerFilter}
-              onChange={event => { setLayerFilter(event.target.value); setSelectedId(null); }} aria-label="Lineage layer">
-              <option value="">All</option><option value="external">Sources</option><option value="bronze">Bronze</option>
-              <option value="silver">Silver</option><option value="gold">Gold</option>
             </select>
           </label>
           <label className="flex shrink-0 items-center gap-1.5">
@@ -193,9 +183,6 @@ export default function ArchitectureLineage() {
       </div>
       {error && <div className="m-4"><ApiError message={error} onRetry={refresh} /></div>}
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        <div className="pointer-events-none absolute left-4 right-4 top-3 z-10 grid grid-cols-4 gap-2 text-center text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-white/35">
-          {(['external', 'bronze', 'silver', 'gold'] as const).map(layer => <span key={layer}>{layer === 'external' ? 'Sources' : layer}</span>)}
-        </div>
         {loading && <div role="status" aria-live="polite" className={`pointer-events-none absolute z-30 flex items-center justify-center ${graph ? 'left-1/2 top-12 -translate-x-1/2' : 'inset-0 bg-white/65 dark:bg-[#080a10]/65'}`}>
           <span className="flex items-center gap-2 rounded-full border border-gray-200 bg-white/95 px-3 py-1.5 text-xs text-gray-600 shadow-sm dark:border-white/10 dark:bg-[#11141d]/95 dark:text-white/65">
             <RefreshCw size={13} className="animate-spin" /> {graph ? 'Refreshing lineage…' : 'Loading lineage…'}
@@ -204,7 +191,7 @@ export default function ArchitectureLineage() {
         {!loading && graph?.nodes.length === 0 && <p className="p-8 text-sm text-gray-400">No pipeline assets found. Configure source and sink assets, then save a pipeline.</p>}
         {selected && <aside className="absolute right-4 top-14 z-20 w-72 rounded-xl border border-gray-200 bg-white/95 p-4 shadow-xl backdrop-blur dark:border-white/10 dark:bg-[#11141d]/95">
           <div className="flex items-start justify-between gap-2"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-brand-500">Impact analysis</p><h3 className="mt-1 text-sm font-semibold text-gray-900 dark:text-white/90">{selected.data.name}</h3></div><button className="icon-button h-7 w-7" aria-label="Close impact analysis" onClick={() => setSelectedId(null)}>×</button></div>
-          <p className="mt-1 text-[10px] text-gray-400">{selected.type === 'pipeline' ? `${selected.data.external ? 'External job' : 'Pipeline'} · ${selected.data.environment}` : `${selected.data.platform} · ${selected.data.layer}`}</p>
+          <p className="mt-1 text-[10px] text-gray-400">{selected.type === 'pipeline' ? `${selected.data.external ? 'External job' : 'Pipeline'} · ${selected.data.environment}` : `${selected.data.platform} · ${selected.data.namespace}`}</p>
           <div className="mt-3 grid grid-cols-3 gap-2 text-center"><div className="rounded-lg bg-gray-50 p-2 dark:bg-white/[0.04]"><p className="text-lg font-semibold">{impact.upstream.size}</p><p className="text-[9px] uppercase text-gray-400">Upstream</p></div><div className="rounded-lg bg-gray-50 p-2 dark:bg-white/[0.04]"><p className="text-lg font-semibold">{impact.downstream.size}</p><p className="text-[9px] uppercase text-gray-400">Downstream</p></div><div className="rounded-lg bg-red-50 p-2 dark:bg-red-500/10"><p className="text-lg font-semibold text-red-500">{atRisk}</p><p className="text-[9px] uppercase text-gray-400">At risk</p></div></div>
           {selected.data.metadata?.owner && <p className="mt-3 text-xs text-gray-600 dark:text-white/60">Owner · {selected.data.metadata.owner}</p>}
           {selected.type === 'asset' && selected.data.materialization && <div className="mt-3 rounded-lg bg-emerald-50 p-2 text-[10px] dark:bg-emerald-500/10"><p className="font-semibold text-emerald-700 dark:text-emerald-300">Last materialization</p><p className="mt-1 text-gray-600 dark:text-white/55">{new Date(selected.data.materialization.materializedAt).toLocaleString()}{selected.data.materialization.recordCount != null ? ` · ${selected.data.materialization.recordCount.toLocaleString()} rows` : ''}</p><Link to={`/runs/${selected.data.materialization.executionId}`} className="mt-1 block text-brand-500">Open producing run</Link></div>}
