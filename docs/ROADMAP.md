@@ -1,6 +1,6 @@
 # DataFlow roadmap
 
-Updated: 2026-07-10
+Updated: 2026-07-17
 
 Only unfinished work belongs here. Completed work belongs in release notes or
 Git history. Priority is a safe ten-user pilot, then measured scale from 10K to
@@ -98,6 +98,41 @@ tested. These are blockers, not aspirational features.
   *(2026-07-15: review caught the license-review job had no license policy
   (vuln-only) — deny-licenses list added. Deployed E2E smoke stays manual/
   on-demand — CI runners have no live URL to target.)*
+
+### dbt + DuckDB transformation POCs — deferred
+
+This is a non-gating investigation. It does not block Gate 1 or Gate 2. Product
+implementation starts only after every POC passes and the execution model is
+explicitly approved.
+
+- [ ] Build a Python 3.12 activity-worker image with pinned `dbt-core`,
+  `dbt-duckdb`, and DuckDB dependencies for amd64 and arm64.
+- [ ] Prove two named DataRef inputs can be joined and aggregated through an
+  ephemeral dbt project, returning the result as an encrypted DataRef.
+- [ ] Measure execution with a 1 GiB worker limit, one DuckDB thread, a 384 MiB
+  DuckDB memory limit, the existing 10 MiB per-ref and 50 MiB aggregate-input
+  limits, and bounded temporary disk.
+- [ ] Prove Temporal timeout and cancellation, process-group termination, retry
+  isolation, and temporary-workspace cleanup.
+- [ ] Verify restrictions on file, network, environment, extension, and DuckDB
+  configuration access; ensure SQL, records, credentials, and secrets never
+  appear in logs or retained artifacts.
+- [ ] Record POC results and approve or reject the trusted-owner,
+  existing-activity-worker execution model. Any dependency, architecture,
+  security, resource, or cancellation failure is a no-go and requires
+  reassessing an isolated runner.
+- [ ] After POC approval, implement `transform.dbt-duckdb` as an entitled,
+  owner-only workflow transform with named input aliases, inline SQL/Jinja,
+  structured dbt tests, encrypted DataRef output, and additive data-quality
+  results.
+- [ ] Roll out with the entitlement disabled, enable it first in one test
+  workspace, and retain entitlement disablement as the rollback.
+
+Initial POC target: Python 3.12, `dbt-core==1.10.22`,
+`dbt-duckdb==1.10.1`, and `duckdb==1.4.4`. V1 remains limited to current
+normalized batch connector outputs and DataRef limits. Full dbt projects,
+packages, macros, seeds, snapshots, persistent DuckDB databases, streaming SQL,
+and large direct datasets are out of scope.
 
 ## Gate 2 — 100K stored DAGs / high-throughput data plane
 
