@@ -35,8 +35,8 @@ Prerequisites: Docker + Compose v2, Go ≥ 1.25, Node ≥ 20, `npm`.
 
 ```bash
 # Clone and install JS deps
-git clone https://github.com/as791/dataflow-poc.git
-cd dataflow-poc
+git clone https://github.com/Cohestra/cohestra-dataflow.git
+cd cohestra-dataflow
 npm install
 
 # Run the full stack locally

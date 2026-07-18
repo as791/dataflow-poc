@@ -2,7 +2,7 @@ DataFlow
 Copyright 2025 DataFlow Contributors
 
 This product includes software developed by the DataFlow Contributors
-(https://github.com/as791/dataflow-poc).
+(https://github.com/Cohestra/cohestra-dataflow).
 
 Third-party software used by this project is listed in each workspace's
 dependency manifest (go.mod, package.json) and is subject to its own license

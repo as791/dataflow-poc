@@ -11,7 +11,7 @@
 **Please do not file public GitHub issues for security vulnerabilities.**
 
 Report vulnerabilities through GitHub's private
-[security advisory form](https://github.com/as791/dataflow-poc/security/advisories/new).
+[security advisory form](https://github.com/Cohestra/cohestra-dataflow/security/advisories/new).
 If that form is unavailable, contact [@as791](https://github.com/as791) and ask
 for a private reporting channel without including vulnerability details.
 

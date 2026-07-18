@@ -139,7 +139,7 @@ curl -fsS -X POST "$BASE_URL/api/openlineage" \
   -H "Authorization: Bearer $OL_TOKEN" -H 'Content-Type: application/json' -d "{
   \"eventType\": \"COMPLETE\",
   \"eventTime\": \"$NOW\",
-  \"producer\": \"https://github.com/dataflow-poc/demo-seed\",
+  \"producer\": \"https://github.com/Cohestra/cohestra-dataflow\",
   \"run\": { \"runId\": \"$OL_RUN_ID\" },
   \"job\": { \"namespace\": \"demo-warehouse\", \"name\": \"nightly_orders_rollup\" },
   \"inputs\": [ { \"namespace\": \"demo-warehouse\", \"name\": \"raw.orders\" } ],

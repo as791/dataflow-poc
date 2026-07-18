@@ -1,0 +1,3 @@
+[submodule "cohestra"]
+	path = cohestra
+	url = https://github.com/Cohestra/cohestra-control-plane.git

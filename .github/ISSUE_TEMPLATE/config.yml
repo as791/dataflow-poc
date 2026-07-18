@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Question / discussion
-    url: https://github.com/aryaman-sinha/dataflow-poc/discussions
+    url: https://github.com/Cohestra/cohestra-dataflow/discussions
     about: Ask questions or start a discussion
   - name: Security vulnerability
-    url: https://github.com/aryaman-sinha/dataflow-poc/security/advisories/new
+    url: https://github.com/Cohestra/cohestra-dataflow/security/advisories/new
     about: Report a security issue privately (do not open a public issue)

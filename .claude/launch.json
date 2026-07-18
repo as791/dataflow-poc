@@ -8,6 +8,13 @@
       "cwd": ".",
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "docs-site",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "serve", "--", "--port", "3005", "--no-open"],
+      "cwd": "cohestra/docs-site",
+      "port": 3005
     }
   ]
 }

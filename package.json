@@ -1,5 +1,5 @@
 {
-  "name": "dataflow-poc",
+  "name": "cohestra-dataflow",
   "private": true,
   "workspaces": ["packages/shared", "apps/web"],
   "scripts": {
