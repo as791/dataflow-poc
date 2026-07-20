@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orchestrate Agents"
+  short_description: "Delegate work across coordinated child agents"
+  default_prompt: "Use $orchestrate-agents to delegate this task to child agents and synthesize verified results."
