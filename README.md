@@ -72,7 +72,6 @@ Current GCE demo box (IP rotates when the VM is recreated — repoint the
 `dataflow` A record in the `cohestra.dev` DNS zone if that happens):
 
 - App: https://dataflow.cohestra.dev
-- SSH: `ssh ubuntu@34.14.212.157` (key auth), repo at `/opt/dataflow`
 - Deploy: `sudo git pull --ff-only`, rebuild `dataflow-app:local` /
   `dataflow-web:local` images, `sudo kind load docker-image --name dataflow <img>`
   for both, then `kubectl rollout restart deploy/api deploy/web -n dataflow`
