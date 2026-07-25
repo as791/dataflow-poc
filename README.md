@@ -68,11 +68,10 @@ test commands.
 
 ## Live demo host
 
-Current GCE demo box (rotates when the VM is recreated — confirm before
-sharing publicly):
+Current GCE demo box (IP rotates when the VM is recreated — repoint the
+`dataflow` A record in the `cohestra.dev` DNS zone if that happens):
 
-- App: https://34.14.212.157.nip.io
-- SSH: `ssh ubuntu@34.14.212.157` (key auth), repo at `/opt/dataflow`
+- App: https://dataflow.cohestra.dev
 - Deploy: `sudo git pull --ff-only`, rebuild `dataflow-app:local` /
   `dataflow-web:local` images, `sudo kind load docker-image --name dataflow <img>`
   for both, then `kubectl rollout restart deploy/api deploy/web -n dataflow`
@@ -158,4 +157,9 @@ and [GOVERNANCE.md](GOVERNANCE.md). Report vulnerabilities privately using
 [SECURITY.md](SECURITY.md). Never commit `.env`, secret files, DB dumps,
 Terraform state, or generated credential values.
 
-Licensed under the [Apache License 2.0](LICENSE).
+Licensed under the [Apache License 2.0](LICENSE), except
+[`apps/workflow-go/ee/`](apps/workflow-go/ee/) — the enterprise features
+(Flink SQL, Spark SQL, realtime stream-direct) — which is source-available
+under the [Elastic License 2.0](apps/workflow-go/ee/LICENSE). Community builds
+(`go build ./...`) exclude `ee/` entirely; enterprise builds use
+`go build -tags ee ./...`.

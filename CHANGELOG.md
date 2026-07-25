@@ -28,4 +28,4 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Docker Compose stack: one command brings up the full local environment
 - Public project policies for security reporting, governance, conduct, and contributions
 
-[Unreleased]: https://github.com/as791/dataflow-poc/commits/main
+[Unreleased]: https://github.com/Cohestra/cohestra-dataflow/commits/main

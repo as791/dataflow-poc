@@ -3,6 +3,7 @@ package api
 import (
 	"testing"
 
+	"github.com/dataflow-poc/workflow-go/internal/enterprise"
 	"github.com/dataflow-poc/workflow-go/internal/model"
 )
 
@@ -42,6 +43,9 @@ func TestValidatePipelineRejectsInvalidLakehouseLayer(t *testing.T) {
 }
 
 func TestSparkSQLValidationAndEntitlement(t *testing.T) {
+	if !enterprise.Build {
+		t.Skip("requires the enterprise build (-tags ee)")
+	}
 	def := model.PipelineDefinition{Name: "spark", Trigger: model.Trigger{Type: "manual"}, Execution: &model.ExecutionConfig{Engine: "spark-sql", TransformSQL: "SELECT id FROM source"}, Nodes: []model.Node{
 		{ID: "source", Type: "source", ActivityType: "s3.fetch"}, {ID: "sink", Type: "sink", ActivityType: "sink.iceberg"},
 	}, Edges: []model.Edge{{ID: "edge", Source: "source", Target: "sink"}}}
@@ -58,6 +62,9 @@ func TestSparkSQLValidationAndEntitlement(t *testing.T) {
 }
 
 func TestFlinkSQLValidationAndEntitlements(t *testing.T) {
+	if !enterprise.Build {
+		t.Skip("requires the enterprise build (-tags ee)")
+	}
 	columns := []interface{}{map[string]interface{}{"name": "id", "type": "BIGINT"}}
 	def := model.PipelineDefinition{Name: "flink", Trigger: model.Trigger{Type: "manual"}, Execution: &model.ExecutionConfig{Engine: "flink-sql", TransformSQL: "SELECT id FROM source"}, Nodes: []model.Node{{ID: "source", Type: "source", ActivityType: "kafka.fetch", Config: map[string]interface{}{"topic": "db.orders", "columns": columns}}, {ID: "sink", Type: "sink", ActivityType: "sink.clickhouse", Config: map[string]interface{}{"collection": "orders", "columns": columns}}}, Edges: []model.Edge{{ID: "edge", Source: "source", Target: "sink"}}}
 	if err := validatePipeline(def); err != nil {

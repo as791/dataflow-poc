@@ -51,7 +51,7 @@ variable "service_account_email" {
 variable "repo" {
   description = "Git repo cloned on first boot"
   type        = string
-  default     = "https://github.com/as791/dataflow-poc.git"
+  default     = "https://github.com/Cohestra/cohestra-dataflow.git"
 }
 
 variable "branch" {

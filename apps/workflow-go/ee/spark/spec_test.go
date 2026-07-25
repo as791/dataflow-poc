@@ -1,3 +1,5 @@
+// Source-available under the Elastic License 2.0. See ee/LICENSE.
+
 package spark
 
 import (

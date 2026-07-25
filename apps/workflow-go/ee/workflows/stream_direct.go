@@ -1,3 +1,5 @@
+// Source-available under the Elastic License 2.0. See ee/LICENSE.
+
 package workflows
 
 import (
@@ -5,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dataflow-poc/workflow-go/internal/model"
+	corewf "github.com/dataflow-poc/workflow-go/internal/workflows"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
@@ -20,11 +23,11 @@ func StreamDirectWorkflow(ctx workflow.Context, input model.WorkflowInput) (mode
 		input.Environment = model.Environment(info.Namespace)
 	}
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{TaskQueue: "dynamic-activities-" + string(input.Environment), StartToCloseTimeout: 10 * time.Minute, HeartbeatTimeout: time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: 2 * time.Second, MaximumInterval: time.Minute, MaximumAttempts: 5}})
-	plan, err := buildPlan(input.Definition.Nodes, input.Definition.Edges)
+	plan, err := corewf.BuildPlan(input.Definition.Nodes, input.Definition.Edges)
 	if err != nil {
 		return model.ExecutionStatus{}, err
 	}
-	state := &workflowState{Results: map[string]model.NodeResult{}}
+	state := &corewf.WorkflowState{Results: map[string]model.NodeResult{}}
 	metrics := input.Stream
 	if metrics == nil {
 		metrics = &model.StreamStatus{}
@@ -45,7 +48,7 @@ func StreamDirectWorkflow(ctx workflow.Context, input model.WorkflowInput) (mode
 	}
 	pauseCh, resumeCh, cancelCh := workflow.GetSignalChannel(ctx, "pause"), workflow.GetSignalChannel(ctx, "resume"), workflow.GetSignalChannel(ctx, "cancel")
 	for iteration := 0; iteration < streamContinueAfter; iteration++ {
-		drainSignals(pauseCh, resumeCh, cancelCh, state)
+		corewf.DrainSignals(pauseCh, resumeCh, cancelCh, state)
 		for state.Paused && !state.Cancelled {
 			selector := workflow.NewSelector(ctx)
 			selector.AddReceive(resumeCh, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil); state.Paused = false })
@@ -88,7 +91,7 @@ func StreamDirectWorkflow(ctx workflow.Context, input model.WorkflowInput) (mode
 	return model.ExecutionStatus{}, workflow.NewContinueAsNewError(ctx, StreamDirectWorkflow, input)
 }
 
-func runStreamBatch(ctx workflow.Context, input model.WorkflowInput, plan executionPlan) (map[string]model.NodeResult, map[string]interface{}, string, int, int64, error) {
+func runStreamBatch(ctx workflow.Context, input model.WorkflowInput, plan corewf.ExecutionPlan) (map[string]model.NodeResult, map[string]interface{}, string, int, int64, error) {
 	results := map[string]model.NodeResult{}
 	var checkpoint map[string]interface{}
 	connectionID, count := "", 0
@@ -96,7 +99,7 @@ func runStreamBatch(ctx workflow.Context, input model.WorkflowInput, plan execut
 	for _, level := range plan.Levels {
 		for _, node := range level {
 			if node.Type == "source" {
-				connectionID = sourceConnectionID(input.Definition.ID, node)
+				connectionID = corewf.SourceConnectionID(input.Definition.ID, node)
 				var page struct {
 					OutputRef   *model.DataRef         `json:"outputRef"`
 					RecordCount int                    `json:"recordCount"`
@@ -111,7 +114,7 @@ func runStreamBatch(ctx workflow.Context, input model.WorkflowInput, plan execut
 				results[node.ID] = model.NodeResult{NodeID: node.ID, Status: "success", OutputRef: page.OutputRef, Meta: map[string]interface{}{"recordCount": count}}
 				continue
 			}
-			result, err := runNode(ctx, input, node, plan.Incoming, results)
+			result, err := corewf.RunNode(ctx, input, node, plan.Incoming, results)
 			if err != nil || result.Status == "failed" {
 				if err == nil {
 					err = fmt.Errorf("node %s failed: %s", node.ID, result.Error)

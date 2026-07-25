@@ -2,7 +2,11 @@ DataFlow
 Copyright 2025 DataFlow Contributors
 
 This product includes software developed by the DataFlow Contributors
-(https://github.com/as791/dataflow-poc).
+(https://github.com/Cohestra/cohestra-dataflow).
+
+This repository is Apache-2.0 licensed, with one exception: the contents of
+apps/workflow-go/ee/ are source-available under the Elastic License 2.0 (see
+apps/workflow-go/ee/LICENSE).
 
 Third-party software used by this project is listed in each workspace's
 dependency manifest (go.mod, package.json) and is subject to its own license
