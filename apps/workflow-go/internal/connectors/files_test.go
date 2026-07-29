@@ -2,6 +2,8 @@ package connectors
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"os"
 	"testing"
 
@@ -11,7 +13,24 @@ import (
 	iceio "github.com/apache/iceberg-go/io"
 	icetable "github.com/apache/iceberg-go/table"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 )
+
+func TestFixedHostKeyRejectsUnexpectedServer(t *testing.T) {
+	_, expectedPrivate, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	expected, err := ssh.NewPublicKey(expectedPrivate.Public())
+	require.NoError(t, err)
+	callback, err := fixedHostKey(string(ssh.MarshalAuthorizedKey(expected)))
+	require.NoError(t, err)
+	require.NoError(t, callback("sftp.example:22", nil, expected))
+
+	_, unexpectedPrivate, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	unexpected, err := ssh.NewPublicKey(unexpectedPrivate.Public())
+	require.NoError(t, err)
+	require.Error(t, callback("sftp.example:22", nil, unexpected))
+}
 
 func TestIcebergRESTMinIOAppendAndRetry(t *testing.T) {
 	uri := os.Getenv("ICEBERG_TEST_CATALOG_URL")

@@ -148,7 +148,11 @@ func (r *Runtime) sftpClient(ctx context.Context, id string) (*sftp.Client, func
 		}
 		auth = append(auth, ssh.PublicKeys(signer))
 	}
-	sshConfig := &ssh.ClientConfig{User: stringValue(cfg["user"]), Auth: auth, HostKeyCallback: ssh.InsecureIgnoreHostKey(), Timeout: 10 * time.Second}
+	hostKeyCallback, err := fixedHostKey(stringValue(cfg["hostKey"]))
+	if err != nil {
+		return nil, nil, err
+	}
+	sshConfig := &ssh.ClientConfig{User: stringValue(cfg["user"]), Auth: auth, HostKeyCallback: hostKeyCallback, Timeout: 10 * time.Second}
 	address := net.JoinHostPort(stringValue(cfg["host"]), fmt.Sprint(int(firstNumber(cfg["port"], 22))))
 	connection, err := ssh.Dial("tcp", address, sshConfig)
 	if err != nil {
@@ -160,6 +164,14 @@ func (r *Runtime) sftpClient(ctx context.Context, id string) (*sftp.Client, func
 		return nil, nil, err
 	}
 	return client, func() { client.Close(); connection.Close() }, nil
+}
+
+func fixedHostKey(value string) (ssh.HostKeyCallback, error) {
+	hostKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(value))
+	if err != nil {
+		return nil, fmt.Errorf("invalid SFTP host key: %w", err)
+	}
+	return ssh.FixedHostKey(hostKey), nil
 }
 func (r *Runtime) sftpFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
 	client, closeFn, err := r.sftpClient(ctx, stringValue(p.Config["connectionId"]))
