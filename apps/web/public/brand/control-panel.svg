@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
-  <title id="title">Cohestra Control Panel</title>
-  <rect width="64" height="64" rx="15" fill="#172033"/>
-  <rect x="11" y="13" width="42" height="38" rx="7" fill="none" stroke="#8D82EE" stroke-width="3"/>
-  <path d="M20 23h24M20 32h24M20 41h24" stroke="#22C8D7" stroke-linecap="round" stroke-width="3"/>
-  <g fill="#fff"><circle cx="27" cy="23" r="4"/><circle cx="39" cy="32" r="4"/><circle cx="30" cy="41" r="4"/></g>
-</svg>
