@@ -1,4 +1,5 @@
 <div align="center">
+  <img src="apps/web/public/brand/dataflow.svg" width="140" height="140" alt="Cohestra Dataflow icon">
   <h1>DataFlow</h1>
   <p><strong>Visual, durable data pipelines powered by Go and Temporal</strong></p>
 </div>
