@@ -114,7 +114,7 @@ func validateCredential(provider string, config, secret map[string]interface{}) 
 		}
 		return required(secret, "accessKeyId", "secretAccessKey")
 	case "sftp":
-		if err := required(config, "host", "user"); err != nil {
+		if err := required(config, "host", "user", "hostKey"); err != nil {
 			return err
 		}
 		if secret["password"] == nil && secret["privateKey"] == nil {

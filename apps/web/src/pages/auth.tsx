@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Boxes, ShieldCheck } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 import { Navigate, useLocation, useSearchParams } from 'react-router-dom';
+import { AtomMark } from '../components/AtomMark';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api';
 
@@ -14,7 +15,7 @@ function AuthShell({ title, subtitle, children }: { title: string; subtitle?: st
         <div className="w-full max-w-md rounded-[24px] border border-white/[0.1] bg-[#10131c]/78 p-8 shadow-glass-glow backdrop-blur-2xl">
           <div className="mb-8 flex items-center gap-3">
             <span className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-gradient-to-br from-brand-400 to-brand-600 shadow-lg shadow-brand-500/20">
-              <Boxes size={20} aria-hidden="true" />
+              <AtomMark size={22} />
             </span>
             <div><p className="text-sm font-semibold">DataFlow</p><p className="text-[10px] uppercase tracking-[.16em] text-white/30">Orchestration cloud</p></div>
           </div>
