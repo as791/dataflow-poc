@@ -1,0 +1,45 @@
+name: Integration
+
+on:
+  schedule:
+    - cron: '17 3 * * *' # daily, off the hour to avoid GH Actions cron pile-up
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compose-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate .env + worker keypair
+        run: NO_UP=1 ./scripts/bootstrap.sh
+
+      - name: Start stack
+        run: docker compose up -d --build
+
+      - name: Wait for API
+        run: ./scripts/wait-for.sh localhost:4000 -- echo "API port open"
+
+      - name: Wait for API health
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4000/health && exit 0
+            sleep 2
+          done
+          echo "API never became healthy" >&2
+          exit 1
+
+      - name: Run smoke test
+        run: ./scripts/smoke-test.sh
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --tail=200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
