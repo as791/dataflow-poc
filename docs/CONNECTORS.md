@@ -1,77 +1,65 @@
 # Connectors
 
-DataFlow connectors come in two flavors, both served by the Go connector
-registry that feeds worker dispatch, the API catalog
-endpoint (`GET /api/connectors/catalog`), the canvas palette, and the AI
-builder:
+DataFlow exposes **25 connector roles: 13 sources and 12 sinks**. The live
+catalog is available at `GET /api/connectors/catalog` and is filtered by the
+workspace's enabled features.
 
-1. **Manifest connectors** — a single JSON file. No code. For REST/HTTP sources
-   with cursor/page/offset pagination and optional incremental watermarking.
-2. **Coded connectors** — hand-written Go for anything a manifest can't
-   express (OAuth, changes-feeds, GraphQL, SDK auth). The existing Google
-   Sheets / Drive / Excel / Zendesk connectors are coded.
+| 13 sources | 12 sinks |
+| --- | --- |
+| Zendesk | PostgreSQL |
+| Google Sheets | ClickHouse |
+| Google Drive | MySQL |
+| Microsoft Excel | MongoDB |
+| Custom HTTP API | Amazon S3 |
+| PostgreSQL | Kafka / Redpanda |
+| MySQL | SFTP |
+| MongoDB | Snowflake |
+| Amazon S3 | Apache Iceberg |
+| Kafka / Redpanda | Google Sheets |
+| SFTP | Webhook |
+| Snowflake | DataFlow managed store |
+| Apache Iceberg |  |
 
-## Adding a REST source with zero code
+## Connect through the application
 
-Drop a `*.manifest.json` file into a directory the registry loads:
+1. Open **Connectors** and choose a service.
+2. Enter its connection details or complete OAuth.
+3. Test and save the connection.
+4. Select the saved connection from a source or sink node on the pipeline
+   canvas.
 
-- **Bundled examples:** `connectors/manifests/` (mounted into the image).
-- **Your own, no rebuild:** set `CONNECTORS_DIR` to a mounted directory and
-  restart the worker + API.
+Credentials are stored separately from pipeline definitions and can be reused
+across pipelines.
 
-It then appears in the catalog, the canvas palette, and the AI builder, and the
-worker can run it — no code changes.
+## Connect through an HTTP client library
 
-### Worked example
+Routes accept `Authorization: Bearer <JWT-or-API-token>`, so any HTTP client can
+create and reuse connections:
 
-`jsonplaceholder.manifest.json` (a public, no-auth REST API):
+```js
+const response = await fetch("https://YOUR_DATAFLOW_HOST/api/connectors", {
+  method: "POST",
+  headers: {
+    "Authorization": `Bearer ${process.env.DATAFLOW_TOKEN}`,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    provider: "postgres",
+    name: "orders-production",
+    config: { host: "db.example.com", database: "orders", user: "dataflow" },
+    secret: { password: process.env.POSTGRES_PASSWORD },
+  }),
+});
 
-```json
-{
-  "activityType": "rest.jsonplaceholder.fetch",
-  "label": "JSONPlaceholder (demo REST)",
-  "kind": "source",
-  "url": "https://jsonplaceholder.typicode.com/posts",
-  "method": "GET",
-  "pagination": { "style": "page", "param": "_page", "limitParam": "_limit", "limit": 20 },
-  "fields": [
-    { "key": "userId", "label": "Filter by userId (optional)", "type": "text" }
-  ]
-}
+if (!response.ok) throw new Error(`DataFlow returned ${response.status}`);
+const { id: connectionId } = await response.json();
 ```
 
-### Manifest schema
+Use `GET /api/connectors` to list saved connections. Keep API tokens and
+connector secrets in environment variables or a secret manager.
 
-| Field | Required | Notes |
-|-------|----------|-------|
-| `activityType` | yes | Unique catalog key, e.g. `rest.acme.fetch`. |
-| `label` | yes | Display name in the palette/AI. |
-| `kind` | yes | `source` or `sink`. |
-| `url` | yes | May contain `{placeholders}` filled from node config. |
-| `method` | no | Default `GET`. |
-| `recordsPath` | no | Dotted path to the records array in the body (e.g. `data.items`). |
-| `headers` | no | Static headers merged with per-node config. |
-| `auth` | no | `{ "type": "bearer"|"header"|"basic", "tokenField": "<config key>", "headerName": "..." }`. The secret comes from node config (declare it in `fields`). |
-| `pagination` | no | `{ "style": "cursor"|"page"|"offset", "param", "cursorPath", "limitParam", "limit" }`. |
-| `incremental` | no | `{ "sinceParam": "updated_after", "recordTimestampPath": "updated_at" }`. |
-| `fields` | no | Extra config inputs rendered on the node (same `FieldSpec` shape as the catalog). |
+## Administrator-provided REST connectors
 
-Pagination and incremental state are driven by
-`apps/workflow-go/internal/connectors/http.go`.
-
-## Adding a coded plugin
-
-When a manifest is not enough, add a source or handler to the Go runtime:
-
-```go
-func (r *Runtime) registerAcme() {
-    r.Sources["acme.fetch"] = r.acmeFetch
-}
-
-func (r *Runtime) acmeFetch(ctx context.Context, p SourceParams) (SourceResult, error) {
-    return SourceResult{Records: []interface{}{}, NextCursor: p.Cursor}, nil
-}
-```
-
-Add catalog metadata to the frontend catalog when the connector needs canvas
-configuration fields.
+Operators can mount declarative REST connector manifests through deployment
+configuration. They appear in the same UI and API catalog after the service is
+restarted; application users do not edit source code or rebuild images.

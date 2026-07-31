@@ -84,7 +84,7 @@ export function AppShell() {
 
         {/* brand mark */}
         <NavLink to="/pipelines" aria-label="DataFlow home" className="mb-2 flex h-9 w-9 items-center justify-center rounded-[10px]
-          bg-gradient-to-br from-brand-400 to-brand-600 shadow-md shadow-brand-500/20">
+          border border-gray-200 bg-white shadow-md dark:border-white/[0.12]">
           <AtomMark size={22} />
         </NavLink>
         <div className="my-1 h-px w-8 bg-gray-200 dark:bg-white/[0.08]" />

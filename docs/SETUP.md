@@ -1,86 +1,95 @@
-# Local setup
+# Self-host DataFlow
 
-Updated: 2026-07-10
+These deployment paths use repository configuration and do not require changes
+to application source code.
 
-## Requirements
+## Docker Compose
 
-- Docker Desktop: at least 8 GB RAM and 4 CPUs.
-- Node.js 20+ and npm.
-- Go version declared by `apps/workflow-go/go.mod`.
-- Kind, `kubectl`, and Helm.
-
-## Full local stack
+Requirements: Docker Desktop or Docker Engine with Compose and at least 8 GB of
+memory.
 
 ```bash
+git clone https://github.com/Cohestra/cohestra-dataflow.git
+cd cohestra-dataflow
+cp .env.example .env
+node scripts/gen-worker-keypair.js
+docker compose up -d
+```
+
+Open `http://localhost:3002`, then verify the API:
+
+```bash
+docker compose ps
+curl --fail http://localhost:3002/api/health
+```
+
+Stop without deleting stored data with `docker compose down`.
+
+## Local Kubernetes
+
+Install Docker, Kind, `kubectl`, and Helm, then run:
+
+```bash
+git clone https://github.com/Cohestra/cohestra-dataflow.git
+cd cohestra-dataflow
 ./scripts/bootstrap.sh
 ./scripts/smoke-test.sh
 ```
 
-Bootstrap creates `.env`, generates JWT/OAuth/Temporal keys and the worker
-keypair, builds local images, creates a Kind cluster, and installs Helm. Secrets
-are rendered to a mode-0600 temporary values file and deleted on exit.
+Bootstrap creates the local configuration, builds images, creates the Kind
+cluster, and installs the Helm chart. Open `http://localhost:3002`.
 
-Local endpoints:
-
-| Service | URL |
-| --- | --- |
-| Web | `http://localhost:3002` |
-| API health | `http://localhost:3002/api/health` through the web proxy |
-| Temporal UI | `http://localhost:8082` |
-| Cohestra UI | `http://localhost:8080` when installed |
-
-Delete local data deliberately:
+Delete the local cluster and its data with:
 
 ```bash
 kind delete cluster --name dataflow
 ```
 
-## Frontend development
+## Existing Kubernetes cluster
+
+Supply image references, a public application URL, storage classes, and secrets
+through your normal Helm values and secret-management workflow:
 
 ```bash
-npm install
-npm -w apps/web run dev
-npm -w apps/web run build
-npm -w apps/web test
-npm -w apps/web run test:e2e
+helm upgrade --install dataflow deploy/helm/dataflow \
+  --namespace dataflow \
+  --create-namespace \
+  --values my-dataflow-values.yaml
+
+kubectl rollout status deployment/api -n dataflow
+kubectl rollout status deployment/web -n dataflow
 ```
 
-Vite runs at `http://localhost:3000` and proxies `/api` to the local backend.
-Route pages are lazy-loaded; a production build must not emit an oversized
-single entry chunk warning.
+For production, use persistent storage and highly available backing services
+appropriate to your SLOs. Expose only the web ingress; keep databases, workers,
+and internal service ports private.
 
-## Go backend development
+## GCP with Terraform
+
+The `infra/` directory is a Terraform starting point for GCP. Review the plan
+in your own project and keep runtime secrets out of Terraform state.
 
 ```bash
-cd apps/workflow-go
-go test -race ./...
-go vet ./...
+cd infra
+terraform init
+terraform plan \
+  -var='project_id=YOUR_PROJECT' \
+  -var='admin_cidr=YOUR_PUBLIC_IP/32'
+terraform apply \
+  -var='project_id=YOUR_PROJECT' \
+  -var='admin_cidr=YOUR_PUBLIC_IP/32'
 ```
 
-The repository vendors Go modules because the Docker build uses
-`go build -mod=vendor`. After changing dependencies:
+Treat the checked-in Terraform as a reference, not a universal production
+blueprint. Adapt networking, managed services, backups, availability, and
+ingress to your organization's standards. Use GCP Secret Manager or your
+existing secret manager for runtime credentials.
 
-```bash
-go mod tidy
-go mod vendor
-```
+## After deployment
 
-Run processes separately when debugging:
-
-```bash
-npm run dev:api
-npm run dev:workflow-worker
-npm run dev:activity-worker
-```
-
-## Configuration rules
-
-- `.env.example` documents local variables; `.env` is ignored.
-- Everything under `secrets/` except `.gitkeep` is ignored.
-- Production must set `NODE_ENV=production` and a valid
-  `TEMPORAL_PAYLOAD_ENCRYPTION_KEY`; plaintext Temporal history is development-only.
-- Never use production credentials in deployed Playwright fixtures.
-
-For GCP, persistence, backups, and Secret Manager, use
-[DEPLOYMENT_GCP.md](DEPLOYMENT_GCP.md). For system boundaries, use
-[ARCHITECTURE.md](ARCHITECTURE.md).
+1. Create the first workspace owner.
+2. Add and test connector credentials in **Connectors**.
+3. Run a small source-to-sink pipeline.
+4. Confirm run history, lineage, and destination records.
+5. Configure TLS, monitoring, backups, and credential rotation before using
+   production data.

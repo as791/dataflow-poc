@@ -1,10 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
-  <title id="title">Dataflow</title>
-  <rect width="64" height="64" rx="15" fill="#6557D9"/>
-  <g fill="none" stroke="#fff" stroke-linecap="round" stroke-width="4">
-    <path d="M10 18h9c10 0 12 14 22 14h13"/>
-    <path d="M10 32h12c8 0 10 14 19 14h13" opacity=".72"/>
-    <path d="M10 46h9c10 0 12-28 22-28h13" opacity=".44"/>
-  </g>
-  <g fill="#fff"><circle cx="54" cy="18" r="3"/><circle cx="54" cy="32" r="3"/><circle cx="54" cy="46" r="3"/></g>
+  <title id="title">Cohestra DataFlow</title>
+  <rect width="64" height="64" rx="15" fill="#fff"/>
+  <rect x="10" y="15" width="12" height="36" rx="6" fill="#efc17e"/>
+  <rect x="26" y="15" width="12" height="36" rx="6" fill="#6c5ce7"/>
+  <rect x="42" y="15" width="12" height="36" rx="6" fill="#e58a17"/>
 </svg>

@@ -1,165 +1,107 @@
 <div align="center">
-  <h1>DataFlow</h1>
-  <p><strong>Visual, durable data pipelines powered by Go and Temporal</strong></p>
+  <img src="./cohestra-org-avatar.png" alt="Cohestra" width="112" />
+  <h1>Cohestra DataFlow</h1>
+  <p><strong>Visual, durable data pipelines powered by Go and Temporal.</strong></p>
+  <p>
+    <a href="https://dataflow.cohestra.dev">Open DataFlow</a> ·
+    <a href="https://cohestra.dev/docs/dataflow">Documentation</a> ·
+    <a href="https://cohestra.dev/docs/dataflow/setup">Self-hosting</a>
+  </p>
 </div>
 
-DataFlow is an Apache-2.0 open-core data-pipeline platform in pre-release demo
-stage. A React/Vite editor creates versioned DAGs; Go API and workers execute
-them durably through Temporal. PostgreSQL stores tenant and pipeline state,
-Redis carries bounded events/rate limits, ClickHouse serves analytics, and
-encrypted `DataRef` objects move larger payloads outside workflow history.
+DataFlow is an open-core platform for building, running, and observing data
+pipelines. Use the visual canvas or AI-assisted builder, promote immutable
+versions between environments, and let Temporal resume work safely after
+failures.
 
-## Current status
+The community code is licensed under **GNU AGPL-3.0**. Enterprise-only code in
+`apps/workflow-go/ee/` is source-available under **Elastic License 2.0**.
 
-Good fit: local development, controlled product demos, architecture and
-connector validation.
+> DataFlow is pre-release software. It is suitable for local evaluation and
+> controlled pilots; production readiness and high availability depend on your
+> deployment and backing services.
 
-Not yet claimed: production readiness, HA, 10K/1M-DAG capacity, SOC 2/ISO 27001
-compliance, or penetration-test assurance. Release blockers and acceptance
-criteria are explicit in the [roadmap](docs/ROADMAP.md) and
-[pre-release audit](docs/audit/2026-07-10-pre-release-audit.md).
+## Get started
 
-## Features
+Try the hosted app at [dataflow.cohestra.dev](https://dataflow.cohestra.dev), or
+run it locally with Docker Compose:
 
-- React Flow canvas with Mermaid round-trip editing and local Ollama drafting.
-- Immutable pipeline versions, Integration/Production lifecycle, backfills,
-  pause/resume/cancel, and Temporal retries.
-- Manifest-driven HTTP connectors plus coded database, SaaS, file, Kafka,
-  Snowflake, ClickHouse, Iceberg, SFTP, Google, Microsoft, and Zendesk paths.
-- Cursor/CDC checkpoints, dedupe state, data contracts, lineage, quality,
-  alerts, analytics dashboards, and OpenLineage import/export.
-- Tenant-aware PostgreSQL RLS, encrypted credentials/payloads, audit events,
-  and owner/member workspace access.
+```bash
+git clone https://github.com/Cohestra/cohestra-dataflow.git
+cd cohestra-dataflow
+cp .env.example .env
+node scripts/gen-worker-keypair.js
+docker compose up -d
+```
+
+Open `http://localhost:3002`. For local Kubernetes, an existing cluster, or a
+GCP/Terraform deployment, use the [self-hosting guide](https://cohestra.dev/docs/dataflow/setup).
+
+## What is included
+
+- Visual pipeline canvas and AI-assisted pipeline drafting.
+- Durable execution, retries, schedules, backfills, pause, resume, and cancel.
+- Immutable versions with Integration and Production promotion gates.
+- Runtime lineage, data quality, alerts, analytics, audit events, and OpenLineage.
+- **13 built-in sources and 12 built-in sinks**, with saved credentials and
+  OAuth where supported.
+- Tenant-aware PostgreSQL row-level security and encrypted credentials and
+  payloads.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    Browser --> Web["React/Vite + nginx"]
-    Web --> API["Go API"]
-    API --> PG["PostgreSQL"]
-    API --> Redis
-    API --> Temporal
-    API --> CH["ClickHouse"]
-    Temporal --> Workflow["Go workflow workers"]
-    Workflow --> Activity["Go activity workers"]
-    Activity --> Connectors
-    Activity --> Payloads["Encrypted DataRef storage"]
-```
+| Layer | Components | Responsibility |
+| --- | --- | --- |
+| Experience | React/Vite web app | Canvas, catalog, runs, lineage, and administration |
+| API | Go API | Identity, tenants, pipeline lifecycle, run control, monitoring, and billing |
+| Orchestration | Temporal + Go workflow workers | Durable DAG history, queues, retries, timers, and signals |
+| Data plane | Go activity workers | Connector I/O, checkpoints, payload handling, and sink writes |
+| State | PostgreSQL, Redis, ClickHouse, object storage | Authoritative metadata, events, analytics, and encrypted large payloads |
 
-The backend remains a modular monolith with three independently scalable
-processes. Microservice and micro-frontend extraction seams are documented in
-[Architecture](docs/ARCHITECTURE.md); premature network splits are deliberate
-non-goals.
+See the [visual architecture guide](https://cohestra.dev/docs/dataflow/architecture)
+for the full runtime flow.
 
-## Quick start
+## Connect data
 
-Requirements: Docker Desktop with at least 8 GB RAM, Node.js 20+, Kind,
-`kubectl`, and Helm.
+Open **Connectors** in DataFlow, save a connection, test it, and select that
+connection from a source or sink node. The authenticated REST API can also be
+used from `fetch`, `curl`, or any HTTP client library. No product source changes
+or image rebuilds are required.
 
-```bash
-./scripts/bootstrap.sh
-./scripts/smoke-test.sh
-```
+See the [connector catalog and API examples](https://cohestra.dev/docs/dataflow/connectors).
 
-Open `http://localhost:3002`. Bootstrap generates local secrets and installs
-the full Kind/Helm stack. See [Local setup](docs/SETUP.md) for development and
-test commands.
-
-## Live demo host
-
-Current GCE demo box (IP rotates when the VM is recreated — repoint the
-`dataflow` A record in the `cohestra.dev` DNS zone if that happens):
-
-- App: https://dataflow.cohestra.dev
-- Deploy: `sudo git pull --ff-only`, rebuild `dataflow-app:local` /
-  `dataflow-web:local` images, `sudo kind load docker-image --name dataflow <img>`
-  for both, then `kubectl rollout restart deploy/api deploy/web -n dataflow`
-  (~10-15 min). See [GCP deployment](docs/DEPLOYMENT_GCP.md) for a fresh
-  Terraform-provisioned host — `appUrl` derives from the reserved static IP,
-  so it changes per deployment.
-
-## Using DataFlow: build and run a pipeline
-
-1. Open the app, sign in, land on the pipeline canvas.
-2. Drag a source node from the palette (any connector in the catalog) onto
-   the canvas, configure its fields (URL, auth, filters).
-3. Drag a sink node, connect source → sink (add transforms in between as
-   needed). Or describe the pipeline in the AI builder box and let it draft
-   the graph, then edit by hand.
-4. Save — this creates an immutable pipeline version.
-5. Promote through the lifecycle: Integration (test run) → Production.
-6. Run manually, or let Temporal schedule/trigger it; watch progress, retries,
-   and backfills from the run view.
-7. Check Lineage, Data Quality, and Analytics tabs for output visibility and
-   OpenLineage export.
-
-## Registering a new connector
-
-Two paths, see [Connector development](docs/CONNECTORS.md) for full detail:
-
-- **No-code (REST/HTTP source):** drop a `*.manifest.json` file into
-  `connectors/manifests/` (bundled) or a directory pointed to by
-  `CONNECTORS_DIR` (no rebuild — restart worker + API). It auto-appears in
-  the catalog, canvas palette, and AI builder. Example:
-
-  ```json
-  {
-    "activityType": "rest.jsonplaceholder.fetch",
-    "label": "JSONPlaceholder (demo REST)",
-    "kind": "source",
-    "url": "https://jsonplaceholder.typicode.com/posts",
-    "method": "GET",
-    "pagination": { "style": "page", "param": "_page", "limitParam": "_limit", "limit": 20 }
-  }
-  ```
-
-- **Coded (OAuth, GraphQL, SDK auth, changes-feeds):** register a Go source/
-  sink in `apps/workflow-go/internal/connectors/`, then add catalog metadata
-  on the frontend if it needs canvas config fields.
-
-## Demo video
-
-<!-- Record a walkthrough (build → deploy → run → lineage/analytics), upload
-to YouTube, then replace this line with the link. -->
-
-[Watch on YouTube](TODO-add-youtube-link-here)
-
-## Repository layout
+## Repository structure
 
 | Path | Purpose |
 | --- | --- |
-| `apps/workflow-go` | Go API, Temporal workflow/activity workers, connectors, storage |
-| `apps/web` | React UI, route features, design components, deployed E2E tests |
-| `packages/shared` | Browser pipeline/Mermaid/lineage contracts |
-| `cohestra` | Compute control plane for Flink/Spark execution |
-| `connectors/manifests` | Declarative connector plugins |
+| `apps/web` | React application, routes, and UI components |
+| `apps/workflow-go` | Go API, Temporal workers, connector runtime, and storage |
+| `packages/shared` | Shared pipeline, catalog, lineage, and entitlement contracts |
+| `connectors/manifests` | Deploy-time declarative connector manifests |
 | `db` | PostgreSQL and ClickHouse migrations |
-| `deploy` | Kind and Helm demo deployment |
-| `infra` | GCP demo infrastructure |
-| `docs` | Canonical architecture, operations, security, roadmap, audits |
-| `tests` | Cross-runtime contracts and benchmarks |
+| `deploy/helm/dataflow` | Kubernetes Helm chart |
+| `infra` | Optional Terraform deployment reference |
+| `docs` | Architecture, operations, security, API contracts, and decisions |
+| `tests` | Cross-runtime contracts and deployment verification |
 
 ## Documentation
 
-- [Documentation index](docs/README.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [GCP deployment and persistence](docs/DEPLOYMENT_GCP.md)
-- [Security and compliance readiness](docs/SECURITY_COMPLIANCE.md)
-- [Pending roadmap](docs/ROADMAP.md)
-- [Backend contracts](docs/BACKEND_CONTRACTS.md)
-- [Connector development](docs/CONNECTORS.md)
+| Guide | Use it for |
+| --- | --- |
+| [Documentation home](https://cohestra.dev/docs/dataflow) | User-facing documentation index |
+| [Architecture](https://cohestra.dev/docs/dataflow/architecture) | Runtime flow, process boundaries, and data ownership |
+| [Self-hosting](https://cohestra.dev/docs/dataflow/setup) | Docker, Kubernetes/Helm, and GCP/Terraform |
+| [Connectors](https://cohestra.dev/docs/dataflow/connectors) | Supported sources and sinks, UI setup, and API use |
+| [Backend contracts](docs/BACKEND_CONTRACTS.md) | HTTP and Temporal compatibility surface |
+| [Security](docs/SECURITY_COMPLIANCE.md) | Security baseline and release controls |
+| [Roadmap](docs/ROADMAP.md) | Pending work and acceptance criteria |
 
-## Contributing and security
+## Contributing, security, and license
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md),
 and [GOVERNANCE.md](GOVERNANCE.md). Report vulnerabilities privately using
-[SECURITY.md](SECURITY.md). Never commit `.env`, secret files, DB dumps,
-Terraform state, or generated credential values.
+[SECURITY.md](SECURITY.md).
 
-Licensed under the [GNU AGPL-3.0](LICENSE), except
-[`apps/workflow-go/ee/`](apps/workflow-go/ee/) — the enterprise features
-(Flink SQL, Spark SQL, realtime stream-direct) — which is source-available
-under the [Elastic License 2.0](apps/workflow-go/ee/LICENSE). Community builds
-(`go build ./...`) exclude `ee/` entirely; enterprise builds use
-`go build -tags ee ./...`.
+- Community code: [GNU AGPL-3.0](LICENSE)
+- Enterprise directory: [Elastic License 2.0](apps/workflow-go/ee/LICENSE)
+- Required notices: [NOTICE](NOTICE)

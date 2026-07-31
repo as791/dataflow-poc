@@ -81,7 +81,7 @@ export function NodePalette({
         bg-white/95 dark:bg-[#0d0f17]/95 backdrop-blur-lg shadow-sm dark:shadow-glass
         inset-x-3 bottom-3 h-16 flex-row px-2
         sm:inset-x-auto sm:left-3 sm:top-3 sm:bottom-3 sm:right-auto sm:h-auto sm:w-[52px] sm:flex-col sm:overflow-visible sm:px-0 sm:py-3">
-        <div className="mr-1 flex h-9 w-9 flex-none items-center justify-center rounded-[10px] bg-gradient-to-br from-brand-400 to-brand-600 shadow-md shadow-brand-500/20 sm:mr-0 sm:mb-2">
+        <div className="mr-1 flex h-9 w-9 flex-none items-center justify-center rounded-[10px] border border-gray-200 bg-white shadow-md dark:border-white/[0.12] sm:mr-0 sm:mb-2">
           <AtomMark size={20} />
         </div>
         <button title="All pipelines" aria-label="All pipelines" onClick={() => navigate('/pipelines')}
