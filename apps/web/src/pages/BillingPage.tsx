@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { Activity, CalendarClock, CreditCard, Gauge, Plus } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Activity, CalendarClock, CreditCard, Gauge } from 'lucide-react';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { useFeatures } from '../context/FeatureContext';
@@ -24,13 +24,8 @@ type Payment = {
   paid_at: string | null;
 };
 
-declare global {
-  interface Window {
-    Razorpay?: any;
-  }
-}
-
-const RAZORPAY_SCRIPT_SRC = 'https://checkout.razorpay.com/v1/checkout.js';
+const ADD_ON_EXECUTIONS = 10_000;
+const ADD_ON_PRICE = '$10';
 const PLANS = [
   { name: 'Free', price: '$0', runs: '500 workflow runs / month' },
   { name: 'Starter', price: '$10', runs: '10,000 workflow runs / month' },
@@ -47,26 +42,6 @@ const ADD_ONS: Array<{ key: PaidFeatureKey; label: string; billing: string; desc
   { key: 'governance', label: 'Governance', billing: 'Enterprise', description: 'Audit export and advanced controls.' },
 ];
 
-function loadRazorpay(): Promise<boolean> {
-  if (typeof window === 'undefined') return Promise.resolve(false);
-  if (window.Razorpay) return Promise.resolve(true);
-  return new Promise(resolve => {
-    const existing = document.querySelector<HTMLScriptElement>(
-      `script[src="${RAZORPAY_SCRIPT_SRC}"]`);
-    if (existing) {
-      existing.addEventListener('load', () => resolve(true));
-      existing.addEventListener('error', () => resolve(false));
-      return;
-    }
-    const s = document.createElement('script');
-    s.src = RAZORPAY_SCRIPT_SRC;
-    s.async = true;
-    s.onload = () => resolve(true);
-    s.onerror = () => resolve(false);
-    document.head.appendChild(s);
-  });
-}
-
 function fmtINR(paise: number) {
   return `₹${(paise / 100).toLocaleString('en-IN')}`;
 }
@@ -81,10 +56,8 @@ export function BillingPage() {
   const { features, availability, loading: featuresLoading, setFeature } = useFeatures();
   const [usage, setUsage] = useState<Usage | null>(null);
   const [history, setHistory] = useState<Payment[]>([]);
-  const [buying, setBuying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [featureBusy, setFeatureBusy] = useState<PaidFeatureKey | null>(null);
-  const pollRef = useRef<number | null>(null);
 
   async function refresh() {
     try {
@@ -98,60 +71,7 @@ export function BillingPage() {
 
   useEffect(() => {
     refresh();
-    return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current);
-    };
   }, []);
-
-  // After payment success, poll usage until extra_quota actually moves —
-  // protects against the webhook still being in flight.
-  function startPostPaymentPoll(prevExtra: number) {
-    if (pollRef.current) window.clearInterval(pollRef.current);
-    let attempts = 0;
-    pollRef.current = window.setInterval(async () => {
-      attempts++;
-      try {
-        const u: Usage = await api.getUsage();
-        setUsage(u);
-        if (u.extra_quota > prevExtra || attempts > 30) {
-          window.clearInterval(pollRef.current!);
-          pollRef.current = null;
-          api.getBillingHistory().then(setHistory).catch(() => {});
-        }
-      } catch { /* keep polling */ }
-    }, 2000);
-  }
-
-  async function buy(units: number) {
-    setBuying(true);
-    setError(null);
-    try {
-      const ok = await loadRazorpay();
-      if (!ok) throw new Error('Razorpay checkout failed to load');
-      const order = await api.createOrder(units);
-      const prevExtra = usage?.extra_quota ?? 0;
-      const rzp = new window.Razorpay({
-        key: order.razorpayKey,
-        amount: order.amount,
-        currency: order.currency,
-        order_id: order.orderId,
-        name: 'DataFlow',
-        description: `${units * 5} workflow executions`,
-        handler: () => startPostPaymentPoll(prevExtra),
-        modal: { ondismiss: () => setBuying(false) },
-        theme: { color: '#6366f1' },
-      });
-      rzp.on('payment.failed', (resp: any) => {
-        setError(resp?.error?.description ?? 'Payment failed');
-        setBuying(false);
-      });
-      rzp.open();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBuying(false);
-    }
-  }
 
   const used = usage?.used ?? 0;
   const limit = usage?.limit ?? 0;
@@ -221,11 +141,6 @@ export function BillingPage() {
             <dt className="flex items-center gap-2 text-xs text-gray-400 dark:text-white/40"><CreditCard size={14} /> Purchased</dt>
             <dd className="text-lg">
               {usage?.extra_quota ?? 0}
-              {usage && usage.extra_quota > 0 && (
-                <span className="opacity-60 text-sm ml-2">
-                  ({usage.extra_quota / 5} × 5)
-                </span>
-              )}
             </dd>
           </div>
           <div className="glass-card p-4">
@@ -234,15 +149,16 @@ export function BillingPage() {
           </div>
         </dl>
 
-        {user?.role === 'owner' && <div className="mt-6">
-          <button
-            className="glass-btn-primary"
-            disabled={buying}
-            onClick={() => buy(1)}
-          >
-            <Plus size={15} /> {buying ? 'Opening checkout…' : 'Buy 5 executions — ₹100'}
-          </button>
-        </div>}
+        <div className="glass-card mt-6 flex items-center justify-between gap-4 p-4">
+          <div>
+            <p className="font-medium">Additional workflow runs</p>
+            <p className="mt-1 text-xs opacity-60">{ADD_ON_EXECUTIONS.toLocaleString()} extra runs</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xl font-semibold">{ADD_ON_PRICE}</p>
+            <p className="text-xs opacity-50">add-on</p>
+          </div>
+        </div>
       </div>
 
       <div className="glass-panel p-6">
