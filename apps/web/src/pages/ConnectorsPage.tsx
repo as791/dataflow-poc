@@ -179,7 +179,7 @@ function CredentialModal({ onClose, onSaved, realtime, advanced, initialProvider
       } else if (provider === 's3') {
         body = { provider, name, config: { region: f.region || 'us-east-1', endpoint: f.endpoint, forcePathStyle: f.forcePathStyle === 'true' }, secret: { accessKeyId: f.accessKeyId, secretAccessKey: f.secretAccessKey } };
       } else if (provider === 'sftp') {
-        body = { provider, name, config: { host: f.host, port: f.port ? +f.port : 22, user: f.user, testPath: f.testPath }, secret: { password: f.password, privateKey: f.privateKey } };
+        body = { provider, name, config: { host: f.host, port: f.port ? +f.port : 22, user: f.user, hostKey: f.hostKey, testPath: f.testPath }, secret: { password: f.password, privateKey: f.privateKey } };
       } else if (provider === 'snowflake') {
         body = { provider, name, config: { account: f.account, user: f.user, warehouse: f.warehouse, database: f.database, schema: f.schema }, secret: { password: f.password } };
       } else if (provider === 'iceberg') {
@@ -277,6 +277,7 @@ function CredentialModal({ onClose, onSaved, realtime, advanced, initialProvider
               <input className="glass-input" placeholder="host" aria-label="Host" value={f.host ?? ''} onChange={set('host')} required />
               <input className="glass-input" placeholder="port (22)" aria-label="Port" value={f.port ?? ''} onChange={set('port')} />
               <input className="glass-input" placeholder="username" aria-label="Username" value={f.user ?? ''} onChange={set('user')} required />
+              <textarea className="glass-input" placeholder="server host public key" aria-label="Server host public key" value={f.hostKey ?? ''} onChange={e => setF(s => ({ ...s, hostKey: e.target.value }))} required />
               <input className="glass-input" type="password" placeholder="password" aria-label="Password" value={f.password ?? ''} onChange={set('password')} />
               <textarea className="glass-input" placeholder="private key (optional)" aria-label="Private key" value={f.privateKey ?? ''} onChange={e => setF(s => ({ ...s, privateKey: e.target.value }))} />
             </>
