@@ -52,8 +52,11 @@ func FlinkJobWorkflow(ctx workflow.Context, input model.WorkflowInput) (model.Ex
 		action := ""
 		selector.AddReceive(pauseCh, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil); action = "pause" })
 		selector.AddReceive(resumeCh, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil); action = "resume" })
-		selector.AddReceive(cancelCh, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil); action = "cancel" })
+		// rollback must win when both are already pending in the same workflow
+		// task (registration order breaks ties in workflow.Selector) — otherwise
+		// a queued rollback is silently dropped by an immediately-following cancel.
 		selector.AddReceive(rollbackCh, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil); action = "rollback" })
+		selector.AddReceive(cancelCh, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil); action = "cancel" })
 		selector.AddFuture(workflow.NewTimer(ctx, 5*time.Second), func(workflow.Future) {})
 		selector.Select(ctx)
 		if action != "" {
