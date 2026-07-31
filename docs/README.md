@@ -10,8 +10,7 @@ loop state, and pre-Go audits were removed; Git history is their archive.
 | Document | Purpose |
 | --- | --- |
 | [Architecture](ARCHITECTURE.md) | Current runtime, module boundaries, data ownership, and scale seams |
-| [Local setup](SETUP.md) | Supported local development and verification flow |
-| [GCP deployment](DEPLOYMENT_GCP.md) | Demo topology, persistence, secrets, backup, and production migration |
+| [Self-hosting](SETUP.md) | Docker, Kubernetes/Helm, and optional GCP/Terraform deployment |
 | [Security and compliance](SECURITY_COMPLIANCE.md) | Security baseline, release controls, and certification evidence plan |
 | [Roadmap](ROADMAP.md) | Pending work only, ordered from demo gate to one-million-DAG scale |
 | [Pre-release audit](audit/2026-07-10-pre-release-audit.md) | Full engineering, product, UX, security, and Ponytail findings |
@@ -21,7 +20,7 @@ loop state, and pre-Go audits were removed; Git history is their archive.
 | Document | Status |
 | --- | --- |
 | [Backend contracts](BACKEND_CONTRACTS.md) | Current public HTTP and Temporal compatibility surface |
-| [Connector development](CONNECTORS.md) | Current manifest and coded connector model |
+| [Connectors](CONNECTORS.md) | Supported sources and sinks, saved connections, and API usage |
 | [AI builder](AI_BUILDER.md) | Current local Ollama authoring flow |
 | [Medallion architecture](MEDALLION_ARCHITECTURE.md) | Current modeling guidance |
 | [ADR-002: Go backend](ADR-002-GO-BACKEND.md) | Accepted |
