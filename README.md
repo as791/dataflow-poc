@@ -1,5 +1,4 @@
 <div align="center">
-  <img src="apps/web/public/brand/dataflow.svg" width="140" height="140" alt="Cohestra Dataflow icon">
   <h1>DataFlow</h1>
   <p><strong>Visual, durable data pipelines powered by Go and Temporal</strong></p>
 </div>
@@ -158,7 +157,7 @@ and [GOVERNANCE.md](GOVERNANCE.md). Report vulnerabilities privately using
 [SECURITY.md](SECURITY.md). Never commit `.env`, secret files, DB dumps,
 Terraform state, or generated credential values.
 
-Licensed under the [Apache License 2.0](LICENSE), except
+Licensed under the [GNU AGPL-3.0](LICENSE), except
 [`apps/workflow-go/ee/`](apps/workflow-go/ee/) — the enterprise features
 (Flink SQL, Spark SQL, realtime stream-direct) — which is source-available
 under the [Elastic License 2.0](apps/workflow-go/ee/LICENSE). Community builds
