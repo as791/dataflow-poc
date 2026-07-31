@@ -1,7 +1,7 @@
 package workflows
 
 // Exported seam for the enterprise workflows under ee/, which reuse the core
-// DAG engine's plan/execution helpers. Core stays Apache-2.0; only ee/ links
+// DAG engine's plan/execution helpers. Core stays AGPL-3.0; only ee/ links
 // against these.
 
 type WorkflowState = workflowState
