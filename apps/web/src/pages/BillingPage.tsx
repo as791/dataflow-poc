@@ -31,6 +31,12 @@ declare global {
 }
 
 const RAZORPAY_SCRIPT_SRC = 'https://checkout.razorpay.com/v1/checkout.js';
+const PLANS = [
+  { name: 'Free', price: '$0', runs: '500 workflow runs / month' },
+  { name: 'Starter', price: '$10', runs: '10,000 workflow runs / month' },
+  { name: 'Growth', price: '$20', runs: '50,000 workflow runs / month' },
+  { name: 'Scale', price: '$200', runs: '5,000,000 workflow runs / month' },
+];
 const ADD_ONS: Array<{ key: PaidFeatureKey; label: string; billing: string; description: string }> = [
   { key: 'realtime', label: 'Realtime', billing: 'Usage metered', description: 'CDC and Kafka streaming connectors.' },
   { key: 'sparkSql', label: 'Spark SQL', billing: 'Paid add-on', description: 'Large batch and incremental lake processing.' },
@@ -173,6 +179,17 @@ export function BillingPage() {
         <h2 className="page-heading">Usage & billing</h2>
         <p className="page-subtitle mt-1">Track workflow executions and extend monthly capacity.</p>
       </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="DataFlow plans">
+        {PLANS.map(plan => (
+          <div className="glass-card p-4" key={plan.name}>
+            <p className="text-xs font-semibold uppercase tracking-[.12em] opacity-50">{plan.name}</p>
+            <p className="mt-2 text-2xl font-semibold">{plan.price}<span className="text-xs font-normal opacity-50"> / mo</span></p>
+            <p className="mt-2 text-xs opacity-60">{plan.runs}</p>
+          </div>
+        ))}
+      </div>
+
       <div className="glass-panel p-6">
         <div className="flex items-baseline justify-between mb-4">
           <h3 className="text-base font-semibold">Usage this month</h3>
