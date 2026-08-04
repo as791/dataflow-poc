@@ -14,7 +14,9 @@
 #   PIPELINE_ID    pipeline rowId to run         (required — no default, see above)
 #   AUTH_EMAIL     account to run as             (default: demo@dataflow.dev, matches demo-seed.sh)
 #   AUTH_PASSWORD  password for AUTH_EMAIL       (default: demo-dataflow-1)
-#   KILL_DELAY     seconds to wait after trigger before killing the worker (default: 3)
+#   KILL_DELAY     seconds to wait after trigger before killing the worker (default: 0 —
+#                  a 3-node demo pipeline can finish in ~1-2s, so waiting any longer risks
+#                  the run reaching a terminal phase before the kill)
 #   POLL_INTERVAL  seconds between status polls  (default: 2)
 #   MAX_ATTEMPTS   status polls before giving up (default: 90, i.e. ~3min at 2s)
 #
@@ -33,7 +35,7 @@ BASE_URL=${BASE_URL:-http://localhost:4000}
 PIPELINE_ID=${PIPELINE_ID:-}
 AUTH_EMAIL=${AUTH_EMAIL:-demo@dataflow.dev}
 AUTH_PASSWORD=${AUTH_PASSWORD:-demo-dataflow-1}
-KILL_DELAY=${KILL_DELAY:-3}
+KILL_DELAY=${KILL_DELAY:-0}
 POLL_INTERVAL=${POLL_INTERVAL:-2}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-90}
 
