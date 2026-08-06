@@ -1,0 +1,14 @@
+{
+  "goal": "Execute M0 (Airflow-wedge site reposition) fully; scaffold M1 (crash-demo script + audit surfacing scope); draft M3 outreach assets. Non-goals: M2 importer build, M4 monetization, governance features.",
+  "budget": {"global_notes": "soft budget; ~8 subagents max; reserve final 20% for review+verify", "per_node_retries": 2},
+  "nodes": [
+    {"id": "scout-site", "agent": "cavecrew-investigator", "model": "sonnet", "deps": [], "owns": [], "output": "line-map of website/app/page.tsx sections", "accept": "path:line list for hero, capabilities, table, stats, AI section, CTAs"},
+    {"id": "scout-product", "agent": "cavecrew-investigator", "model": "sonnet", "deps": [], "owns": [], "output": "line-map of run-history/promotion-gate/audit code + worker entrypoint", "accept": "path:line list sufficient to scope audit export + crash demo"},
+    {"id": "m0-edit", "agent": "cavecrew-builder", "model": "sonnet", "deps": ["scout-site"], "owns": ["website/app/page.tsx"], "output": "hero rewrite, table +Airflow/Dagster rows, stats cut, AI demote, CTA reorder", "accept": "builder verified re-read; no other files touched"},
+    {"id": "m0-review", "agent": "cavecrew-reviewer", "model": "sonnet", "deps": ["m0-edit"], "owns": [], "output": "diff findings", "accept": "0 red findings or fixed"},
+    {"id": "m1-scaffold", "agent": "general-purpose", "model": "sonnet", "deps": ["scout-product"], "owns": ["scripts/", "docs/"], "output": "crash-recovery demo script + audit-export scope doc", "accept": "script runs against local stack or documents exact blockers"},
+    {"id": "m3-assets", "agent": "general-purpose", "model": "sonnet", "deps": [], "owns": ["docs/outreach/"], "output": "HN/reddit outreach drafts + 20-target checklist template", "accept": "3 message variants, no fabricated claims"}
+  ],
+  "boundaries": ["no deploy", "no git push", "no external posting/DMs", "no pricing changes", "website/app/page.tsx single-owner: m0-edit only"],
+  "verify": "main thread: render check via test suite or preview after m0-edit; reviewer pass before done"
+}

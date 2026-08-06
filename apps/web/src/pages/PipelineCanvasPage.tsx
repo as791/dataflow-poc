@@ -12,7 +12,7 @@ import { useFeatures } from '../context/FeatureContext';
 import { api } from '../api';
 import { nodeTypes } from '../components/canvas/FlowNode';
 import { ExecutionMonitor } from '../components/canvas/ExecutionMonitor';
-import { useAiGenerate } from '../hooks/useAiGenerate';
+import { useAiGenerate, type AiGenerateResult } from '../hooks/useAiGenerate';
 import { useApiQuery } from '../hooks/useApiQuery';
 import { definitionToFlow, flowToDefinition } from '../utils/pipelineConvert';
 import { validatePipeline } from '../utils/validatePipeline';
@@ -78,7 +78,7 @@ export default function PipelineCanvasPage() {
   const [showAI, setShowAI] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiMessages, setAiMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
-  const [aiProposal, setAiProposal] = useState<any | null>(null);
+  const [aiProposal, setAiProposal] = useState<AiGenerateResult | null>(null);
   const [aiUndo, setAiUndo] = useState<any | null>(null);
   const { generate: aiGenerate, refine: aiRefine, loading: aiLoading, error: aiError } = useAiGenerate();
 
@@ -367,21 +367,33 @@ export default function PipelineCanvasPage() {
   const runAI = async () => {
     if (aiLoading || !aiPrompt.trim()) return;
     const hasExisting = nodes.length > 0;
+    const currentDefinition = buildDefinition();
+    const currentMermaid = hasExisting
+      ? definitionToMermaid(currentDefinition.nodes, currentDefinition.edges)
+      : '';
     setMsg(hasExisting ? 'Refining pipeline…' : 'Generating pipeline…');
 
     const result = hasExisting
-      ? await aiRefine(buildDefinition(), aiPrompt, definitionToMermaid(buildDefinition().nodes, buildDefinition().edges), aiMessages)
-      : await aiGenerate(aiPrompt);
+      ? await aiRefine(currentDefinition, aiPrompt, currentMermaid, aiMessages)
+      : await aiGenerate(aiPrompt, currentMermaid, aiMessages);
 
     if (result) {
       setAiProposal(result);
-      setAiMessages(m => [...m, { role: 'user', content: aiPrompt }, { role: 'assistant', content: result.warnings.length ? result.warnings.join('; ') : 'Proposal ready' }]);
-      setMsg('AI proposal ready — review before applying');
+      const responseSummary = [
+        result.status === 'ready' ? 'Proposal ready' : result.status === 'needs_input' ? 'I need more information.' : 'I could not create a safe proposal.',
+        ...result.questions.map(question => `Question: ${question}`),
+        ...result.assumptions.map(assumption => `Assumption: ${assumption}`),
+        ...result.warnings.map(warning => `Warning: ${warning}`),
+      ].join('\n');
+      setAiMessages(m => [...m, { role: 'user', content: aiPrompt }, { role: 'assistant', content: responseSummary }]);
+      setMsg(result.status === 'ready'
+        ? 'AI proposal ready — review before applying'
+        : result.status === 'needs_input' ? 'AI needs more information' : 'AI could not create a safe proposal');
     }
   };
 
   const applyAI = () => {
-    if (!aiProposal) return;
+    if (!aiProposal || aiProposal.status !== 'ready' || !aiProposal.definition) return;
     const previous = buildDefinition();
     const next = definitionToFlow(aiProposal.definition, byType);
     setAiUndo(previous); setNodes(next.nodes); setEdges(next.edges); fitPending.current = true;
