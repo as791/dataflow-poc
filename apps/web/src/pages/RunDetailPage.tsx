@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router';
 import ReactFlow, { Background, BackgroundVariant, Handle, Position, type NodeProps } from 'reactflow';
 import { ArrowLeft, Pause, Play, RotateCcw, X } from 'lucide-react';
 import { api } from '../api';
@@ -53,7 +53,7 @@ export default function RunDetailPage() {
   const [reloadKey, setReloadKey] = useState(0);
   const [trace, setTrace] = useState<any[] | null>(null);
 	const [live, setLive] = useState<any>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     let alive = true;

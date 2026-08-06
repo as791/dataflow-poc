@@ -13,17 +13,17 @@
     "@fontsource-variable/geist": "^5.2.9",
     "lucide-react": "^1.21.0",
     "mermaid": "^11.2.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "react-grid-layout": "^1.4.4",
-    "react-router-dom": "^6.26.2",
+    "react-router": "^8.3.0",
     "reactflow": "^11.11.3",
-    "recharts": "^2.12.7"
+    "recharts": "^2.15.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
-    "@types/react": "^18.3.2",
-    "@types/react-dom": "^18.3.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.4",
     "@types/react-grid-layout": "^1.3.5",
     "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.4.20",

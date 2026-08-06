@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, { Background, BackgroundVariant, Controls, type ReactFlowInstance } from 'reactflow';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { Activity, ExternalLink, RefreshCw, Search, X } from 'lucide-react';
 import { filterWorkspaceLineage, type WorkspaceLineage } from '@dataflow/shared';
 import { api } from '../api';
