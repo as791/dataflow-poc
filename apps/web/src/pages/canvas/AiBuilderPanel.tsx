@@ -1,5 +1,6 @@
 import { Sparkles, X } from 'lucide-react';
 import { MermaidPreview } from '../../components/MermaidPreview';
+import type { AiGenerateResult } from '../../hooks/useAiGenerate';
 
 // Right-hand "Build with AI" chat panel: prompt input, message history, and
 // the pending proposal (mermaid preview + apply/discard/retry).
@@ -12,7 +13,7 @@ export function AiBuilderPanel({
   setShowAI: (show: boolean) => void;
   hasNodes: boolean;
   aiMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
-  aiProposal: any | null;
+  aiProposal: AiGenerateResult | null;
   applyAI: () => void;
   discardProposal: () => void;
   aiLoading: boolean;
@@ -38,12 +39,28 @@ export function AiBuilderPanel({
           </div>
           <div className="flex-1 space-y-3 overflow-y-auto p-4">
             {aiMessages.map((m, i) => <div key={i} className={`rounded-xl p-3 text-xs ${m.role === 'user' ? 'ml-8 bg-brand-500/10 text-gray-800 dark:text-white/80' : 'mr-8 bg-gray-100 text-gray-600 dark:bg-white/[0.06] dark:text-white/60'}`}>{m.content}</div>)}
-            {aiProposal && <div className="space-y-3 rounded-xl border border-brand-300/30 bg-brand-500/[0.05] p-3">
-              <div className="text-xs font-semibold text-gray-900 dark:text-white/90">Proposed graph · {aiProposal.definition.nodes?.length ?? 0} nodes</div>
-              <div className="max-h-52 overflow-auto rounded-lg bg-white p-2 dark:bg-black/20"><MermaidPreview source={aiProposal.mermaid} /></div>
-              {aiProposal.definition.execution?.engine && <div className="text-xs text-gray-500 dark:text-white/50">Engine: {aiProposal.definition.execution.engine}</div>}
-              {aiProposal.warnings?.map((w: string, i: number) => <div key={i} className="text-xs text-amber-600 dark:text-amber-400">{w}</div>)}
-              <div className="flex gap-2"><button className="glass-btn-primary text-xs" onClick={applyAI}>Apply</button><button className="glass-btn-ghost text-xs" onClick={discardProposal}>Discard</button><button className="glass-btn-ghost text-xs" disabled={aiLoading} onClick={runAI}>Retry</button></div>
+            {aiProposal && <div className="space-y-3 rounded-xl border border-brand-300/30 bg-brand-500/[0.05] p-3" role="status">
+              <div className="text-xs font-semibold text-gray-900 dark:text-white/90">
+                {aiProposal.status === 'ready'
+                  ? `Proposed graph · ${aiProposal.definition?.nodes?.length ?? 0} nodes`
+                  : aiProposal.status === 'needs_input' ? 'More information needed' : 'No proposal created'}
+              </div>
+              {aiProposal.status === 'ready' && aiProposal.mermaid && <div className="max-h-52 overflow-auto rounded-lg bg-white p-2 dark:bg-black/20"><MermaidPreview source={aiProposal.mermaid} /></div>}
+              {aiProposal.status === 'ready' && aiProposal.definition?.execution?.engine && <div className="text-xs text-gray-500 dark:text-white/50">Engine: {aiProposal.definition.execution.engine}</div>}
+              {aiProposal.questions.length > 0 && <div className="text-xs text-gray-700 dark:text-white/70">
+                <div className="font-medium">Questions</div>
+                <ul className="mt-1 list-disc space-y-1 pl-4">{aiProposal.questions.map((question, i) => <li key={i}>{question}</li>)}</ul>
+              </div>}
+              {aiProposal.assumptions.length > 0 && <div className="text-xs text-gray-500 dark:text-white/55">
+                <div className="font-medium">Assumptions</div>
+                <ul className="mt-1 list-disc space-y-1 pl-4">{aiProposal.assumptions.map((assumption, i) => <li key={i}>{assumption}</li>)}</ul>
+              </div>}
+              {aiProposal.warnings.map((warning, i) => <div key={i} className="text-xs text-amber-600 dark:text-amber-400">{warning}</div>)}
+              <div className="flex gap-2">
+                {aiProposal.status === 'ready' && aiProposal.definition && <button className="glass-btn-primary text-xs" onClick={applyAI}>Apply</button>}
+                <button className="glass-btn-ghost text-xs" onClick={discardProposal}>Discard</button>
+                <button className="glass-btn-ghost text-xs" disabled={aiLoading || !aiPrompt.trim()} onClick={runAI}>Retry</button>
+              </div>
             </div>}
           </div>
           <div className="border-t border-gray-100 p-3 dark:border-white/[0.07]">
@@ -51,6 +68,7 @@ export function AiBuilderPanel({
               <input
                 className="glass-input flex-1 text-sm"
                 placeholder={hasNodes ? 'Describe changes… e.g. Add a filter step before the Postgres sink' : 'Describe your pipeline… e.g. Sync Zendesk tickets to Postgres'}
+                aria-label="AI pipeline request"
                 value={aiPrompt} onChange={e => setAiPrompt(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && runAI()} autoFocus />
               <button className="glass-btn-primary text-xs flex-none"

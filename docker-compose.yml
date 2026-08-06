@@ -64,8 +64,9 @@ x-app-env: &app-env
   EDITION: ${EDITION:-community}
   # AI builder (opt-in via `--profile ai`). When the ollama service is not
   # running the /api/ai/* routes return 503; the rest of the stack is unaffected.
-  OLLAMA_URL: http://ollama:11434
+  OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
   OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
+  OLLAMA_THINK: ${OLLAMA_THINK:-false}
   # Connector SDK: drop *.manifest.json files in ./connectors/manifests and
   # they load on restart — no rebuild. The bundled examples ship in the image.
   CONNECTORS_DIR: /app/connectors/manifests

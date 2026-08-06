@@ -39,6 +39,13 @@ type PipelineListParams = {
 
 type PipelineListPage = { rows: any[]; nextCursor: string | null };
 
+export type AiConversationMessage = { role: 'user' | 'assistant'; content: string };
+
+type AiPipelineContext = {
+  mermaid?: string;
+  messages?: AiConversationMessage[];
+};
+
 const listPipelines = (params?: PipelineListParams) => {
   const clean = Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][];
   const qs = clean.length ? '?' + new URLSearchParams(Object.fromEntries(clean)) : '';
@@ -119,11 +126,17 @@ export const api = {
     request(`/api/connectors/${id}/cdc`, { method: 'PUT', body: JSON.stringify({ resources }) }).then(j),
   deleteConnectorCdc: (id: string) => request(`/api/connectors/${id}/cdc`, { method: 'DELETE' }).then(j),
 
-  // AI builder (Ollama). Returns { mermaid, definition }.
-  generatePipeline: (prompt: string) =>
-    request('/api/ai/generate', { method: 'POST', body: JSON.stringify({ prompt }) }).then(j),
-  refinePipeline: (definition: any, prompt: string, mermaid?: string, messages?: any[]) =>
-    request('/api/ai/refine', { method: 'POST', body: JSON.stringify({ definition, prompt, mermaid, messages }) }).then(j),
+  // AI builder (Ollama). Conversation and graph context are sent on both paths.
+  generatePipeline: (prompt: string, context: AiPipelineContext = {}) =>
+    request('/api/ai/generate', {
+      method: 'POST',
+      body: JSON.stringify({ prompt, mermaid: context.mermaid ?? '', messages: context.messages ?? [] }),
+    }).then(j),
+  refinePipeline: (definition: any, prompt: string, context: AiPipelineContext = {}) =>
+    request('/api/ai/refine', {
+      method: 'POST',
+      body: JSON.stringify({ definition, prompt, mermaid: context.mermaid ?? '', messages: context.messages ?? [] }),
+    }).then(j),
 
   listExecutions: (params?: Record<string, string>) => {
     const clean = Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][];
