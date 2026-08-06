@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Handle, Position, type Edge, type Node, type NodeProps } from 'reactflow';
+import { Handle, Position, type Edge, type Node, type NodeProps, type NodeTypes } from 'reactflow';
 import { Activity, Database, Workflow } from 'lucide-react';
 import type { WorkspaceLineage } from '@dataflow/shared';
 
@@ -117,7 +117,7 @@ const PipelineNode = memo(function PipelineNode({ data }: NodeProps) {
   );
 });
 
-export const nodeTypes = { asset: AssetNode, pipeline: PipelineNode };
+export const nodeTypes = { asset: AssetNode, pipeline: PipelineNode } as NodeTypes;
 
 const COL_GAP = 160;
 const ROW_GAP = 32;

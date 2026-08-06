@@ -3,7 +3,7 @@ import ReactFlow, {
   Background, BackgroundVariant, Controls, MiniMap,
   type ReactFlowInstance,
 } from 'reactflow';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { AlertTriangle, RefreshCw, Search } from 'lucide-react';
 import { filterWorkspaceLineage, type WorkspaceLineage } from '@dataflow/shared';
 import { api } from '../api';

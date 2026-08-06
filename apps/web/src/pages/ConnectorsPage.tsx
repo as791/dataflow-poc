@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { BadgeHelp, Blocks, Cloud, Database, Globe2, Plug, Radio, Server, Sheet, Snowflake, type LucideIcon } from 'lucide-react';
 import { api } from '../api';
 import { useFeatures } from '../context/FeatureContext';

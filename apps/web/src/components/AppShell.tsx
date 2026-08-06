@@ -2,7 +2,7 @@ import {
   BarChart3, Cable, CreditCard, History, LogOut, Menu, Moon, Network, Orbit, Settings, Sun, Users, Workflow, Gauge, X,
 } from 'lucide-react';
 import { AtomMark } from './AtomMark';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { Suspense, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';

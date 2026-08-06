@@ -1,5 +1,5 @@
 import { LogOut, User } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { useAuth } from '../context/AuthContext';
 
 export default function ProfilePage() {

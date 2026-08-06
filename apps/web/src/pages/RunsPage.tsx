@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router';
 import { ExternalLink, RefreshCw, Search, X } from 'lucide-react';
 import { api } from '../api';
 import { displayEnvironment } from '../utils/pipelineStage';

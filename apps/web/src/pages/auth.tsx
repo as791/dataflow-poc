@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
-import { Navigate, useLocation, useSearchParams } from 'react-router-dom';
+import { Navigate, useLocation, useSearchParams } from 'react-router';
 import { AtomMark } from '../components/AtomMark';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api';

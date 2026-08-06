@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { Activity, AlertTriangle, CheckCircle2, Clock3, RefreshCw } from 'lucide-react';
 import { api } from '../api';
 import { displayEnvironment } from '../utils/pipelineStage';
