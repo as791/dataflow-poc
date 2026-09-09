@@ -13,6 +13,10 @@ model defaults are unchanged. Implementation begins only after plan review.
 | 2 — Backend architecture | codex/plan-agent-backend / codex/plan-product-gaps | BACKEND_ARCHITECTURE.md; B1–B6 future implementation sequence |
 | 3 — Frontend architecture | codex/plan-agent-frontend / codex/plan-agent-backend | FRONTEND_ARCHITECTURE.md; F1–F6 future implementation sequence |
 
+Published draft PRs: [#38](https://github.com/Cohestra/cohestra-dataflow/pull/38),
+[#39](https://github.com/Cohestra/cohestra-dataflow/pull/39), and
+[#40](https://github.com/Cohestra/cohestra-dataflow/pull/40).
+
 The architecture files arrive in their respective stacked PRs; they are not
 missing implementations on the first branch. Review each incremental diff.
 After a predecessor merges, retarget/reconcile the next PR before merging it.
@@ -46,7 +50,8 @@ license wording with maintainers; this stack does not change license terms.
 
 Source inspection and reference checks support the stated gaps. Existing shared
 and web tests, frontend build, and the Python evaluator offline self-tests were
-run. Go/Compose checks and live model characterization are recorded in the PR
-validation notes when completed. Future agent integration scenarios are plans,
+run. Base Compose validation and remote community/enterprise builds, race tests and
+vet passed. Existing history/dependency scans remain failing and require separate
+triage; see PR notes. Live model characterization is recorded in its report. Future agent integration scenarios are plans,
 not tests claimed to exist today. Tests of planner handlers do not prove runtime,
 authentication, browser or durable tool/approval integration.

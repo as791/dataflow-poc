@@ -38,6 +38,38 @@ Internal Go paths below are relative to `apps/workflow-go/`.
 | G08 / P2 | CONTRIBUTING and PR template say Apache 2.0; root LICENSE contains AGPLv3. Settings UI also says Apache. | Maintainer confirms intended policy; align wording in docs/UI. No license change in this stack. | Statements match the approved policy. |
 | G09 / P1 | `apps/web/src/utils/pipelineConvert.ts` reconstructs a whitelist and drops node timeoutSec/retry/inputAssets/outputAssets and pipeline concurrency on load/save. | Preserve supported definition fields through canvas conversion. | Round-trip test retains every supported policy/asset field and metadata while editing a different node. |
 
+## Evaluation and CI findings during this review
+
+- **G10 / P1 — Security checks are not green.** Exact baseline main CI already
+  reported two history-scan detections and vulnerable workflow-image dependencies.
+  The planning PR reports the same detection count and four unique dependency
+  advisories (three high, one critical) on unchanged dependencies. Logs alone do
+  not establish live secret validity or vulnerability exploitability. Triage
+  using redacted evidence, remediate separately, and rerun skipped npm/Go security
+  checks plus image scanning. Existing dependency PRs should be reviewed before
+  opening duplicate fixes. Evidence links are in MODEL_EVALUATION.md.
+- **G11 / P1 — The v1 corpus contradicts the current planner contract.** Five
+  refinement inputs omit required connectionIds but demand exact config
+  preservation; one generation case requires Snowflake config.mode=upsert which
+  main rejects. At least six of 31 cannot pass this API and scorer simultaneously.
+  Keep v1 historical reports intact. Publish a versioned corpus with symbolic
+  fixture binding applied consistently to requests and preservation expectations,
+  and reconcile desired versus supported Snowflake behavior explicitly.
+  Acceptance: a golden ready answer passes each positive case, invalid/mismatched
+  fixture references fail preflight, and the original failing cases remain
+  documented rather than quietly removed. The offline proof uses the actual
+  evaluator request path and scorer and confirms one captured model request.
+
+GAP-EVAL-01 owns G11 and is a dependency of accuracy claims in GAP-AI-01 and model
+promotion. GAP-SEC-01 owns G10 with a maintainer; no credential rotation, history
+rewrite or dependency update is performed in this documentation stack.
+
+For G04, the current prompt lists field names/required markers but omits allowed
+values/types, while config JSON schema remains generic. Retained model output
+shows rejected enum/type guesses. Plan explicit field constraints before using
+larger weights or fine-tuning as the presumed fix. Prompt/schema changes and
+model changes must be evaluated independently on the corrected corpus.
+
 ## Corrected assumptions
 
 - Base Compose excluding Ollama is intentional: the AI profile is opt-in.
