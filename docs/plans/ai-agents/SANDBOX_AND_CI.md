@@ -56,6 +56,8 @@ not claims of existing coverage. B/F milestones live in the separate architectur
 
 ## Model experiments
 
+First run positive golden-output checks against the API contract to detect
+unsatisfiable cases (G11); freeze a corrected version without rewriting v1.
 Pin source, corpus, prompt, schema and binary hashes; seed the synthetic connector
 manifest. Record actual serving digest, context, sampling, thinking, repair limit
 and timeout. Run serially, retain cold/warm distinction and every failed case.
